@@ -2,10 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Atli.Reports.Engine.Tests.Support;
-using Atli.Reports.Server;
 using Atli.Reports.Server.Endpoints;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OneOf;
@@ -308,52 +305,6 @@ public class ConvertEndpointTests
       inspect?.Invoke(options);
       var error = await write(destination, cancellationToken);
       return error is null ? new Success() : error;
-    }
-  }
-
-  private sealed class RunningServer(WebApplication app) : IAsyncDisposable
-  {
-    public HttpClient Client { get; } = new() { BaseAddress = new Uri(app.Urls.First()) };
-
-    public IServiceProvider Services => app.Services;
-
-    public static async Task<RunningServer> StartAsync(
-      IHtmlToPdfConverter? converter,
-      params string[] arguments
-    )
-    {
-      var app = ReportsServerApplication.Create(
-        [
-          "--urls=http://127.0.0.1:0",
-          "--ReportsEngine:Browser:WarmUpOnStartup=false",
-          "--ReportsEngine:Browser:NoSandbox=true",
-          .. arguments,
-        ],
-        builder =>
-        {
-          builder.WebHost.UseSetting(WebHostDefaults.SuppressStatusMessagesKey, "true");
-          if (converter is not null)
-          {
-            builder.Services.AddSingleton(converter);
-          }
-        }
-      );
-      await app.StartAsync(TestToken);
-      return new RunningServer(app);
-    }
-
-    public Task<HttpResponseMessage> PostAsync(string json) =>
-      Client.PostAsync(
-        "/convert",
-        new StringContent(json, Encoding.UTF8, "application/json"),
-        TestToken
-      );
-
-    public async ValueTask DisposeAsync()
-    {
-      Client.Dispose();
-      await app.StopAsync(CancellationToken.None);
-      await app.DisposeAsync();
     }
   }
 }

@@ -68,6 +68,45 @@ reference](architecture.md#configuration-reference). The server's `appsettings.j
 
 Request size is Kestrel's: 30 MB by default, configurable with `Kestrel__Limits__MaxRequestBodySize`.
 
+## Telemetry
+
+The server exports logs, metrics, and traces over OTLP once `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+Without it, OpenTelemetry is not registered at all. Everything follows the standard OpenTelemetry
+environment variables, which .NET Aspire sets for the resources it runs (they also bind from
+`appsettings.json` and the command line):
+
+| Variable | Effect |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector address, for example `http://otel-collector:4317`; switches the export on |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` (default) or `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Headers for the collector, for example an API key |
+| `OTEL_SERVICE_NAME` | Service name; defaults to `atli-reports-server` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes, for example `deployment.environment.name=staging` |
+
+Once the export is on, the other standard settings, such as `OTEL_BSP_SCHEDULE_DELAY` or
+`OTEL_METRIC_EXPORT_INTERVAL`, apply as in any OpenTelemetry .NET app.
+
+- **Traces**: every request except the `/health` probes, with the engine's conversion spans
+  (`atli.reports.convert` and its stages) below `POST /convert`. See
+  [the engine's telemetry](architecture.md#telemetry) for span names and attributes.
+- **Metrics**: ASP.NET Core and Kestrel (`http.server.request.duration` and friends), the .NET
+  runtime (`System.Runtime`: GC, thread pool, exceptions), and the engine (`atli.reports.*`).
+- **Logs**: whatever the `Logging` configuration lets through, with formatted messages and scopes,
+  correlated with the trace that wrote them.
+
+To look at it locally, start the [standalone Aspire
+dashboard](https://learn.microsoft.com/dotnet/aspire/fundamentals/dashboard/standalone) (it takes
+OTLP/gRPC on port 18889) or any OpenTelemetry Collector, and point the server at it:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:18889 \
+  atli-reports-server
+```
+
+In this repository, `aspire start` runs the server under `examples/Atli.Reports.AppHost` with the
+export already wired to the AppHost's dashboard.
+
 ## Container image
 
 ```bash

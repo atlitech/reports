@@ -39,20 +39,34 @@ public sealed class ReportService(
   {
     ArgumentNullException.ThrowIfNull(destination);
 
-    Dictionary<string, object?> componentParameters = new()
-    {
-      { "BaseStyles", reportRegistry.BaseStyles },
-      { "Data", data },
-      { "GlobalAssets", reportRegistry.GlobalAssets },
-    };
-
-    var html = await RenderAsync(typeof(T), componentParameters);
-    return await converter.ConvertAsync(
-      html,
-      destination,
-      PdfOptionsMapper.Map(reportRegistry.DefaultPageSettings),
-      cancellationToken
+    using var activity = BlazorReportsTelemetry.StartGenerate(
+      typeof(T),
+      reportName: null,
+      ReportOutputFormat.Pdf
     );
+    try
+    {
+      Dictionary<string, object?> componentParameters = new()
+      {
+        { "BaseStyles", reportRegistry.BaseStyles },
+        { "Data", data },
+        { "GlobalAssets", reportRegistry.GlobalAssets },
+      };
+
+      var html = await RenderAsync(typeof(T), componentParameters);
+      var result = await converter.ConvertAsync(
+        html,
+        destination,
+        PdfOptionsMapper.Map(reportRegistry.DefaultPageSettings),
+        cancellationToken
+      );
+      return BlazorReportsTelemetry.Finished(activity, result);
+    }
+    catch (Exception exception)
+    {
+      BlazorReportsTelemetry.Failed(activity, exception);
+      throw;
+    }
   }
 
   /// <inheritdoc />
@@ -67,6 +81,33 @@ public sealed class ReportService(
     ArgumentNullException.ThrowIfNull(destination);
     ArgumentNullException.ThrowIfNull(blazorReport);
 
+    using var activity = BlazorReportsTelemetry.StartGenerate(
+      blazorReport.Component,
+      blazorReport.Name,
+      blazorReport.OutputFormat
+    );
+    try
+    {
+      return BlazorReportsTelemetry.Finished(
+        activity,
+        await GenerateCoreAsync(destination, blazorReport, data, cancellationToken)
+      );
+    }
+    catch (Exception exception)
+    {
+      BlazorReportsTelemetry.Failed(activity, exception);
+      throw;
+    }
+  }
+
+  private async ValueTask<OneOf<Success, ConversionError>> GenerateCoreAsync<T>(
+    Stream destination,
+    BlazorReport blazorReport,
+    T? data,
+    CancellationToken cancellationToken
+  )
+    where T : class
+  {
     var javaScriptSettings =
       blazorReport.JavaScriptSettings ?? reportRegistry.DefaultJavaScriptSettings;
     var html = await RenderAsync(
@@ -236,17 +277,26 @@ public sealed class ReportService(
     IDictionary<string, object?> parameters
   )
   {
-    await using var scope = serviceProvider.CreateAsyncScope();
-    var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-    await using HtmlRenderer htmlRenderer = new(scope.ServiceProvider, loggerFactory);
-
-    return await htmlRenderer.Dispatcher.InvokeAsync(async () =>
+    using var activity = BlazorReportsTelemetry.StartRender();
+    try
     {
-      var output = await htmlRenderer.RenderComponentAsync(
-        componentType,
-        ParameterView.FromDictionary(parameters)
-      );
-      return output.ToHtmlString();
-    });
+      await using var scope = serviceProvider.CreateAsyncScope();
+      var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+      await using HtmlRenderer htmlRenderer = new(scope.ServiceProvider, loggerFactory);
+
+      return await htmlRenderer.Dispatcher.InvokeAsync(async () =>
+      {
+        var output = await htmlRenderer.RenderComponentAsync(
+          componentType,
+          ParameterView.FromDictionary(parameters)
+        );
+        return output.ToHtmlString();
+      });
+    }
+    catch (Exception exception)
+    {
+      BlazorReportsTelemetry.Failed(activity, exception);
+      throw;
+    }
   }
 }

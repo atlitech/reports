@@ -24,6 +24,11 @@ public static class Extensions
   private const string ReportsEngineTelemetryName = "Atli.Reports.Engine";
 
   /// <summary>
+  /// The name of the Blazor reports activity source, which traces component rendering.
+  /// </summary>
+  private const string BlazorReportsTelemetryName = "Atli.Reports.Blazor";
+
+  /// <summary>
   /// Adds OpenTelemetry, the default health checks, service discovery, and the standard resilience
   /// handler for every <see cref="HttpClient"/>.
   /// </summary>
@@ -73,6 +78,7 @@ public static class Extensions
         tracing
           .AddSource(builder.Environment.ApplicationName)
           .AddSource(ReportsEngineTelemetryName)
+          .AddSource(BlazorReportsTelemetryName)
           .AddAspNetCoreInstrumentation(options =>
             // Health probes would drown out the requests worth looking at.
             options.Filter = context =>

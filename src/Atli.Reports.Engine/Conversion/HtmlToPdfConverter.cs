@@ -83,37 +83,49 @@ internal sealed class HtmlToPdfConverter(
   )
   {
     var started = Stopwatch.GetTimestamp();
-    var error = Validate(html, options);
-    if (error is null && cancellationToken.IsCancellationRequested)
+    using var activity = EngineActivities.StartConversion(html, options);
+    try
     {
-      error = ConversionErrors.Canceled();
-    }
+      var error = Validate(html, options);
+      if (error is null && cancellationToken.IsCancellationRequested)
+      {
+        error = ConversionErrors.Canceled();
+      }
 
-    if (error is null)
+      if (error is null)
+      {
+        error = await RunWithDeadlineAsync(html, options, destination, activity, cancellationToken);
+        RecordOutcome(error);
+      }
+
+      metrics.ConversionFinished(Stopwatch.GetElapsedTime(started), error?.Kind);
+      EngineActivities.ConversionFinished(activity, error);
+      return error;
+    }
+    catch (Exception exception)
     {
-      error = await RunWithDeadlineAsync(html, options, destination, cancellationToken);
-      RecordOutcome(error);
+      // Failures become a ConversionError; only the destination's own exceptions get here.
+      EngineActivities.Failed(activity, exception);
+      throw;
     }
-
-    metrics.ConversionFinished(Stopwatch.GetElapsedTime(started), error?.Kind);
-    return error;
   }
 
   private async ValueTask<ConversionError?> RunWithDeadlineAsync(
     string html,
     PdfOptions options,
     Stream destination,
+    Activity? activity,
     CancellationToken cancellationToken
   )
   {
     if (_conversionTimeout == Timeout.InfiniteTimeSpan)
     {
-      return await RunAsync(html, options, destination, cancellationToken);
+      return await RunAsync(html, options, destination, activity, cancellationToken);
     }
 
     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     deadline.CancelAfter(_conversionTimeout);
-    var error = await RunAsync(html, options, destination, deadline.Token);
+    var error = await RunAsync(html, options, destination, activity, deadline.Token);
 
     // The deadline surfaces as a cancellation; report it as the timeout it is.
     return
@@ -160,27 +172,42 @@ internal sealed class HtmlToPdfConverter(
     string html,
     PdfOptions options,
     Stream destination,
+    Activity? activity,
     CancellationToken cancellationToken
   )
   {
     ConversionLimiter.Permit permit;
-    try
+    var acquire = limiter.AcquireAsync(cancellationToken);
+
+    // Only a conversion that has to wait for its turn gets a queue span.
+    using (
+      var queued = acquire.IsCompleted
+        ? null
+        : EngineActivities.Source.StartActivity(EngineActivities.Spans.QueueWait)
+    )
     {
-      permit = await limiter.AcquireAsync(cancellationToken);
-    }
-    catch (Exception exception)
-      when (exception is ConversionBusyException or OperationCanceledException)
-    {
-      return ConversionErrors.FromException(OpenStage, exception, cancellationToken);
+      try
+      {
+        permit = await acquire;
+      }
+      catch (Exception exception)
+        when (exception is ConversionBusyException or OperationCanceledException)
+      {
+        var error = ConversionErrors.FromException(OpenStage, exception, cancellationToken);
+        EngineActivities.StageFailed(queued, error);
+        return error;
+      }
     }
 
     using (permit)
     {
       var stage = OpenStage;
+      var span = EngineActivities.Source.StartActivity(EngineActivities.Spans.PageOpen);
       try
       {
         await using var page = await browsers.OpenPageAsync(cancellationToken);
 
+        span = EngineActivities.NextStage(span, EngineActivities.Spans.SetContent);
         var signalName = options.WaitForSignal;
         if (signalName is not null)
         {
@@ -193,12 +220,16 @@ internal sealed class HtmlToPdfConverter(
         await page.SetContentAsync(html, cancellationToken);
 
         stage = WaitStage;
+        span = EngineActivities.NextStage(span, EngineActivities.Spans.PageWait);
+        span?.SetTag(EngineActivities.Tags.WaitFor, signalName is null ? "load" : "signal");
         if (signalName is not null)
         {
           if (!await page.WaitForSignalAsync(options.WaitTimeout, cancellationToken))
           {
             LogMessages.SignalTimeoutDuringConversion(logger, signalName, options.WaitTimeout);
-            return ConversionErrors.SignalTimeout(signalName, options.WaitTimeout);
+            var timedOut = ConversionErrors.SignalTimeout(signalName, options.WaitTimeout);
+            EngineActivities.StageFailed(span, timedOut);
+            return timedOut;
           }
         }
         else
@@ -207,19 +238,29 @@ internal sealed class HtmlToPdfConverter(
         }
 
         stage = PrintStage;
-        await page.PrintToPdfAsync(options, destination, cancellationToken);
+        span = EngineActivities.NextStage(span, EngineActivities.Spans.Print);
+        var size = await page.PrintToPdfAsync(options, destination, cancellationToken);
+        span?.SetTag(EngineActivities.Tags.PdfSize, size);
+        activity?.SetTag(EngineActivities.Tags.PdfSize, size);
+
+        // The page closes next; that is not printing.
+        span?.Dispose();
+        span = null;
         return null;
       }
       catch (DestinationWriteException exception) when (!cancellationToken.IsCancellationRequested)
       {
         // The caller's stream failed, not the engine: hand its exception back unchanged.
+        EngineActivities.StageFailed(span, exception.InnerException!);
         ExceptionDispatchInfo.Throw(exception.InnerException!);
         throw;
       }
       catch (Exception exception)
       {
         var error = ConversionErrors.FromException(stage, exception, cancellationToken);
-        if (ConversionErrors.IsExpected(exception))
+        var expected = ConversionErrors.IsExpected(exception);
+        EngineActivities.StageFailed(span, error, unexpected: !expected);
+        if (expected)
         {
           if (error.Kind != ConversionErrorKind.Canceled)
           {
@@ -232,6 +273,10 @@ internal sealed class HtmlToPdfConverter(
         }
 
         return error;
+      }
+      finally
+      {
+        span?.Dispose();
       }
     }
   }
