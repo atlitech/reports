@@ -204,5 +204,6 @@ negative timeout other than `Timeout.InfiniteTimeSpan` throws when the report is
 
 ## Client and viewer
 
-`Atli.Reports.Client` and `Atli.Reports.Viewer`, formerly `BlazorReports.Client` and
-`BlazorReports.Viewer`, live in this repository but are not published, as before.
+`BlazorReports.Client` and `BlazorReports.Viewer` were never published and have been removed. To
+convert over HTTP, call the reports server's `POST /convert` endpoint
+([docs/engine/server.md](../engine/server.md)).
