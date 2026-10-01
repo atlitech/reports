@@ -130,16 +130,26 @@ public class ResponseMappingTests
   [Test]
   public async Task An_attempt_that_runs_out_of_time_is_a_timeout_and_is_not_retried()
   {
+    TaskCompletionSource received = new(TaskCreationOptions.RunContinuationsAsynchronously);
     await using var server = StubServer.Start(
       async (_, cancellationToken) =>
       {
+        received.TrySetResult();
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         throw new InvalidOperationException("unreachable");
       },
-      settings => settings.AttemptTimeout = TimeSpan.FromMilliseconds(200)
+      settings => settings.AttemptTimeout = TimeSpan.FromSeconds(30)
     );
 
-    var result = await server.Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken);
+    var conversion = server
+      .Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken)
+      .AsTask();
+    await received.Task.WaitAsync(TestToken);
+    await server.Clock.WaitForTimerAsync(TimeSpan.FromSeconds(30), TestToken);
+    server.Clock.Advance(TimeSpan.FromSeconds(30) - TestClock.Tick);
+    await Assert.That(conversion.IsCompleted).IsFalse();
+    server.Clock.Advance(TestClock.Tick);
+    var result = await conversion;
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
     await Assert.That(server.Handler.Requests.Count).IsEqualTo(1);

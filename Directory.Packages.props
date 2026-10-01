@@ -22,6 +22,7 @@
   <ItemGroup Label="Atli.Reports.Client">
     <!-- Also used by the examples' service defaults. -->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
   </ItemGroup>
   <ItemGroup Label="Atli.Reports.Aspire.Hosting">
     <!--
