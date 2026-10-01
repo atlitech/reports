@@ -7,7 +7,8 @@ public enum ConversionErrorKind
 {
   /// <summary>
   /// The browser failed to load the HTML or to print the PDF (including print options the browser
-  /// rejects, such as a malformed <see cref="PdfOptions.PageRanges"/>), or the conversion failed for a
+  /// rejects, such as a malformed <see cref="PdfOptions.PageRanges"/>), the page crashed while it
+  /// rendered (for example because its renderer ran out of memory), or the conversion failed for a
   /// reason not covered by a more specific kind.
   /// </summary>
   RenderFailed,
@@ -19,19 +20,25 @@ public enum ConversionErrorKind
   InvalidRequest,
 
   /// <summary>
-  /// No browser could be used: the executable was not found, the process did not start, or the engine
-  /// could not connect to it or open a page in it.
+  /// No browser could be used: the executable was not found, the process did not start, the engine
+  /// could not connect to it or open a page in it, the browser exited or disconnected while the
+  /// conversion ran, or the engine is shutting down. The engine starts a new browser for the next
+  /// conversion, so retrying usually succeeds unless the browser cannot start at all.
   /// </summary>
   BrowserUnavailable,
 
   /// <summary>
-  /// The engine has no capacity for the conversion right now. Retrying later may succeed.
+  /// The engine has no capacity for the conversion right now: the queue of conversions waiting for a
+  /// turn was full, or the conversion waited longer than
+  /// <see cref="ReportsEngineConcurrencyOptions.QueueTimeout"/>. Retrying later may succeed.
   /// </summary>
   Busy,
 
   /// <summary>
   /// The browser did not answer a DevTools command within
-  /// <see cref="ReportsEngineBrowserOptions.CommandTimeout"/>.
+  /// <see cref="ReportsEngineBrowserOptions.CommandTimeout"/> (which also bounds the wait for the
+  /// document's <c>load</c> event), or the conversion as a whole ran past
+  /// <see cref="ReportsEngineOptions.ConversionTimeout"/>.
   /// </summary>
   Timeout,
 

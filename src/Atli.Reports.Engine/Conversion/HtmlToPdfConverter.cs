@@ -1,26 +1,37 @@
-using System.IO.Pipelines;
-using Atli.Reports.Engine.Chromium;
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.ExceptionServices;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Page;
 using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
-using Atli.Reports.Engine.Pdf;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OneOf;
 using OneOf.Types;
 
 namespace Atli.Reports.Engine.Conversion;
 
 /// <summary>
-/// Converts HTML to PDF in a Chromium browser launched for each conversion.
+/// Converts HTML to PDF in the engine's long-lived browser, one isolated page per conversion.
 /// </summary>
 internal sealed class HtmlToPdfConverter(
-  IBrowserFactory browserFactory,
-  ChromiumPdfGenerator pdfGenerator,
+  IBrowserProvider browsers,
+  ConversionLimiter limiter,
   ConversionHealthTracker healthTracker,
+  EngineMetrics metrics,
+  IOptions<ReportsEngineOptions> engineOptions,
   ILogger<HtmlToPdfConverter> logger
 ) : IHtmlToPdfConverter
 {
+  private readonly TimeSpan _conversionTimeout = engineOptions.Value.ConversionTimeout;
+
+  private const string OpenStage = "Failed to open a browser page";
+  private const string SignalStage = "Failed to register the signal";
+  private const string ContentStage = "Failed to set HTML content";
+  private const string WaitStage = "Failed waiting for the page";
+  private const string PrintStage = "PDF generation failed";
+
   public async ValueTask<OneOf<Stream, ConversionError>> ConvertAsync(
     string html,
     PdfOptions? options = null,
@@ -29,9 +40,16 @@ internal sealed class HtmlToPdfConverter(
   {
     ArgumentNullException.ThrowIfNull(html);
 
-    var result = await ConvertCoreAsync(html, options ?? new PdfOptions(), cancellationToken);
-    RecordOutcome(result);
-    return result;
+    MemoryStream pdf = new();
+    var error = await ConvertCoreAsync(html, options ?? new PdfOptions(), pdf, cancellationToken);
+    if (error is not null)
+    {
+      await pdf.DisposeAsync();
+      return error;
+    }
+
+    pdf.Position = 0;
+    return pdf;
   }
 
   public async ValueTask<OneOf<Success, ConversionError>> ConvertAsync(
@@ -48,48 +66,72 @@ internal sealed class HtmlToPdfConverter(
       throw new ArgumentException("The destination stream must be writable.", nameof(destination));
     }
 
-    var result = await ConvertAsync(html, options, cancellationToken);
-    if (result.TryPickT1(out var error, out var pdf))
-    {
-      return error;
-    }
-
-    await using (pdf)
-    {
-      try
-      {
-        await pdf.CopyToAsync(destination, cancellationToken);
-      }
-      catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
-      {
-        return ConversionErrors.Canceled(exception);
-      }
-    }
-
-    return new Success();
+    var error = await ConvertCoreAsync(
+      html,
+      options ?? new PdfOptions(),
+      destination,
+      cancellationToken
+    );
+    return error is null ? new Success() : error;
   }
 
-  private void RecordOutcome(OneOf<Stream, ConversionError> result)
-  {
-    if (result.TryPickT1(out var error, out _))
-    {
-      // Callers canceling or sending an invalid request say nothing about the engine's health.
-      if (error.Kind is not (ConversionErrorKind.Canceled or ConversionErrorKind.InvalidRequest))
-      {
-        healthTracker.RecordFailure(error.Message);
-      }
-
-      return;
-    }
-
-    healthTracker.RecordSuccess();
-  }
-
-  private async ValueTask<OneOf<Stream, ConversionError>> ConvertCoreAsync(
+  private async ValueTask<ConversionError?> ConvertCoreAsync(
     string html,
     PdfOptions options,
+    Stream destination,
     CancellationToken cancellationToken
   )
+  {
+    var started = Stopwatch.GetTimestamp();
+    var error = Validate(html, options);
+    if (error is null && cancellationToken.IsCancellationRequested)
+    {
+      error = ConversionErrors.Canceled();
+    }
+
+    if (error is null)
+    {
+      error = await RunWithDeadlineAsync(html, options, destination, cancellationToken);
+      RecordOutcome(error);
+    }
+
+    metrics.ConversionFinished(Stopwatch.GetElapsedTime(started), error?.Kind);
+    return error;
+  }
+
+  private async ValueTask<ConversionError?> RunWithDeadlineAsync(
+    string html,
+    PdfOptions options,
+    Stream destination,
+    CancellationToken cancellationToken
+  )
+  {
+    if (_conversionTimeout == Timeout.InfiniteTimeSpan)
+    {
+      return await RunAsync(html, options, destination, cancellationToken);
+    }
+
+    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    deadline.CancelAfter(_conversionTimeout);
+    var error = await RunAsync(html, options, destination, deadline.Token);
+
+    // The deadline surfaces as a cancellation; report it as the timeout it is.
+    return
+      error is { Kind: ConversionErrorKind.Canceled }
+      && !cancellationToken.IsCancellationRequested
+      && deadline.IsCancellationRequested
+      ? new ConversionError(
+        ConversionErrorKind.Timeout,
+        string.Create(
+          CultureInfo.InvariantCulture,
+          $"The conversion did not finish within the conversion timeout of {_conversionTimeout.TotalSeconds:0.###}s."
+        ),
+        error.Exception
+      )
+      : error;
+  }
+
+  private static ConversionError? Validate(string html, PdfOptions options)
   {
     if (string.IsNullOrWhiteSpace(html))
     {
@@ -111,168 +153,109 @@ internal sealed class HtmlToPdfConverter(
       return ConversionErrors.InvalidRequest("The signal wait timeout must not be negative.");
     }
 
-    if (cancellationToken.IsCancellationRequested)
-    {
-      return ConversionErrors.Canceled();
-    }
-
-    IBrowser? browser = null;
-    ChromiumPage? page = null;
-    var success = false;
-
-    try
-    {
-      // Step 1: Create browser
-      OneOf<IBrowser, BrowserError> browserResult;
-      try
-      {
-        browserResult = await browserFactory.CreateBrowserAsync(cancellationToken);
-      }
-      catch (Exception exception)
-      {
-        LogMessages.FailedToCreateBrowser(logger, exception.Message);
-        return ConversionErrors.FromLaunchException(exception, cancellationToken);
-      }
-
-      if (browserResult.TryPickT1(out var browserError, out browser))
-      {
-        LogMessages.FailedToCreateBrowser(logger, browserError.Message);
-        return ConversionErrors.FromBrowserError(
-          "Failed to create browser",
-          browserError,
-          ConversionErrorKind.BrowserUnavailable,
-          cancellationToken
-        );
-      }
-
-      // Step 2: Create page
-      var pageResult = await browser.CreatePageAsync(cancellationToken);
-      if (pageResult.TryPickT1(out var pageError, out page))
-      {
-        LogMessages.FailedToCreatePage(logger, pageError.Message);
-        return ConversionErrors.FromBrowserError(
-          "Failed to create page",
-          pageError,
-          ConversionErrorKind.BrowserUnavailable,
-          cancellationToken
-        );
-      }
-
-      // Step 3: Register the signal binding BEFORE loading the HTML, so a page that signals
-      // immediately cannot race the registration.
-      SignalAwaiter? signalAwaiter = null;
-      try
-      {
-        var htmlToSet = html;
-        if (signalName is not null)
-        {
-          LogMessages.SignalWaitRequested(logger, signalName);
-          signalAwaiter = await page.RegisterSignalAsync(signalName, cancellationToken);
-
-          // Runtime.addBinding creates a function that requires one string argument; the shim
-          // lets the page call window.<signalName>() without arguments.
-          htmlToSet = SignalShim.Apply(html, signalName);
-        }
-
-        // Step 4: Set HTML content
-        var contentResult = await page.SetContentAsync(htmlToSet, cancellationToken);
-        if (contentResult.TryPickT1(out var renderError, out _))
-        {
-          LogMessages.FailedToSetHtmlContent(logger);
-          return ConversionErrors.FromBrowserError(
-            "Failed to set HTML content",
-            renderError,
-            ConversionErrorKind.RenderFailed,
-            cancellationToken
-          );
-        }
-
-        // Step 5: Wait for the signal, if configured
-        if (signalAwaiter is not null)
-        {
-          var signalResult = await signalAwaiter.WaitAsync(options.WaitTimeout, cancellationToken);
-          if (signalResult.TryPickT1(out var timeoutError, out _))
-          {
-            LogMessages.SignalTimeoutDuringConversion(logger, signalName!, timeoutError.Timeout);
-            return ConversionErrors.SignalTimeout(signalName!, timeoutError.Timeout);
-          }
-        }
-
-        // Step 6: Generate PDF
-        MemoryStream pdfStream = new();
-        var pipeWriter = PipeWriter.Create(pdfStream, new StreamPipeWriterOptions(leaveOpen: true));
-
-        var pdfResult = await pdfGenerator.GeneratePdfAsync(
-          page,
-          pipeWriter,
-          options,
-          cancellationToken
-        );
-
-        if (pdfResult.TryPickT1(out var pdfError, out _))
-        {
-          LogMessages.PdfGenerationFailedWithError(logger, pdfError.Message);
-          await pdfStream.DisposeAsync();
-          return pdfError;
-        }
-
-        pdfStream.Position = 0;
-        success = true;
-        return pdfStream;
-      }
-      finally
-      {
-        if (signalAwaiter is not null)
-        {
-          await signalAwaiter.DisposeAsync();
-        }
-      }
-    }
-    catch (Exception exception)
-    {
-      LogMessages.HtmlToPdfConversionFailed(logger, exception);
-      return ConversionErrors.FromException(
-        "HTML to PDF conversion failed",
-        exception,
-        ConversionErrorKind.RenderFailed,
-        cancellationToken
-      );
-    }
-    finally
-    {
-      await ReleaseAsync(browser, page, success);
-    }
+    return null;
   }
 
-  private async ValueTask ReleaseAsync(IBrowser? browser, ChromiumPage? page, bool success)
+  private async ValueTask<ConversionError?> RunAsync(
+    string html,
+    PdfOptions options,
+    Stream destination,
+    CancellationToken cancellationToken
+  )
   {
-    if (browser is null)
-    {
-      return;
-    }
-
-    // Cleanup is best effort: a failure here must not turn a finished conversion into an exception.
+    ConversionLimiter.Permit permit;
     try
     {
-      if (page is not null)
+      permit = await limiter.AcquireAsync(cancellationToken);
+    }
+    catch (Exception exception)
+      when (exception is ConversionBusyException or OperationCanceledException)
+    {
+      return ConversionErrors.FromException(OpenStage, exception, cancellationToken);
+    }
+
+    using (permit)
+    {
+      var stage = OpenStage;
+      try
       {
-        if (success)
+        await using var page = await browsers.OpenPageAsync(cancellationToken);
+
+        var signalName = options.WaitForSignal;
+        if (signalName is not null)
         {
-          // Return the healthy page to the pool for reuse
-          browser.ReleasePage(page);
+          stage = SignalStage;
+          LogMessages.SignalWaitRequested(logger, signalName);
+          await page.EnableSignalAsync(signalName, cancellationToken);
+        }
+
+        stage = ContentStage;
+        await page.SetContentAsync(html, cancellationToken);
+
+        stage = WaitStage;
+        if (signalName is not null)
+        {
+          if (!await page.WaitForSignalAsync(options.WaitTimeout, cancellationToken))
+          {
+            LogMessages.SignalTimeoutDuringConversion(logger, signalName, options.WaitTimeout);
+            return ConversionErrors.SignalTimeout(signalName, options.WaitTimeout);
+          }
         }
         else
         {
-          // Dispose a page that encountered errors
-          await browser.DisposePageAsync(page);
+          await page.WaitForLoadAsync(cancellationToken);
         }
-      }
 
-      await browser.DisposeAsync();
+        stage = PrintStage;
+        await page.PrintToPdfAsync(options, destination, cancellationToken);
+        return null;
+      }
+      catch (DestinationWriteException exception) when (!cancellationToken.IsCancellationRequested)
+      {
+        // The caller's stream failed, not the engine: hand its exception back unchanged.
+        ExceptionDispatchInfo.Throw(exception.InnerException!);
+        throw;
+      }
+      catch (Exception exception)
+      {
+        var error = ConversionErrors.FromException(stage, exception, cancellationToken);
+        if (ConversionErrors.IsExpected(exception))
+        {
+          if (error.Kind != ConversionErrorKind.Canceled)
+          {
+            LogMessages.ConversionFailed(logger, error.Kind, error.Message);
+          }
+        }
+        else
+        {
+          LogMessages.ConversionFailedUnexpectedly(logger, exception, stage);
+        }
+
+        return error;
+      }
     }
-    catch (Exception exception)
+  }
+
+  private void RecordOutcome(ConversionError? error)
+  {
+    if (error is null)
     {
-      LogMessages.BrowserCleanupFailed(logger, exception);
+      healthTracker.RecordSuccess();
+      return;
+    }
+
+    // Callers canceling or sending an invalid request, and load shedding, say nothing about whether
+    // the engine works.
+    if (
+      error.Kind
+      is not (
+        ConversionErrorKind.Canceled
+        or ConversionErrorKind.InvalidRequest
+        or ConversionErrorKind.Busy
+      )
+    )
+    {
+      healthTracker.RecordFailure(error.Message);
     }
   }
 }

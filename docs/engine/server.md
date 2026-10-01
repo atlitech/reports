@@ -1,0 +1,80 @@
+# Atli Reports Server
+
+`Atli.Reports.Server` is a small NativeAOT HTTP service over `Atli.Reports.Engine`. It ships as a
+container image.
+
+## `POST /convert`
+
+The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOptions`
+(`orientation`, `paperSize`, `margins`, `printBackground`, `scale`, `headerTemplate`,
+`footerTemplate`, `displayHeaderFooter`, `pageRanges`, `preferCSSPageSize`, `waitForSignal`,
+`waitTimeoutSeconds`).
+
+**Success** is `200 OK` with `Content-Type: application/pdf` and
+`Content-Disposition: attachment; filename=output.pdf`. The PDF streams into the response as the
+browser produces it (chunked transfer encoding), without being buffered in the server first.
+
+**Failures before the first PDF byte** are RFC 9457 problem details (`application/problem+json`)
+with an extra `kind` member holding the `ConversionErrorKind`:
+
+| Kind | Status | Notes |
+| --- | --- | --- |
+| `InvalidRequest` | 400 Bad Request | Blank HTML, blank signal name, negative signal timeout |
+| `SignalTimeout` | 422 Unprocessable Content | The document never called its signal; retrying the same document will not help |
+| `Busy` | 503 Service Unavailable | `Retry-After: 1`; the queue is full or the wait for a turn timed out |
+| `BrowserUnavailable` | 503 Service Unavailable | `Retry-After: 5`; the browser is restarting, missing, or the server is shutting down |
+| `Timeout` | 504 Gateway Timeout | A browser command, the load wait, or `ConversionTimeout` ran out |
+| `RenderFailed` | 500 Internal Server Error | The browser could not render or print (including rejected print options), or the page crashed |
+| `Canceled` | 499 (no body) | The client disconnected; nothing reaches it, the status only shows in logs |
+
+`SignalTimeout` deliberately differs from the 504 that `Atli.Reports.Blazor`'s `MapBlazorReport`
+uses: there the server renders its own component, so a missing signal is a server-side timeout;
+here the client sends the document, so it is a problem with the request.
+
+**Failures after the first PDF byte** (the browser dies mid-transfer, say) abort the connection.
+The client sees a broken response, never a truncated `200`.
+
+## Health
+
+- `GET /health/live`: the browser executable exists.
+- `GET /health/ready`: the executable exists and recent conversions mostly succeed (busy, canceled,
+  and invalid requests do not count).
+
+## Configuration
+
+Every engine option binds from the `ReportsEngine` section, so environment variables work as usual,
+for example `ReportsEngine__Concurrency__MaxConcurrentConversions=4` or
+`ReportsEngine__ConversionTimeout=00:00:45`. See [the engine's configuration
+reference](architecture.md#configuration-reference). The server's `appsettings.json` sets:
+
+- `Browser:WarmUpOnStartup: true`, so the first request does not pay the browser's start-up time;
+- `ConversionTimeout: 00:01:00`, so overload ends in a clean `504` rather than a client timeout;
+- `Browser:NoSandbox: true` and `Browser:DisableDevShmUsage: true`, for containers.
+
+Request size is Kestrel's: 30 MB by default, configurable with `Kestrel__Limits__MaxRequestBodySize`.
+
+## Container image
+
+```bash
+docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
+docker run -p 8080:8080 atli-reports-server
+```
+
+- **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble`, `runtime-deps:10.0-noble`), so the
+  NativeAOT binary runs against the glibc it was linked with.
+- **The browser is `chrome-headless-shell`** from Chrome for Testing (`linux64` or `linux-arm64`),
+  which renders and isolates conversions several times faster than the full browser (see
+  [architecture.md](architecture.md#isolation)). The `CHROME_VERSION` build argument pins a version;
+  the default takes the current stable release, so a rebuild picks up browser security fixes.
+- **`tini` is PID 1.** It forwards `SIGTERM` to the server, whose shutdown drains conversions and
+  closes the browser cleanly, and it reaps the browser's exited child processes so none linger as
+  zombies.
+- **The server runs as the non-root `app` user.** The browser runs without its sandbox, which only
+  suits trusted HTML.
+
+Measured with 50 one-page documents against a container limited to 2 CPUs and 2 GB (Linux arm64):
+
+| | Sequential | 8 concurrent clients | Left in `/tmp` |
+| --- | --- | --- | --- |
+| Before (a browser per request, Debian Chromium) | 3.0 docs/s, p50 315 ms | 2.2 docs/s, p50 3.5 s | 187 entries after 101 requests |
+| After (shared browser, isolated contexts, `chrome-headless-shell`) | 58.7 docs/s, p50 13 ms | 57.6 docs/s, p50 121 ms | the live profile only |

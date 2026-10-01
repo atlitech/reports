@@ -1,9 +1,9 @@
 # Reactive Signal Approach for JavaScript Rendering Completion
 
 > **Status:** implemented in `Atli.Reports.Engine` as `PdfOptions.WaitForSignal` and
-> `PdfOptions.WaitTimeout`. This is the original design note, with names updated to the
-> `Atli.Reports.Engine` layout. [As implemented](#as-implemented) records where the shipped
-> code differs from the proposal.
+> `PdfOptions.WaitTimeout`. This is the original design note; its code sketches use the original
+> type names (`ChromiumPage`, `SignalAwaiter`). [As implemented](#as-implemented) records where the
+> shipped code differs from the proposal.
 
 ## Problem Statement
 
@@ -22,25 +22,31 @@ Use Chrome DevTools Protocol's `Runtime.addBinding` to create a **reactive, even
 
 ## As implemented
 
-The shipped code follows the design below, with these differences:
+The shipped code follows the design below, with these differences (see also
+[architecture.md](architecture.md#load-and-signal-correctness)):
 
-- **Registration happens before the HTML loads.** `ChromiumPage.RegisterSignalAsync`
-  (`src/Atli.Reports.Engine/Chromium/Page/ChromiumPage.cs`) sends `Runtime.enable` and
-  `Runtime.addBinding` and waits for both responses before `HtmlToPdfConverter` sets the content,
-  so a page that signals immediately cannot race the registration. It returns a `SignalAwaiter`
-  (`Chromium/Page/SignalAwaiter.cs`) that `HtmlToPdfConverter` awaits after setting the content.
-- **A shim makes the signal callable without arguments.** `Runtime.addBinding` exposes a function
-  that requires exactly one string argument. `SignalShim`
-  (`src/Atli.Reports.Engine/Conversion/SignalShim.cs`) prepends a `<script>` that replaces
-  `window[name]` with a zero-argument wrapper, so pages call `window.pdfReady()`.
-- **The connection event is `DevToolsConnection.EventReceived`** (an `EventHandler<DevToolsEventArgs>`)
-  rather than the `OnEvent` tuple event proposed below. Event parameters are cloned, so handlers can
-  keep them.
-- **The binding is removed afterwards.** Disposing the `SignalAwaiter` unsubscribes from the event
-  and sends `Runtime.removeBinding`, so a reused page does not keep the binding.
+- **Registration happens before the HTML loads.** `IsolatedPage.EnableSignalAsync`
+  (`src/Atli.Reports.Engine/Chromium/Page/IsolatedPage.cs`) sends `Page.enable`, `Runtime.enable`,
+  `Runtime.addBinding`, and `Page.addScriptToEvaluateOnNewDocument` and waits for all four before
+  `HtmlToPdfConverter` sets the content, so a page that signals immediately cannot race the
+  registration.
+- **The binding has the engine's own name.** The CDP binding is `__atliReportsSignal`. A script
+  registered with `Page.addScriptToEvaluateOnNewDocument` (`SignalShim`,
+  `src/Atli.Reports.Engine/Conversion/SignalShim.cs`) defines `window.<signal>()` as a zero-argument
+  wrapper that calls the binding, because a binding requires exactly one string argument. The HTML
+  itself is not modified. An earlier version prepended a `<script>` to the HTML, which put every
+  document with a doctype into quirks mode.
+- **The signal reaches every document.** `runImmediately` defines the function in the document that
+  is already loaded (which `Page.setDocumentContent` keeps), and the enabled Page and Runtime domains
+  carry the script and the binding into documents the page navigates to.
+- **Events are routed per session.** Every conversion's page is a flat-mode session on the browser's
+  single DevTools connection; `Runtime.bindingCalled` reaches only that page's handler.
+- **No clean-up is needed.** Each conversion has its own page in its own browser context, discarded
+  afterwards, so the binding and the script cannot leak into another conversion.
 - **Outcomes are typed.** A missing signal fails the conversion with
   `ConversionErrorKind.SignalTimeout`; canceling the caller's token fails it with
-  `ConversionErrorKind.Canceled`.
+  `ConversionErrorKind.Canceled`; a page that crashes while the engine waits fails it at once with
+  `ConversionErrorKind.RenderFailed`.
 
 ## Implementation Details
 
@@ -326,8 +332,8 @@ Optionally support Network Idle as a convenience for cases where users don't wan
 
 ## Implementation Checklist
 
-- [x] Add a CDP event to `DevToolsConnection` (shipped as `EventReceived`)
-- [x] Register the signal in `ChromiumPage` (shipped as `RegisterSignalAsync` + `SignalAwaiter`)
+- [x] Route CDP events to the page (shipped as `DevToolsSession.EventReceived`)
+- [x] Register the signal on the page (shipped as `IsolatedPage.EnableSignalAsync` and `WaitForSignalAsync`)
 - [x] Add `WaitForSignal` and `WaitTimeout` properties to `PdfOptions`
 - [x] Update `HtmlToPdfConverter` to wait for the signal when configured
 - [x] Add logging for signal timeout scenarios

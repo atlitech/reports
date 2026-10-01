@@ -1,119 +1,26 @@
 using System.Buffers;
-using System.IO.Pipelines;
-using System.Security.Cryptography;
-using System.Text;
+using System.Buffers.Text;
+using System.Text.Json;
+using Atli.Reports.Engine.Chromium.Connection;
 using Atli.Reports.Engine.Chromium.Page;
-using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Chromium.Protocol.Messages;
-using Atli.Reports.Engine.Chromium.Protocol.Responses;
-using Atli.Reports.Engine.Conversion;
-using Atli.Reports.Engine.Diagnostics;
-using Microsoft.Extensions.Logging;
-using OneOf;
-using OneOf.Types;
 
 namespace Atli.Reports.Engine.Pdf;
 
 /// <summary>
-/// Prints a Chromium page to PDF and streams the result into a <see cref="PipeWriter"/>.
+/// Maps <see cref="PdfOptions"/> onto <c>Page.printToPDF</c> and streams the printed PDF out of the
+/// browser.
 /// </summary>
-internal sealed class ChromiumPdfGenerator(ILogger<ChromiumPdfGenerator> logger)
+internal static class ChromiumPdfGenerator
 {
   /// <summary>
-  /// The number of bytes requested per <c>IO.read</c> call.
+  /// The default number of PDF bytes requested per <c>IO.read</c>.
   /// </summary>
-  private const int ReadChunkSize = 50 * 1024;
+  public const int DefaultReadChunkSize = 1024 * 1024;
 
   /// <summary>
-  /// Generates a PDF from a Chromium page
-  /// </summary>
-  public async ValueTask<OneOf<Success, ConversionError>> GeneratePdfAsync(
-    ChromiumPage page,
-    PipeWriter pipeWriter,
-    PdfOptions options,
-    CancellationToken ct = default
-  )
-  {
-    try
-    {
-      var message = CreatePrintToPdfMessage(options);
-
-      await page.SendDevToolsCommandAsync(
-        message,
-        PrintToPdfResponseSerializationContext.Default.DevToolsResponsePrintToPdfResponse,
-        async pagePrintToPdfResponse =>
-        {
-          // Invalid options (for example a malformed page range or an out-of-range scale) come
-          // back as a protocol error; without this check they produced an empty "PDF".
-          if (pagePrintToPdfResponse.Error is { } printError)
-          {
-            throw new DevToolsProtocolException(message.Method, printError);
-          }
-
-          if (string.IsNullOrEmpty(pagePrintToPdfResponse.Result?.Stream))
-          {
-            throw new DevToolsProtocolException($"{message.Method} returned no PDF stream.");
-          }
-
-          DevToolsMessage ioReadMessage = new("IO.read");
-          ioReadMessage.Parameters.Add("handle", pagePrintToPdfResponse.Result.Stream);
-          ioReadMessage.Parameters.Add("size", ReadChunkSize);
-
-          var finished = false;
-          while (!finished)
-          {
-            await page.SendDevToolsCommandAsync(
-              ioReadMessage,
-              IoReadResponseSerializationContext.Default.DevToolsResponseIoReadResponse,
-              async ioReadResponse =>
-              {
-                if (ioReadResponse.Error is { } readError)
-                {
-                  throw new DevToolsProtocolException(ioReadMessage.Method, readError);
-                }
-
-                if (ioReadResponse.Result?.Eof == true)
-                {
-                  ClosePdfStream(page, pagePrintToPdfResponse.Result!.Stream);
-                  finished = true;
-                  return Task.CompletedTask;
-                }
-
-                if (ioReadResponse.Result?.Data != null)
-                {
-                  await ReadAndTransform(ioReadResponse.Result.Data.AsMemory(), pipeWriter, ct);
-                }
-
-                return Task.CompletedTask;
-              },
-              ct
-            );
-          }
-
-          await pipeWriter.CompleteAsync();
-          return Task.CompletedTask;
-        },
-        ct
-      );
-
-      return new Success();
-    }
-    catch (Exception ex)
-    {
-      LogMessages.PdfGenerationFailed(logger, ex, page.PageId);
-      return ConversionErrors.FromException(
-        ex is DevToolsProtocolException
-          ? $"PDF generation failed: {ex.Message}"
-          : "PDF generation failed",
-        ex,
-        ConversionErrorKind.RenderFailed,
-        ct
-      );
-    }
-  }
-
-  /// <summary>
-  /// Maps <paramref name="options"/> onto a <c>Page.printToPDF</c> command.
+  /// Maps <paramref name="options"/> onto a <c>Page.printToPDF</c> command that returns the PDF as
+  /// a stream handle.
   /// </summary>
   internal static DevToolsMessage CreatePrintToPdfMessage(PdfOptions options)
   {
@@ -154,69 +61,200 @@ internal sealed class ChromiumPdfGenerator(ILogger<ChromiumPdfGenerator> logger)
       message.Parameters.Add("preferCSSPageSize", true);
     }
 
+    if (options.GenerateTaggedPdf is { } tagged)
+    {
+      message.Parameters.Add("generateTaggedPDF", tagged);
+    }
+
     return message;
   }
 
-  private static async ValueTask ReadAndTransform(
-    ReadOnlyMemory<char> data,
-    PipeWriter writer,
-    CancellationToken ct
+  /// <summary>
+  /// Reads the stream <paramref name="handle"/> with <c>IO.read</c> and writes the decoded bytes to
+  /// <paramref name="destination"/> as each chunk arrives, then closes the handle.
+  /// </summary>
+  /// <remarks>
+  /// The next chunk is requested before the current one is written, so the browser reads while the
+  /// destination writes. Chunks are decoded straight from the reply's UTF-8 JSON into a pooled
+  /// buffer: no base64 string is ever materialized.
+  /// </remarks>
+  /// <exception cref="DestinationWriteException"><paramref name="destination"/> threw.</exception>
+  public static async Task CopyToAsync(
+    DevToolsSession session,
+    string handle,
+    Stream destination,
+    int chunkSize,
+    CancellationToken cancellationToken
   )
   {
-    if (data.Length == 0)
-    {
-      return;
-    }
+    DevToolsMessage read = new("IO.read");
+    read.Parameters.Add("handle", handle);
+    read.Parameters.Add("size", chunkSize);
 
-    using Base64StreamTransformer transformer = new(FromBase64TransformMode.IgnoreWhiteSpaces);
-    var sharedPool = ArrayPool<byte>.Shared;
-    var dataBytes = sharedPool.Rent(data.Length);
-
+    Task<DevToolsReply>? pending = session.SendAsync(read, cancellationToken);
     try
     {
-      var totalBytes = Encoding.UTF8.GetBytes(data.Span, dataBytes);
-      var index = 0;
-      var writerBuffer = writer.GetMemory(Base64StreamTransformer.OutputBlockSize);
-      var dataBytesSpan = dataBytes.AsMemory();
-
-      while (index < totalBytes)
+      while (pending is not null)
       {
-        ct.ThrowIfCancellationRequested();
-
-        var bytesRead = Math.Min(totalBytes - index, Base64StreamTransformer.InputBlockSize);
-        var inputBlockMemory = dataBytesSpan.Slice(index, bytesRead);
-        index += bytesRead;
-
-        var count = transformer.TransformBlock(
-          inputBlockMemory.Span,
-          0,
-          bytesRead,
-          writerBuffer.Span,
-          0
-        );
-
-        writer.Advance(count);
-        var flushResult = await writer.FlushAsync(ct);
-
-        if (flushResult.IsCanceled || flushResult.IsCompleted)
+        PdfChunk chunk;
+        using (var reply = await pending)
         {
-          break;
+          chunk = DecodeReadResult(reply.Result);
         }
 
-        writerBuffer = writer.GetMemory(count);
+        pending = chunk.Eof ? null : session.SendAsync(read, cancellationToken);
+        try
+        {
+          if (chunk.Length > 0)
+          {
+            await WriteAsync(destination, chunk, cancellationToken);
+          }
+        }
+        finally
+        {
+          chunk.Return();
+        }
       }
     }
     finally
     {
-      sharedPool.Return(dataBytes);
-      transformer.Reset();
+      if (pending is not null)
+      {
+        // Leaving early (a failed write, cancellation): release the read still in flight.
+        _ = pending.ContinueWith(
+          static task =>
+          {
+            if (task.IsCompletedSuccessfully)
+            {
+              task.Result.Dispose();
+            }
+            else
+            {
+              _ = task.Exception;
+            }
+          },
+          CancellationToken.None,
+          TaskContinuationOptions.ExecuteSynchronously,
+          TaskScheduler.Default
+        );
+      }
+
+      DevToolsMessage close = new("IO.close");
+      close.Parameters.Add("handle", handle);
+      session.Post(close);
     }
   }
 
-  private static void ClosePdfStream(ChromiumPage page, string stream)
+  /// <summary>
+  /// Decodes the result of an <c>IO.read</c> into a pooled buffer.
+  /// </summary>
+  internal static PdfChunk DecodeReadResult(ReadOnlySpan<byte> result)
   {
-    DevToolsMessage ioCloseMessage = new("IO.close");
-    ioCloseMessage.Parameters.Add("handle", stream);
-    page.SendDevToolsCommand(ioCloseMessage);
+    Utf8JsonReader reader = new(result);
+    if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+    {
+      throw new JsonException("IO.read returned no result object.");
+    }
+
+    var eof = false;
+    var base64Encoded = false;
+    byte[]? unescaped = null;
+    ReadOnlySpan<byte> data = default;
+
+    try
+    {
+      while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+      {
+        if (reader.ValueTextEquals("eof"u8))
+        {
+          reader.Read();
+          eof = reader.GetBoolean();
+        }
+        else if (reader.ValueTextEquals("base64Encoded"u8))
+        {
+          reader.Read();
+          base64Encoded = reader.GetBoolean();
+        }
+        else if (reader.ValueTextEquals("data"u8))
+        {
+          reader.Read();
+          if (reader.ValueIsEscaped)
+          {
+            unescaped = ArrayPool<byte>.Shared.Rent(reader.ValueSpan.Length);
+            data = unescaped.AsSpan(0, reader.CopyString(unescaped));
+          }
+          else
+          {
+            data = reader.ValueSpan;
+          }
+        }
+        else
+        {
+          reader.Read();
+          reader.Skip();
+        }
+      }
+
+      if (data.IsEmpty)
+      {
+        return new PdfChunk(null, 0, eof);
+      }
+
+      if (!base64Encoded)
+      {
+        var copy = ArrayPool<byte>.Shared.Rent(data.Length);
+        data.CopyTo(copy);
+        return new PdfChunk(copy, data.Length, eof);
+      }
+
+      var decoded = ArrayPool<byte>.Shared.Rent(Base64.GetMaxDecodedFromUtf8Length(data.Length));
+      if (Base64.DecodeFromUtf8(data, decoded, out _, out var written) != OperationStatus.Done)
+      {
+        ArrayPool<byte>.Shared.Return(decoded);
+        throw new InvalidDataException("IO.read returned malformed base64 data.");
+      }
+
+      return new PdfChunk(decoded, written, eof);
+    }
+    finally
+    {
+      if (unescaped is not null)
+      {
+        ArrayPool<byte>.Shared.Return(unescaped);
+      }
+    }
+  }
+
+  private static async Task WriteAsync(
+    Stream destination,
+    PdfChunk chunk,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      await destination.WriteAsync(chunk.Buffer.AsMemory(0, chunk.Length), cancellationToken);
+    }
+    catch (Exception exception)
+      when (exception is not OperationCanceledException
+        || !cancellationToken.IsCancellationRequested
+      )
+    {
+      throw new DestinationWriteException(exception);
+    }
+  }
+
+  /// <summary>
+  /// Decoded PDF bytes in a pooled buffer.
+  /// </summary>
+  internal readonly record struct PdfChunk(byte[]? Buffer, int Length, bool Eof)
+  {
+    public void Return()
+    {
+      if (Buffer is not null)
+      {
+        ArrayPool<byte>.Shared.Return(Buffer);
+      }
+    }
   }
 }

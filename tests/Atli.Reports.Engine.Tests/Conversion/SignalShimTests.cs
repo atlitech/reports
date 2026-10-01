@@ -5,38 +5,33 @@ namespace Atli.Reports.Engine.Tests.Conversion;
 public class SignalShimTests
 {
   [Test]
-  public async Task CreateScript_wraps_the_named_binding_in_a_zero_argument_function()
+  public async Task CreateScript_defines_a_zero_argument_function_that_calls_the_binding()
   {
     var script = SignalShim.CreateScript("pdfReady");
 
     await Assert
       .That(script)
       .IsEqualTo(
-        "<script>(function(){var n=\"pdfReady\";var o=window[n];"
-          + "if(typeof o==='function'){window[n]=function(){o('ready')}}})();</script>"
+        "(function(){var n=\"pdfReady\";window[n]=function(){"
+          + "var b=window[\"__atliReportsSignal\"];if(typeof b==='function'){b('ready')}}})();"
       );
   }
 
   [Test]
-  public async Task CreateScript_escapes_names_that_could_break_out_of_the_string_or_script()
+  public async Task CreateScript_escapes_names_that_could_break_out_of_the_string()
   {
-    var script = SignalShim.CreateScript("a\"b'c\\d</script><img src=x>");
+    var script = SignalShim.CreateScript("a\"b'c\\d\n</script>");
 
-    // Only the shim's own closing tag remains, and the quote cannot end the string literal.
-    await Assert
-      .That(script.IndexOf("</script>", StringComparison.Ordinal))
-      .IsEqualTo(script.Length - "</script>".Length);
     await Assert.That(script).DoesNotContain("a\"b");
-    await Assert.That(script).DoesNotContain("<img");
+    await Assert.That(script).DoesNotContain("\n");
+    await Assert.That(script).DoesNotContain("</script>");
   }
 
   [Test]
-  public async Task Apply_prepends_the_shim_to_the_html()
+  public async Task CreateScript_contains_no_markup()
   {
-    const string html = "<p>Hello</p>";
-
-    var result = SignalShim.Apply(html, "done");
-
-    await Assert.That(result).IsEqualTo(SignalShim.CreateScript("done") + html);
+    // The script is registered with Page.addScriptToEvaluateOnNewDocument, never written into the
+    // HTML, so it cannot push the document into quirks mode.
+    await Assert.That(SignalShim.CreateScript("done")).DoesNotContain("<script");
   }
 }

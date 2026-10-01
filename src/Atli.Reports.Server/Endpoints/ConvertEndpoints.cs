@@ -3,32 +3,71 @@ using Atli.Reports.Server.Models;
 
 namespace Atli.Reports.Server.Endpoints;
 
-public static class ConvertEndpoints
+public static partial class ConvertEndpoints
 {
   public static void MapConvertEndpoints(this WebApplication app)
   {
     app.MapPost("/convert", ConvertHtmlToPdf);
   }
 
-  private static async Task<IResult> ConvertHtmlToPdf(
+  /// <summary>
+  /// Converts the posted HTML and streams the PDF into the response as the browser produces it.
+  /// </summary>
+  /// <remarks>
+  /// The response stays uncommitted until the first PDF byte, so failures before that become problem
+  /// details with the status from <see cref="ConversionProblems"/>. A failure after the first byte
+  /// aborts the connection: the client sees a broken response, never a truncated 200.
+  /// </remarks>
+  private static async Task ConvertHtmlToPdf(
+    HttpContext context,
     ConvertRequest request,
     IHtmlToPdfConverter converter,
-    CancellationToken ct
+    ILoggerFactory loggerFactory
   )
   {
     if (string.IsNullOrWhiteSpace(request.Html))
     {
-      return Results.BadRequest(new ErrorResponse { Error = "HTML content is required." });
+      await ConversionProblems.WriteAsync(
+        context,
+        new ConversionError(ConversionErrorKind.InvalidRequest, "HTML content is required.")
+      );
+      return;
     }
 
     var options = MapOptions(request.Options);
-    var result = await converter.ConvertAsync(request.Html, options, ct);
+    PdfResponseStream body = new(context.Response);
+    var result = await converter.ConvertAsync(request.Html, body, options, context.RequestAborted);
 
-    return result.Match<IResult>(
-      stream => Results.File(stream, "application/pdf", "output.pdf"),
-      error => Results.Problem(error.Message, statusCode: 500)
-    );
+    if (result.TryPickT0(out _, out var error))
+    {
+      body.Start();
+      return;
+    }
+
+    if (body.HasStarted)
+    {
+      LogAbortedAfterStart(
+        loggerFactory.CreateLogger("Atli.Reports.Server.Convert"),
+        error.Kind,
+        error.Message
+      );
+      context.Abort();
+      return;
+    }
+
+    await ConversionProblems.WriteAsync(context, error);
   }
+
+  [LoggerMessage(
+    EventId = 1,
+    Level = LogLevel.Warning,
+    Message = "The conversion failed ({Kind}) after the PDF response started; aborting the connection: {Message}"
+  )]
+  private static partial void LogAbortedAfterStart(
+    ILogger logger,
+    ConversionErrorKind kind,
+    string message
+  );
 
   private static PdfOptions MapOptions(PdfOptionsRequest? request)
   {

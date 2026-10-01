@@ -3,241 +3,226 @@ using Microsoft.Extensions.Logging;
 namespace Atli.Reports.Engine.Diagnostics;
 
 /// <summary>
-/// Source-generated log messages for the reports engine
+/// Source-generated log messages for the reports engine. None of them include the HTML being
+/// converted.
 /// </summary>
 internal static partial class LogMessages
 {
-  // Connection Messages
+  // DevTools connection (100s)
 
   [LoggerMessage(
     EventId = 100,
-    Level = LogLevel.Error,
-    Message = "Unable to establish WebSocket connection to {Uri}"
+    Level = LogLevel.Warning,
+    Message = "The DevTools connection to {Uri} was lost"
   )]
-  public static partial void UnableToEstablishWebSocketConnection(ILogger logger, Uri uri);
+  public static partial void DevToolsConnectionLost(ILogger logger, Exception exception, Uri uri);
 
   [LoggerMessage(
     EventId = 101,
-    Level = LogLevel.Debug,
-    Message = "Send queue processing cancelled for connection {Uri}"
+    Level = LogLevel.Warning,
+    Message = "Ignored a malformed DevTools message from {Uri}"
   )]
-  public static partial void SendQueueProcessingCancelled(ILogger logger, Uri uri);
+  public static partial void MalformedDevToolsMessage(ILogger logger, Exception exception, Uri uri);
 
   [LoggerMessage(
     EventId = 102,
-    Level = LogLevel.Debug,
-    Message = "Receive queue processing cancelled for connection {Uri}"
-  )]
-  public static partial void ReceiveQueueProcessingCancelled(ILogger logger, Uri uri);
-
-  [LoggerMessage(
-    EventId = 103,
-    Level = LogLevel.Error,
-    Message = "Receive queue processing error for connection {Uri}"
-  )]
-  public static partial void ReceiveQueueProcessingError(ILogger logger, Exception ex, Uri uri);
-
-  // Browser Messages
-
-  [LoggerMessage(EventId = 201, Level = LogLevel.Error, Message = "Failed to start Chrome browser")]
-  public static partial void FailedToStartBrowser(ILogger logger, Exception error);
-
-  [LoggerMessage(
-    EventId = 202,
-    Level = LogLevel.Debug,
-    Message = "Disposing of Chrome browser with process id: {BrowserProcessId}"
-  )]
-  public static partial void BrowserDispose(ILogger logger, int browserProcessId);
-
-  // Browser Pool Messages
-
-  // Page Messages
-
-  [LoggerMessage(
-    EventId = 400,
-    Level = LogLevel.Error,
-    Message = "Failed to create browser page for browser with process id {BrowserProcessId}"
-  )]
-  public static partial void BrowserCreatePageFailed(
-    ILogger logger,
-    Exception error,
-    int browserProcessId
-  );
-
-  [LoggerMessage(
-    EventId = 402,
-    Level = LogLevel.Debug,
-    Message = "Disposing browser page with target ID: {TargetId}"
-  )]
-  public static partial void BrowserPageDispose(ILogger logger, string targetId);
-
-  [LoggerMessage(
-    EventId = 403,
-    Level = LogLevel.Error,
-    Message = "Failed to dispose browser page with target ID: {TargetId}"
-  )]
-  public static partial void BrowserPageDisposeFailed(
-    ILogger logger,
-    Exception exception,
-    string targetId
-  );
-
-  // BrowserFactory Messages
-
-  [LoggerMessage(
-    EventId = 500,
-    Level = LogLevel.Debug,
-    Message = "Starting Chromium process with arguments: {Arguments}"
-  )]
-  public static partial void StartingChromiumProcess(ILogger logger, string arguments);
-
-  [LoggerMessage(
-    EventId = 501,
-    Level = LogLevel.Debug,
-    Message = "Browser data directory used: {DataDirectory}"
-  )]
-  public static partial void BrowserDataDirectoryUsed(ILogger logger, string dataDirectory);
-
-  [LoggerMessage(
-    EventId = 502,
-    Level = LogLevel.Error,
-    Message = "Could not read DevTools active port file: {FilePath}"
-  )]
-  public static partial void CouldNotReadDevToolsActivePort(
-    ILogger logger,
-    Exception error,
-    string filePath
-  );
-
-  [LoggerMessage(
-    EventId = 503,
-    Level = LogLevel.Error,
-    Message = "Chromium process crashed with exit code: {ExitCode}"
-  )]
-  public static partial void ChromiumProcessCrashed(
-    ILogger logger,
-    Exception? exception,
-    int exitCode
-  );
-
-  [LoggerMessage(
-    EventId = 505,
-    Level = LogLevel.Error,
-    Message = "Browser page '{TargetId}' failed to set content"
-  )]
-  public static partial void BrowserPageSetContentFailed(
-    ILogger logger,
-    Exception exception,
-    string targetId
-  );
-
-  // CDP Event Messages
-
-  [LoggerMessage(
-    EventId = 600,
     Level = LogLevel.Warning,
-    Message = "CDP event handler threw an exception for event '{Method}'"
+    Message = "A DevTools event handler failed for '{Method}'"
   )]
-  public static partial void CdpEventHandlerError(
+  public static partial void DevToolsEventHandlerFailed(
     ILogger logger,
     Exception exception,
     string method
   );
 
-  // Signal Messages
+  [LoggerMessage(
+    EventId = 103,
+    Level = LogLevel.Debug,
+    Message = "The DevTools receive loop for {Uri} ended with an error"
+  )]
+  public static partial void ReceiveLoopFailed(ILogger logger, Exception exception, Uri uri);
+
+  // Browser process (200s)
 
   [LoggerMessage(
-    EventId = 700,
+    EventId = 200,
     Level = LogLevel.Debug,
-    Message = "Signal binding '{BindingName}' registered for page '{TargetId}'"
+    Message = "Started browser process {ProcessId} with profile {ProfileDirectory}"
   )]
-  public static partial void SignalBindingRegistered(
+  public static partial void BrowserProcessStarted(
     ILogger logger,
-    string targetId,
-    string bindingName
+    int processId,
+    string profileDirectory
   );
 
   [LoggerMessage(
-    EventId = 701,
+    EventId = 201,
     Level = LogLevel.Debug,
-    Message = "Waiting for signal '{BindingName}' with timeout {Timeout}"
+    Message = "Browser process {ProcessId}: {Line}"
   )]
-  public static partial void WaitingForSignal(ILogger logger, string bindingName, TimeSpan timeout);
+  public static partial void BrowserOutput(ILogger logger, int processId, string line);
 
   [LoggerMessage(
-    EventId = 702,
-    Level = LogLevel.Debug,
-    Message = "Signal '{BindingName}' received"
-  )]
-  public static partial void SignalReceived(ILogger logger, string bindingName);
-
-  [LoggerMessage(
-    EventId = 703,
+    EventId = 202,
     Level = LogLevel.Warning,
-    Message = "Signal '{BindingName}' timed out after {Timeout}"
+    Message = "Could not kill browser process {ProcessId}"
   )]
-  public static partial void SignalTimedOut(ILogger logger, string bindingName, TimeSpan timeout);
-
-  // Conversion Messages
-
-  // PDF Generation Messages
-
-  [LoggerMessage(
-    EventId = 800,
-    Level = LogLevel.Error,
-    Message = "PDF generation failed for page {PageId}"
-  )]
-  public static partial void PdfGenerationFailed(
+  public static partial void BrowserProcessKillFailed(
     ILogger logger,
     Exception exception,
-    string pageId
+    int processId
   );
 
-  // HTML to PDF Conversion Messages
+  [LoggerMessage(
+    EventId = 203,
+    Level = LogLevel.Debug,
+    Message = "Browser process {ProcessId} exited; deleting profile {ProfileDirectory}"
+  )]
+  public static partial void BrowserProcessExited(
+    ILogger logger,
+    int processId,
+    string profileDirectory
+  );
+
+  [LoggerMessage(
+    EventId = 204,
+    Level = LogLevel.Warning,
+    Message = "Could not delete the browser profile directory {ProfileDirectory}"
+  )]
+  public static partial void ProfileDirectoryNotDeleted(
+    ILogger logger,
+    Exception exception,
+    string profileDirectory
+  );
+
+  // Browser lifecycle (300s)
+
+  [LoggerMessage(
+    EventId = 300,
+    Level = LogLevel.Information,
+    Message = "Browser {Generation} started (process {ProcessId})"
+  )]
+  public static partial void BrowserLaunched(ILogger logger, int generation, int processId);
+
+  [LoggerMessage(EventId = 301, Level = LogLevel.Error, Message = "The browser failed to start")]
+  public static partial void BrowserLaunchFailed(ILogger logger, Exception exception);
+
+  [LoggerMessage(
+    EventId = 302,
+    Level = LogLevel.Information,
+    Message = "Recycling browser {Generation} because {Reason}"
+  )]
+  public static partial void BrowserRecycling(ILogger logger, int generation, string reason);
+
+  [LoggerMessage(
+    EventId = 303,
+    Level = LogLevel.Warning,
+    Message = "Browser {Generation} (process {ProcessId}) exited or disconnected unexpectedly; the next conversion starts a new one"
+  )]
+  public static partial void BrowserTerminated(ILogger logger, int generation, int processId);
+
+  [LoggerMessage(
+    EventId = 304,
+    Level = LogLevel.Information,
+    Message = "Browser {Generation} (process {ProcessId}) closed"
+  )]
+  public static partial void BrowserClosed(ILogger logger, int generation, int processId);
+
+  [LoggerMessage(
+    EventId = 305,
+    Level = LogLevel.Warning,
+    Message = "Closing browser {Generation} failed"
+  )]
+  public static partial void BrowserCloseFailed(
+    ILogger logger,
+    Exception exception,
+    int generation
+  );
+
+  [LoggerMessage(
+    EventId = 306,
+    Level = LogLevel.Warning,
+    Message = "Shutdown stopped waiting for {InFlight} running conversion(s); closing the browser"
+  )]
+  public static partial void ShutdownDrainTimedOut(ILogger logger, int inFlight);
+
+  [LoggerMessage(
+    EventId = 308,
+    Level = LogLevel.Information,
+    Message = "Closing browser {Generation}: no conversions for {IdleTimeout}"
+  )]
+  public static partial void BrowserIdleClosing(
+    ILogger logger,
+    int generation,
+    TimeSpan idleTimeout
+  );
+
+  [LoggerMessage(
+    EventId = 307,
+    Level = LogLevel.Warning,
+    Message = "Warming up the browser failed; the next conversion will try again"
+  )]
+  public static partial void WarmUpFailed(ILogger logger, Exception exception);
+
+  // Pages (400s)
+
+  [LoggerMessage(
+    EventId = 400,
+    Level = LogLevel.Debug,
+    Message = "Disposing browser context {BrowserContextId} failed"
+  )]
+  public static partial void BrowserContextDisposeFailed(
+    ILogger logger,
+    Exception exception,
+    string browserContextId
+  );
+
+  [LoggerMessage(
+    EventId = 401,
+    Level = LogLevel.Debug,
+    Message = "Waiting for the page to load failed in the page ({Error}); printing it as it is"
+  )]
+  public static partial void LoadWaitFailed(ILogger logger, string error);
+
+  // Conversions (900s)
 
   [LoggerMessage(
     EventId = 900,
-    Level = LogLevel.Error,
-    Message = "Failed to create browser: {Error}"
+    Level = LogLevel.Warning,
+    Message = "Conversion failed ({Kind}): {Error}"
   )]
-  public static partial void FailedToCreateBrowser(ILogger logger, string error);
+  public static partial void ConversionFailed(
+    ILogger logger,
+    ConversionErrorKind kind,
+    string error
+  );
 
-  [LoggerMessage(EventId = 901, Level = LogLevel.Error, Message = "Failed to create page: {Error}")]
-  public static partial void FailedToCreatePage(ILogger logger, string error);
-
-  [LoggerMessage(EventId = 902, Level = LogLevel.Error, Message = "Failed to set HTML content")]
-  public static partial void FailedToSetHtmlContent(ILogger logger);
-
-  [LoggerMessage(EventId = 903, Level = LogLevel.Error, Message = "PDF generation failed: {Error}")]
-  public static partial void PdfGenerationFailedWithError(ILogger logger, string error);
-
-  [LoggerMessage(EventId = 904, Level = LogLevel.Error, Message = "HTML to PDF conversion failed")]
-  public static partial void HtmlToPdfConversionFailed(ILogger logger, Exception exception);
-
-  // Signal Messages
+  [LoggerMessage(
+    EventId = 901,
+    Level = LogLevel.Error,
+    Message = "Conversion failed unexpectedly at stage '{Stage}'"
+  )]
+  public static partial void ConversionFailedUnexpectedly(
+    ILogger logger,
+    Exception exception,
+    string stage
+  );
 
   [LoggerMessage(
     EventId = 1000,
-    Level = LogLevel.Information,
-    Message = "Signal wait requested for binding '{BindingName}'"
+    Level = LogLevel.Debug,
+    Message = "Signal wait requested for '{SignalName}'"
   )]
-  public static partial void SignalWaitRequested(ILogger logger, string bindingName);
+  public static partial void SignalWaitRequested(ILogger logger, string signalName);
 
   [LoggerMessage(
     EventId = 1001,
     Level = LogLevel.Warning,
-    Message = "Signal '{BindingName}' timed out after {Timeout} during conversion"
+    Message = "Signal '{SignalName}' timed out after {Timeout} during conversion"
   )]
   public static partial void SignalTimeoutDuringConversion(
     ILogger logger,
-    string bindingName,
+    string signalName,
     TimeSpan timeout
   );
-
-  [LoggerMessage(
-    EventId = 905,
-    Level = LogLevel.Warning,
-    Message = "Failed to clean up the browser after a conversion"
-  )]
-  public static partial void BrowserCleanupFailed(ILogger logger, Exception exception);
 }

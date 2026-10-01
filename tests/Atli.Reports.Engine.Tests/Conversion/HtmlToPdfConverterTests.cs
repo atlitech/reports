@@ -1,52 +1,54 @@
+using System.Diagnostics.Metrics;
 using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Page;
+using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Conversion;
+using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
-using Atli.Reports.Engine.Pdf;
 using Microsoft.Extensions.Logging.Abstractions;
-using OneOf;
+using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Engine.Tests.Conversion;
 
 /// <summary>
-/// Exercises the converter's error mapping and health recording against a fake browser,
-/// so no real browser is launched.
+/// Exercises the converter's flow, error mapping, and health recording against a fake browser, so
+/// no real browser is launched.
 /// </summary>
 public class HtmlToPdfConverterTests
 {
   [Test]
   [Arguments("")]
   [Arguments("   ")]
-  public async Task Blank_html_is_an_invalid_request_and_launches_no_browser(string html)
+  public async Task Blank_html_is_an_invalid_request_and_opens_no_page(string html)
   {
-    FakeBrowserFactory factory = new(_ => throw new InvalidOperationException("unreachable"));
-    var (converter, tracker) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new InvalidOperationException("unreachable"));
+    var (converter, tracker) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync(html);
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.InvalidRequest);
-    await Assert.That(factory.Calls).IsEqualTo(0);
+    await Assert.That(browsers.Calls).IsEqualTo(0);
     await Assert.That(tracker.GetHealthStatus().Total).IsEqualTo(0);
   }
 
   [Test]
   public async Task Blank_signal_name_is_an_invalid_request()
   {
-    FakeBrowserFactory factory = new(_ => throw new InvalidOperationException("unreachable"));
-    var (converter, _) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new InvalidOperationException("unreachable"));
+    var (converter, _) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync("<p>x</p>", new PdfOptions { WaitForSignal = " " });
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.InvalidRequest);
-    await Assert.That(factory.Calls).IsEqualTo(0);
+    await Assert.That(browsers.Calls).IsEqualTo(0);
   }
 
   [Test]
   public async Task Negative_signal_timeout_is_an_invalid_request()
   {
-    FakeBrowserFactory factory = new(_ => throw new InvalidOperationException("unreachable"));
-    var (converter, _) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new InvalidOperationException("unreachable"));
+    var (converter, _) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync(
       "<p>x</p>",
@@ -54,82 +56,123 @@ public class HtmlToPdfConverterTests
     );
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.InvalidRequest);
-    await Assert.That(factory.Calls).IsEqualTo(0);
+    await Assert.That(browsers.Calls).IsEqualTo(0);
   }
 
   [Test]
-  public async Task A_missing_browser_is_BrowserUnavailable_and_counts_as_a_failure()
+  public async Task Without_a_signal_the_page_loads_before_it_prints()
   {
-    FakeBrowserFactory factory = new(_ =>
-      ValueTask.FromResult<OneOf<IBrowser, BrowserError>>(
-        new ChromiumError("Could not find browser at ''")
-      )
+    FakePage page = new();
+    var (converter, tracker) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    var result = await converter.ConvertAsync("<p>x</p>");
+
+    await Assert.That(result.IsT0).IsTrue();
+    await using var pdf = result.AsT0;
+    await Assert.That(pdf.Position).IsEqualTo(0);
+    await Assert.That(pdf.Length).IsEqualTo(FakePage.Pdf.Length);
+    await Assert.That(page.Calls).IsEquivalentTo(["SetContent", "WaitForLoad", "Print"]);
+    await Assert.That(page.Disposed).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().Successes).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task With_a_signal_the_signal_is_enabled_before_the_content_is_set()
+  {
+    FakePage page = new();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    var result = await converter.ConvertAsync(
+      "<p>x</p>",
+      new PdfOptions { WaitForSignal = "pdfReady" }
     );
-    var (converter, tracker) = CreateConverter(factory);
+
+    await Assert.That(result.IsT0).IsTrue();
+    await Assert
+      .That(page.Calls)
+      .IsEquivalentTo(["EnableSignal:pdfReady", "SetContent", "WaitForSignal", "Print"]);
+  }
+
+  [Test]
+  public async Task A_signal_that_never_comes_is_SignalTimeout()
+  {
+    FakePage page = new() { SignalArrives = false };
+    var (converter, tracker) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    var result = await converter.ConvertAsync(
+      "<p>x</p>",
+      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TimeSpan.FromSeconds(2) }
+    );
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.SignalTimeout);
+    await Assert.That(page.Disposed).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().Failures).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task An_unavailable_browser_is_BrowserUnavailable_and_counts_as_a_failure()
+  {
+    FakeBrowserProvider browsers = new(_ =>
+      throw new BrowserUnavailableException("No Chrome executable was found.")
+    );
+    var (converter, tracker) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync("<p>x</p>");
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
     await Assert
       .That(result.AsT1.Message)
-      .IsEqualTo("Failed to create browser: Could not find browser at ''");
+      .IsEqualTo("Failed to open a browser page: No Chrome executable was found.");
     await Assert.That(tracker.GetHealthStatus().Failures).IsEqualTo(1);
   }
 
   [Test]
-  public async Task A_browser_that_throws_while_starting_is_BrowserUnavailable()
+  public async Task A_command_timeout_is_Timeout_and_the_page_is_disposed()
   {
-    FakeBrowserFactory factory = new(_ => throw new TimeoutException("no DevToolsActivePort"));
-    var (converter, _) = CreateConverter(factory);
-
-    var result = await converter.ConvertAsync("<p>x</p>");
-
-    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
-    await Assert.That(result.AsT1.Exception).IsTypeOf<TimeoutException>();
-  }
-
-  [Test]
-  public async Task An_exhausted_page_pool_is_Busy_and_the_browser_is_disposed()
-  {
-    FakeBrowser browser = new(new PoolExhaustedError("Page", 10));
-    FakeBrowserFactory factory = new(_ =>
-      ValueTask.FromResult<OneOf<IBrowser, BrowserError>>(browser)
-    );
-    var (converter, _) = CreateConverter(factory);
-
-    var result = await converter.ConvertAsync("<p>x</p>");
-
-    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Busy);
-    await Assert.That(browser.Disposed).IsTrue();
-  }
-
-  [Test]
-  public async Task A_page_creation_timeout_is_Timeout()
-  {
-    FakeBrowser browser = new(
-      new ChromiumError("Failed to create browser page", new TimeoutException())
-    );
-    FakeBrowserFactory factory = new(_ =>
-      ValueTask.FromResult<OneOf<IBrowser, BrowserError>>(browser)
-    );
-    var (converter, _) = CreateConverter(factory);
+    FakePage page = new()
+    {
+      PrintFailure = new DevToolsTimeoutException("Page.printToPDF", TimeSpan.FromSeconds(30)),
+    };
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
 
     var result = await converter.ConvertAsync("<p>x</p>");
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+    await Assert.That(page.Disposed).IsTrue();
+  }
+
+  [Test]
+  public async Task Options_the_browser_rejects_are_RenderFailed()
+  {
+    FakePage page = new()
+    {
+      PrintFailure = new DevToolsProtocolException(
+        "Page.printToPDF",
+        -32000,
+        "Page range syntax error"
+      ),
+    };
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    var result = await converter.ConvertAsync("<p>x</p>");
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.RenderFailed);
+    await Assert
+      .That(result.AsT1.Message)
+      .StartsWith("PDF generation failed: Page.printToPDF failed:");
   }
 
   [Test]
   public async Task Cancellation_is_Canceled_and_does_not_count_as_a_failure()
   {
     using CancellationTokenSource cancellation = new();
-    FakeBrowserFactory factory = new(async token =>
+    FakeBrowserProvider browsers = new(token =>
     {
-      await cancellation.CancelAsync();
+      cancellation.Cancel();
       token.ThrowIfCancellationRequested();
       throw new InvalidOperationException("unreachable");
     });
-    var (converter, tracker) = CreateConverter(factory);
+    var (converter, tracker) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync("<p>x</p>", cancellationToken: cancellation.Token);
 
@@ -138,26 +181,145 @@ public class HtmlToPdfConverterTests
   }
 
   [Test]
-  public async Task An_already_canceled_token_launches_no_browser()
+  public async Task An_already_canceled_token_opens_no_page()
   {
     using CancellationTokenSource cancellation = new();
     await cancellation.CancelAsync();
-    FakeBrowserFactory factory = new(_ => throw new InvalidOperationException("unreachable"));
-    var (converter, _) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new InvalidOperationException("unreachable"));
+    var (converter, _) = CreateConverter(browsers);
 
     var result = await converter.ConvertAsync("<p>x</p>", cancellationToken: cancellation.Token);
 
     await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Canceled);
-    await Assert.That(factory.Calls).IsEqualTo(0);
+    await Assert.That(browsers.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task A_full_queue_is_Busy_and_does_not_count_as_a_failure()
+  {
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    FakePage blocked = new() { PrintGate = release.Task };
+    var (converter, tracker) = CreateConverter(
+      new FakeBrowserProvider(_ => blocked),
+      new ReportsEngineConcurrencyOptions { MaxConcurrentConversions = 1, MaxQueueLength = 0 }
+    );
+
+    var running = converter.ConvertAsync("<p>first</p>").AsTask();
+    await blocked.Printing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    var rejected = await converter.ConvertAsync("<p>second</p>");
+    release.SetResult();
+    var first = await running;
+
+    await Assert.That(rejected.AsT1.Kind).IsEqualTo(ConversionErrorKind.Busy);
+    await Assert.That(first.IsT0).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().Failures).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task Running_out_of_the_conversion_timeout_is_Timeout()
+  {
+    FakePage page = new() { PrintGate = new TaskCompletionSource().Task };
+    var (converter, tracker) = CreateConverter(
+      new FakeBrowserProvider(_ => page),
+      conversionTimeout: TimeSpan.FromMilliseconds(200)
+    );
+
+    var result = await converter.ConvertAsync("<p>x</p>");
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+    await Assert.That(result.AsT1.Message).Contains("conversion timeout");
+    await Assert.That(page.Disposed).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().Failures).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task The_conversion_timeout_also_covers_the_wait_for_a_turn()
+  {
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    FakePage blocked = new() { PrintGate = release.Task };
+    var (converter, _) = CreateConverter(
+      new FakeBrowserProvider(_ => blocked),
+      new ReportsEngineConcurrencyOptions { MaxConcurrentConversions = 1, MaxQueueLength = 5 },
+      conversionTimeout: TimeSpan.FromMilliseconds(300)
+    );
+
+    var running = converter.ConvertAsync("<p>first</p>").AsTask();
+    await blocked.Printing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    var queued = await converter.ConvertAsync("<p>second</p>");
+    release.SetResult();
+    await running;
+
+    await Assert.That(queued.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+  }
+
+  [Test]
+  public async Task Conversions_are_measured_by_outcome()
+  {
+    List<(double Seconds, string? Outcome)> measurements = [];
+    using MeterListener listener = new();
+    listener.InstrumentPublished = (instrument, meterListener) =>
+    {
+      if (
+        instrument.Meter.Name == EngineMetrics.MeterName
+        && instrument.Name == "atli.reports.conversion.duration"
+      )
+      {
+        meterListener.EnableMeasurementEvents(instrument);
+      }
+    };
+    listener.SetMeasurementEventCallback<double>(
+      (_, value, tags, _) =>
+      {
+        string? outcome = null;
+        foreach (var tag in tags)
+        {
+          if (tag.Key == "outcome")
+          {
+            outcome = tag.Value as string;
+          }
+        }
+
+        lock (measurements)
+        {
+          measurements.Add((value, outcome));
+        }
+      }
+    );
+    listener.Start();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
+
+    var succeeded = await converter.ConvertAsync("<p>x</p>");
+    await succeeded.AsT0.DisposeAsync();
+    await converter.ConvertAsync(" ");
+
+    // Other tests may run converters in parallel; look for this test's two outcomes.
+    string[] outcomes;
+    lock (measurements)
+    {
+      outcomes = [.. measurements.Select(m => m.Outcome ?? "")];
+    }
+
+    await Assert.That(outcomes).Contains("success");
+    await Assert.That(outcomes).Contains("InvalidRequest");
+  }
+
+  [Test]
+  public async Task The_streaming_overload_writes_the_pdf_to_the_destination()
+  {
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
+    using MemoryStream destination = new();
+
+    var result = await converter.ConvertAsync("<p>x</p>", destination);
+
+    await Assert.That(result.IsT0).IsTrue();
+    await Assert.That(destination.ToArray()).IsEquivalentTo(FakePage.Pdf);
   }
 
   [Test]
   public async Task The_streaming_overload_returns_the_error_and_writes_nothing()
   {
-    FakeBrowserFactory factory = new(_ =>
-      ValueTask.FromResult<OneOf<IBrowser, BrowserError>>(new ChromiumError("missing"))
-    );
-    var (converter, _) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new BrowserUnavailableException("missing"));
+    var (converter, _) = CreateConverter(browsers);
     using MemoryStream destination = new();
 
     var result = await converter.ConvertAsync("<p>x</p>", destination);
@@ -167,10 +329,25 @@ public class HtmlToPdfConverterTests
   }
 
   [Test]
+  public async Task Exceptions_from_the_destination_propagate_unchanged()
+  {
+    FakePage page = new();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
+    IOException failure = new("The client disconnected.");
+
+    var thrown = await Assert
+      .That(async () => await converter.ConvertAsync("<p>x</p>", new ThrowingStream(failure)))
+      .Throws<IOException>();
+
+    await Assert.That(thrown).IsSameReferenceAs(failure);
+    await Assert.That(page.Disposed).IsTrue();
+  }
+
+  [Test]
   public async Task The_streaming_overload_rejects_a_read_only_destination()
   {
-    FakeBrowserFactory factory = new(_ => throw new InvalidOperationException("unreachable"));
-    var (converter, _) = CreateConverter(factory);
+    FakeBrowserProvider browsers = new(_ => throw new InvalidOperationException("unreachable"));
+    var (converter, _) = CreateConverter(browsers);
     using MemoryStream readOnly = new([], writable: false);
 
     await Assert
@@ -179,52 +356,139 @@ public class HtmlToPdfConverterTests
   }
 
   private static (HtmlToPdfConverter Converter, ConversionHealthTracker Tracker) CreateConverter(
-    IBrowserFactory factory
+    IBrowserProvider browsers,
+    ReportsEngineConcurrencyOptions? concurrency = null,
+    TimeSpan? conversionTimeout = null
   )
   {
     ConversionHealthTracker tracker = new(TimeProvider.System);
+    ReportsEngineOptions options = new()
+    {
+      ConversionTimeout = conversionTimeout ?? Timeout.InfiniteTimeSpan,
+    };
     HtmlToPdfConverter converter = new(
-      factory,
-      new ChromiumPdfGenerator(NullLogger<ChromiumPdfGenerator>.Instance),
+      browsers,
+      new ConversionLimiter(concurrency ?? new ReportsEngineConcurrencyOptions()),
       tracker,
+      Metrics,
+      Options.Create(options),
       NullLogger<HtmlToPdfConverter>.Instance
     );
     return (converter, tracker);
   }
 
-  private sealed class FakeBrowserFactory(
-    Func<CancellationToken, ValueTask<OneOf<IBrowser, BrowserError>>> create
-  ) : IBrowserFactory
+  private static readonly EngineMetrics Metrics = new();
+
+  private sealed class FakeBrowserProvider(Func<CancellationToken, IConversionPage> open)
+    : IBrowserProvider
   {
     public int Calls { get; private set; }
 
-    public ValueTask<OneOf<IBrowser, BrowserError>> CreateBrowserAsync(
-      CancellationToken ct = default
-    )
+    public ValueTask<IConversionPage> OpenPageAsync(CancellationToken cancellationToken)
     {
       Calls++;
-      return create(ct);
+      return ValueTask.FromResult(open(cancellationToken));
     }
   }
 
-  private sealed class FakeBrowser(BrowserError pageError) : IBrowser
+  private sealed class FakePage : IConversionPage
   {
+    public static readonly byte[] Pdf = "%PDF-1.4 fake %%EOF"u8.ToArray();
+
+    public List<string> Calls { get; } = [];
+
+    public bool SignalArrives { get; init; } = true;
+
+    public Exception? PrintFailure { get; init; }
+
+    public Task PrintGate { get; init; } = Task.CompletedTask;
+
+    public TaskCompletionSource Printing { get; } =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public bool Disposed { get; private set; }
 
-    public ValueTask<OneOf<ChromiumPage, BrowserError>> CreatePageAsync(
-      CancellationToken ct = default
-    ) => ValueTask.FromResult<OneOf<ChromiumPage, BrowserError>>(pageError);
+    public Task EnableSignalAsync(string signalName, CancellationToken cancellationToken)
+    {
+      Calls.Add($"EnableSignal:{signalName}");
+      return Task.CompletedTask;
+    }
 
-    public void ReleasePage(ChromiumPage page) =>
-      throw new InvalidOperationException("No page was created.");
+    public Task SetContentAsync(string html, CancellationToken cancellationToken)
+    {
+      Calls.Add("SetContent");
+      return Task.CompletedTask;
+    }
 
-    public ValueTask DisposePageAsync(ChromiumPage page) =>
-      throw new InvalidOperationException("No page was created.");
+    public Task<bool> WaitForSignalAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+      Calls.Add("WaitForSignal");
+      return Task.FromResult(SignalArrives);
+    }
+
+    public Task WaitForLoadAsync(CancellationToken cancellationToken)
+    {
+      Calls.Add("WaitForLoad");
+      return Task.CompletedTask;
+    }
+
+    public async Task PrintToPdfAsync(
+      PdfOptions options,
+      Stream destination,
+      CancellationToken cancellationToken
+    )
+    {
+      Calls.Add("Print");
+      Printing.TrySetResult();
+      await PrintGate.WaitAsync(cancellationToken);
+      if (PrintFailure is not null)
+      {
+        throw PrintFailure;
+      }
+
+      try
+      {
+        await destination.WriteAsync(Pdf, cancellationToken);
+      }
+      catch (Exception exception) when (exception is not OperationCanceledException)
+      {
+        throw new DestinationWriteException(exception);
+      }
+    }
 
     public ValueTask DisposeAsync()
     {
       Disposed = true;
       return ValueTask.CompletedTask;
     }
+  }
+
+  private sealed class ThrowingStream(Exception failure) : Stream
+  {
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => throw new NotSupportedException();
+    public override long Position
+    {
+      get => throw new NotSupportedException();
+      set => throw new NotSupportedException();
+    }
+
+    public override void Flush() { }
+
+    public override int Read(byte[] buffer, int offset, int count) =>
+      throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw failure;
+
+    public override ValueTask WriteAsync(
+      ReadOnlyMemory<byte> buffer,
+      CancellationToken cancellationToken = default
+    ) => throw failure;
   }
 }
