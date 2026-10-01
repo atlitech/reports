@@ -101,7 +101,9 @@ public class ConvertEndpointTests
   }
 
   [Test]
-  public async Task A_failure_after_the_first_byte_aborts_the_response()
+  [Arguments(false)]
+  [Arguments(true)]
+  public async Task A_failure_after_the_first_byte_aborts_the_response(bool throws)
   {
     await using var server = await RunningServer.StartAsync(
       new FakeConverter(
@@ -109,7 +111,10 @@ public class ConvertEndpointTests
         {
           await destination.WriteAsync(new byte[64 * 1024], cancellationToken);
           await destination.FlushAsync(cancellationToken);
-          return new ConversionError(ConversionErrorKind.BrowserUnavailable, "The browser died.");
+          // An unhandled exception must not become a problem response either: the PDF already started.
+          return throws
+            ? throw new InvalidOperationException("The converter broke.")
+            : new ConversionError(ConversionErrorKind.BrowserUnavailable, "The browser died.");
         }
       )
     );
@@ -144,6 +149,149 @@ public class ConvertEndpointTests
 
     await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
     await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  [Arguments("not json")]
+  [Arguments("""{"html":"<p>x</p>" """)]
+  [Arguments("")]
+  [Arguments("null")]
+  [Arguments("[]")]
+  [Arguments("""{"options":{"paperSize":"a4"}}""")]
+  [Arguments("""{"html":5}""")]
+  [Arguments("""{"html":"<p>x</p>","options":{"scale":"large"}}""")]
+  [Arguments("""{"html":"<p>a</p>","html":"<p>b</p>"}""")]
+  [Arguments("""{"html":"<p>a</p>","Html":"<p>b</p>"}""")]
+  [Arguments("""{"html":"<p>x</p>","options":{"scale":1,"scale":2}}""")]
+  public async Task Bodies_that_are_not_conversion_requests_are_bad_requests_with_problem_details(
+    string body
+  )
+  {
+    FakeConverter converter = new((_, _) => throw new InvalidOperationException("unreachable"));
+    await using var server = await RunningServer.StartAsync(converter);
+
+    using var response = await server.PostAsync(body);
+
+    var detail = await AssertProblemAsync(response, 400, ConversionErrorKind.InvalidRequest);
+    await Assert.That(detail).StartsWith("The request body is not a conversion request.");
+    await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  [Arguments("text/plain")]
+  [Arguments(null)]
+  public async Task Bodies_that_are_not_json_are_unsupported_media_types_with_problem_details(
+    string? contentType
+  )
+  {
+    FakeConverter converter = new((_, _) => throw new InvalidOperationException("unreachable"));
+    await using var server = await RunningServer.StartAsync(converter);
+
+    using var response = await server.Client.PostAsync(
+      "/convert",
+      Content("""{"html":"<p>x</p>"}""", contentType),
+      TestToken
+    );
+
+    var detail = await AssertProblemAsync(response, 415, ConversionErrorKind.InvalidRequest);
+    await Assert.That(detail).Contains("Content-Type: application/json");
+    await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  [Arguments("application/json", "not json", 400)]
+  [Arguments("text/plain", """{"html":"<p>x</p>"}""", 415)]
+  public async Task In_development_unreadable_requests_are_still_client_errors(
+    string contentType,
+    string body,
+    int status
+  )
+  {
+    // Development makes request binding throw its errors rather than set them.
+    FakeConverter converter = new((_, _) => throw new InvalidOperationException("unreachable"));
+    await using var server = await RunningServer.StartAsync(converter, "--environment=Development");
+
+    using var response = await server.Client.PostAsync(
+      "/convert",
+      Content(body, contentType),
+      TestToken
+    );
+
+    await AssertProblemAsync(response, status, ConversionErrorKind.InvalidRequest);
+    await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task A_body_over_the_configured_limit_is_too_large_with_problem_details()
+  {
+    FakeConverter converter = new((_, _) => Task.FromResult<ConversionError?>(null));
+    // The command line feeds the same configuration as Kestrel__Limits__MaxRequestBodySize.
+    await using var server = await RunningServer.StartAsync(
+      converter,
+      "--Kestrel:Limits:MaxRequestBodySize=64"
+    );
+
+    using var small = await server.PostAsync("""{"html":"<p>x</p>"}""");
+    using var large = await server.PostAsync($$"""{"html":"<p>{{new string('x', 64)}}</p>"}""");
+
+    await Assert.That(small.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    var detail = await AssertProblemAsync(large, 413, ConversionErrorKind.InvalidRequest);
+    await Assert.That(detail).IsEqualTo("The request body is larger than the server accepts.");
+    await Assert.That(converter.Calls).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task An_unhandled_exception_before_the_first_byte_is_a_server_error_with_problem_details()
+  {
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter((_, _) => throw new InvalidOperationException("Internal state."))
+    );
+
+    using var response = await server.PostAsync("""{"html":"<p>x</p>"}""");
+
+    await AssertProblemAsync(response, 500, ConversionErrorKind.RenderFailed);
+    await Assert
+      .That(await response.Content.ReadAsStringAsync(TestToken))
+      .DoesNotContain("Internal state.")
+      .Because("exception details stay in the server's logs");
+  }
+
+  [Test]
+  public async Task A_canceled_conversion_answers_499_without_a_body()
+  {
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter(
+        (_, _) =>
+          Task.FromResult<ConversionError?>(
+            new ConversionError(ConversionErrorKind.Canceled, "The client left.")
+          )
+      )
+    );
+
+    using var response = await server.PostAsync("""{"html":"<p>x</p>"}""");
+
+    await Assert.That((int)response.StatusCode).IsEqualTo(499);
+    await Assert.That(response.Content.Headers.ContentType).IsNull();
+    await Assert.That(await response.Content.ReadAsStringAsync(TestToken)).IsEmpty();
+  }
+
+  [Test]
+  [Arguments("GET", "/convert", 405)]
+  [Arguments("POST", "/nowhere", 404)]
+  public async Task Requests_for_no_endpoint_get_problem_details_too(
+    string method,
+    string path,
+    int status
+  )
+  {
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter((_, _) => throw new InvalidOperationException("unreachable"))
+    );
+
+    using HttpRequestMessage request = new(new HttpMethod(method), path);
+    using var response = await server.Client.SendAsync(request, TestToken);
+
+    await AssertProblemAsync(response, status, ConversionErrorKind.InvalidRequest);
   }
 
   [Test]
@@ -242,6 +390,53 @@ public class ConvertEndpointTests
   }
 
   [Test]
+  [Arguments("1e12")]
+  [Arguments("-1e12")]
+  [Arguments("4294968")]
+  [Arguments("-4294968")]
+  [Arguments("1.7976931348623157e308")]
+  // Request bodies may carry numbers as strings, named literals included.
+  [Arguments("\"NaN\"")]
+  [Arguments("\"Infinity\"")]
+  [Arguments("\"-Infinity\"")]
+  public async Task Wait_timeouts_out_of_range_are_bad_requests_and_never_reach_the_converter(
+    string seconds
+  )
+  {
+    FakeConverter converter = new((_, _) => throw new InvalidOperationException("unreachable"));
+    await using var server = await RunningServer.StartAsync(converter);
+
+    using var response = await server.PostAsync(
+      $$$"""{"html":"<p>x</p>","options":{"waitForSignal":"ready","waitTimeoutSeconds":{{{seconds}}}}}"""
+    );
+
+    var detail = await AssertProblemAsync(response, 400, ConversionErrorKind.InvalidRequest);
+    await Assert
+      .That(detail)
+      .StartsWith("waitTimeoutSeconds must be between 0 and 4294967 seconds");
+    await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task The_longest_wait_timeout_reaches_the_converter()
+  {
+    PdfOptions? received = null;
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter(
+        (_, _) => Task.FromResult<ConversionError?>(null),
+        options => received = options
+      )
+    );
+
+    using var response = await server.PostAsync(
+      """{"html":"<p>x</p>","options":{"waitForSignal":"ready","waitTimeoutSeconds":4294967}}"""
+    );
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(received!.WaitTimeout).IsEqualTo(TimeSpan.FromSeconds(4_294_967));
+  }
+
+  [Test]
   public async Task Engine_limits_are_configurable_like_any_setting()
   {
     // Environment variables (ReportsEngine__Concurrency__MaxConcurrentConversions) and the command
@@ -276,6 +471,42 @@ public class ConvertEndpointTests
     var pdf = await response.Content.ReadAsByteArrayAsync(TestToken);
     await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
     await Assert.That(PdfInspector.HasEofMarker(pdf)).IsTrue();
+  }
+
+  /// <summary>
+  /// Asserts that <paramref name="response"/> is problem details with <paramref name="status"/> and
+  /// <paramref name="kind"/>, and returns its detail.
+  /// </summary>
+  private static async Task<string?> AssertProblemAsync(
+    HttpResponseMessage response,
+    int status,
+    ConversionErrorKind kind
+  )
+  {
+    await Assert.That((int)response.StatusCode).IsEqualTo(status);
+    await Assert
+      .That(response.Content.Headers.ContentType?.MediaType)
+      .IsEqualTo("application/problem+json");
+    using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestToken));
+    await Assert.That(problem.RootElement.GetProperty("status").GetInt32()).IsEqualTo(status);
+    await Assert
+      .That(problem.RootElement.GetProperty("kind").GetString())
+      .IsEqualTo(kind.ToString());
+    return problem.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
+  }
+
+  /// <summary>
+  /// A body with <paramref name="contentType"/>, or with no <c>Content-Type</c> at all.
+  /// </summary>
+  private static ByteArrayContent Content(string body, string? contentType)
+  {
+    ByteArrayContent content = new(Encoding.UTF8.GetBytes(body));
+    if (contentType is not null)
+    {
+      content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+    }
+
+    return content;
   }
 
   /// <summary>

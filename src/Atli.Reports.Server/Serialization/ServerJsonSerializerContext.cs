@@ -13,7 +13,6 @@ namespace Atli.Reports.Server.Serialization;
 [JsonSerializable(typeof(PdfOptionsRequest))]
 [JsonSerializable(typeof(MarginsRequest))]
 [JsonSerializable(typeof(HealthCheckResponse))]
-[JsonSerializable(typeof(ErrorResponse))]
 // Results.Problem writes ProblemDetails; without this, NativeAOT builds cannot serialize error responses.
 [JsonSerializable(typeof(ProblemDetails))]
-public sealed partial class ServerJsonSerializerContext : JsonSerializerContext;
+internal sealed partial class ServerJsonSerializerContext : JsonSerializerContext;

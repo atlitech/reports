@@ -145,8 +145,25 @@ public class HealthEndpointTests
     var ready = await GetHealthAsync(server, "/health/ready");
 
     await Assert.That(ready.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
+    await Assert
+      .That(ready.MediaType)
+      .IsEqualTo("application/json")
+      .Because("the health report is the body, not problem details");
     await Assert.That(ready.Checks["browser"].Status).IsEqualTo("Unhealthy");
     await Assert.That(ready.Checks["browser"].Description).Contains("does not exist");
+  }
+
+  [Test]
+  public async Task Liveness_reports_healthy_without_running_a_check()
+  {
+    await using var server = await RunningServer.StartAsync(converter: null);
+
+    var live = await GetHealthAsync(server, "/health/live");
+
+    await Assert.That(live.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(live.MediaType).IsEqualTo("application/json");
+    await Assert.That(live.Status).IsEqualTo("Healthy");
+    await Assert.That(live.Checks).IsEmpty();
   }
 
   private static async Task<HealthResponse> GetHealthAsync(RunningServer server, string path)
@@ -167,6 +184,7 @@ public class HealthEndpointTests
       );
     return new HealthResponse(
       response.StatusCode,
+      response.Content.Headers.ContentType?.MediaType,
       body.RootElement.GetProperty("status").GetString()!,
       checks
     );
@@ -174,6 +192,7 @@ public class HealthEndpointTests
 
   private sealed record HealthResponse(
     HttpStatusCode StatusCode,
+    string? MediaType,
     string Status,
     IReadOnlyDictionary<string, HealthCheckEntry> Checks
   );

@@ -6,6 +6,12 @@ namespace Atli.Reports.Server.Endpoints;
 
 public static partial class ConvertEndpoints
 {
+  /// <summary>
+  /// The longest signal wait the engine can time: .NET timers stop at 2^32 - 2 milliseconds, about
+  /// 49.7 days. Anything longer, which <see cref="TimeSpan"/> may not even hold, is a bad request.
+  /// </summary>
+  private const double MaxWaitTimeoutSeconds = 4_294_967;
+
   public static void MapConvertEndpoints(this WebApplication app)
   {
     app.MapPost("/convert", ConvertHtmlToPdf);
@@ -190,9 +196,21 @@ public static partial class ConvertEndpoints
       options.WaitForSignal = request.WaitForSignal;
     }
 
-    if (request.WaitTimeoutSeconds.HasValue)
+    if (request.WaitTimeoutSeconds is { } waitTimeoutSeconds)
     {
-      options.WaitTimeout = TimeSpan.FromSeconds(request.WaitTimeoutSeconds.Value);
+      // Negative values within range pass through: -0.001 is Timeout.InfiniteTimeSpan, and the engine
+      // rejects any other negative wait when the request waits for a signal.
+      if (
+        !double.IsFinite(waitTimeoutSeconds)
+        || Math.Abs(waitTimeoutSeconds) > MaxWaitTimeoutSeconds
+      )
+      {
+        error =
+          "waitTimeoutSeconds must be between 0 and 4294967 seconds (about 49 days), or -0.001 to wait until the request is canceled.";
+        return false;
+      }
+
+      options.WaitTimeout = TimeSpan.FromSeconds(waitTimeoutSeconds);
     }
 
     return true;

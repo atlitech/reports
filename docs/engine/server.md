@@ -17,9 +17,13 @@ The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOp
   is a `400`.
 - `generateTaggedPdf` asks for (`true`) or against (`false`) a tagged, accessible PDF. Omitted, the
   browser decides; current Chromium tags by default.
-- `waitTimeoutSeconds` defaults to 30. With `waitForSignal` set, `-0.001`
-  (`Timeout.InfiniteTimeSpan`) waits until the request is canceled, and other negative values are a
-  `400`.
+- `waitTimeoutSeconds` defaults to 30 and is at most 4294967 (about 49 days, the longest wait .NET
+  timers support). With `waitForSignal` set, `-0.001` (`Timeout.InfiniteTimeSpan`) waits until the
+  request is canceled, and other negative values are a `400`. A value beyond ±4294967, or one that
+  is not a finite number (`"NaN"`, `"Infinity"`), is a `400` either way.
+- The body must be one JSON object sent as `application/json`. Malformed JSON, a missing `html`, a
+  field of the wrong type, and a property given twice (`{"html": "a", "html": "b"}`, in any letter
+  case) are a `400`; another content type is a `415`.
 
 .NET apps can use [`Atli.Reports.Client`](../../src/Atli.Reports.Client/README.md) instead of
 calling the endpoint directly. It sends this request and maps the answers back to
@@ -30,24 +34,32 @@ calling the endpoint directly. It sends this request and maps the answers back t
 browser produces it (chunked transfer encoding), without being buffered in the server first.
 
 **Failures before the first PDF byte** are RFC 9457 problem details (`application/problem+json`)
-with an extra `kind` member holding the `ConversionErrorKind`:
+with an extra `kind` member holding the `ConversionErrorKind`. That includes requests the endpoint
+never sees, because their body could not be read, and unexpected server errors:
 
 | Kind | Status | Notes |
 | --- | --- | --- |
-| `InvalidRequest` | 400 Bad Request | Blank HTML, unknown orientation or paper size, incomplete custom paper size, blank signal name, negative signal timeout |
+| `InvalidRequest` | 400 Bad Request | A body that is not a conversion request (see above), blank HTML, unknown orientation or paper size, incomplete custom paper size, blank signal name, negative or out-of-range signal timeout |
+| `InvalidRequest` | 413 Content Too Large | The body is larger than `Kestrel:Limits:MaxRequestBodySize` (see [Configuration](#configuration)) |
+| `InvalidRequest` | 415 Unsupported Media Type | The body is not sent as `application/json` |
 | `SignalTimeout` | 422 Unprocessable Content | The document never called its signal; retrying the same document will not help |
 | `Busy` | 503 Service Unavailable | `Retry-After: 1`; the queue is full or the wait for a turn timed out |
 | `BrowserUnavailable` | 503 Service Unavailable | `Retry-After: 5`; the browser is restarting, missing, or the server is shutting down |
 | `Timeout` | 504 Gateway Timeout | A browser command, the load wait, or `ConversionTimeout` ran out |
-| `RenderFailed` | 500 Internal Server Error | The browser could not render or print (including rejected print options), or the page crashed |
+| `RenderFailed` | 500 Internal Server Error | The browser could not render or print (including rejected print options), or the page crashed; also an unexpected server error, whose details stay in the server's log |
 | `Canceled` | 499 (no body) | The client disconnected; nothing reaches it, the status only shows in logs |
+
+Any other error status, such as the `404` of an unknown path or the `405` of `GET /convert`, is
+problem details too, with the kind `Atli.Reports.Client` infers from a bare status (for example
+`InvalidRequest` for a `404`, `RenderFailed` for a `500`), so naming it changes nothing for the
+client.
 
 `SignalTimeout` deliberately differs from the 504 that `Atli.Reports.Blazor`'s `MapBlazorReport`
 uses: there the server renders its own component, so a missing signal is a server-side timeout;
 here the client sends the document, so it is a problem with the request.
 
-**Failures after the first PDF byte** (the browser dies mid-transfer, say) abort the connection.
-The client sees a broken response, never a truncated `200`.
+**Failures after the first PDF byte** (the browser dies mid-transfer, say, or the server fails
+unexpectedly) abort the connection. The client sees a broken response, never a truncated `200`.
 
 ## Health
 
@@ -103,7 +115,14 @@ reference](architecture.md#configuration-reference). The server's `appsettings.j
 - `ConversionTimeout: 00:01:00`, so overload ends in a clean `504` rather than a client timeout;
 - `Browser:NoSandbox: true` and `Browser:DisableDevShmUsage: true`, for containers.
 
-Request size is Kestrel's: 30 MB by default, configurable with `Kestrel__Limits__MaxRequestBodySize`.
+Request limits are Kestrel's, and the `Kestrel:Limits` section binds onto them, so they are
+configurable like any other setting:
+
+- `Kestrel__Limits__MaxRequestBodySize`, in bytes, caps the request body: 30,000,000 (about 30 MB)
+  by default. A larger body is a `413` with problem details.
+- The other `KestrelServerLimits` settings bind the same way, for example
+  `Kestrel__Limits__MaxRequestHeadersTotalSize`, `Kestrel__Limits__KeepAliveTimeout`, or
+  `Kestrel__Limits__Http2__MaxStreamsPerConnection`.
 
 ## Telemetry
 
@@ -126,8 +145,9 @@ Once the export is on, the other standard settings, such as `OTEL_BSP_SCHEDULE_D
 - **Traces**: every request except the `/health` probes, with the engine's conversion spans
   (`atli.reports.convert` and its stages) below `POST /convert`. See
   [the engine's telemetry](architecture.md#telemetry) for span names and attributes.
-- **Metrics**: ASP.NET Core and Kestrel (`http.server.request.duration` and friends), the .NET
-  runtime (`System.Runtime`: GC, thread pool, exceptions), and the engine (`atli.reports.*`).
+- **Metrics**: ASP.NET Core and Kestrel (`http.server.request.duration` and friends, without the
+  `/health` probes), the .NET runtime (`System.Runtime`: GC, thread pool, exceptions), and the
+  engine (`atli.reports.*`).
 - **Logs**: whatever the `Logging` configuration lets through, with formatted messages and scopes,
   correlated with the trace that wrote them.
 

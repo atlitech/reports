@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
 using Atli.Reports.Engine.Tests.Support;
@@ -92,6 +93,53 @@ public class TelemetryTests
     var received = collector.Received("/v1/traces");
     await Assert.That(received).Contains("InvalidRequest");
     await Assert.That(received).DoesNotContain("/health/live");
+  }
+
+  [Test]
+  public async Task Health_probes_record_no_request_duration()
+  {
+    // Every server in the test process publishes this instrument; none may measure a probe.
+    ConcurrentQueue<string> routes = new();
+    using MeterListener listener = new()
+    {
+      InstrumentPublished = (instrument, meterListener) =>
+      {
+        if (
+          instrument is
+          { Meter.Name: "Microsoft.AspNetCore.Hosting", Name: "http.server.request.duration" }
+        )
+        {
+          meterListener.EnableMeasurementEvents(instrument);
+        }
+      },
+    };
+    listener.SetMeasurementEventCallback<double>(
+      (_, _, tags, _) =>
+      {
+        foreach (var tag in tags)
+        {
+          if (tag is { Key: "http.route", Value: string route })
+          {
+            routes.Enqueue(route);
+          }
+        }
+      }
+    );
+    listener.Start();
+    await using var server = await RunningServer.StartAsync(converter: null);
+
+    using var live = await server.Client.GetAsync("/health/live", TestToken);
+    using var ready = await server.Client.GetAsync("/health/ready", TestToken);
+    using var conversion = await server.PostAsync("""{"html":" "}""");
+
+    var measured = await TestEngine.EventuallyAsync(
+      () => Task.FromResult(routes.Contains("/convert")),
+      TestEngine.GenerousTimeout
+    );
+    await Assert.That(measured).IsTrue().Because("other requests are measured");
+    await Assert
+      .That(routes.Where(route => route.StartsWith("/health", StringComparison.Ordinal)))
+      .IsEmpty();
   }
 
   private static Dictionary<string, object> ResourceOf(RunningServer server) =>

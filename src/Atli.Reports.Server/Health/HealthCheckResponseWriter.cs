@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Atli.Reports.Server.Serialization;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -8,37 +7,27 @@ public static class HealthCheckResponseWriter
 {
   public static Task WriteResponse(HttpContext context, HealthReport report)
   {
-    context.Response.ContentType = "application/json";
-
     Dictionary<string, HealthCheckEntry> checks = [];
 
     foreach (var entry in report.Entries)
     {
-      checks[entry.Key] = new HealthCheckEntry
-      {
-        Status = entry.Value.Status.ToString(),
-        Description = entry.Value.Description,
-      };
+      checks[entry.Key] = new HealthCheckEntry(
+        entry.Value.Status.ToString(),
+        entry.Value.Description
+      );
     }
 
-    HealthCheckResponse response = new() { Status = report.Status.ToString(), Checks = checks };
-
-    return JsonSerializer.SerializeAsync(
-      context.Response.Body,
-      response,
-      ServerJsonSerializerContext.Default.HealthCheckResponse
+    return context.Response.WriteAsJsonAsync(
+      new HealthCheckResponse(report.Status.ToString(), checks),
+      ServerJsonSerializerContext.Default.HealthCheckResponse,
+      cancellationToken: context.RequestAborted
     );
   }
 }
 
-public sealed class HealthCheckResponse
-{
-  public required string Status { get; init; }
-  public required Dictionary<string, HealthCheckEntry> Checks { get; init; }
-}
+internal sealed record HealthCheckResponse(
+  string Status,
+  Dictionary<string, HealthCheckEntry> Checks
+);
 
-public sealed class HealthCheckEntry
-{
-  public required string Status { get; init; }
-  public string? Description { get; init; }
-}
+internal sealed record HealthCheckEntry(string Status, string? Description);
