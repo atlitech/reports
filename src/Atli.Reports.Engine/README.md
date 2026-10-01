@@ -60,9 +60,14 @@ builder.Services.AddReportsEngine(
 );
 builder
   .Services.AddHealthChecks()
-  .AddReportsEngineBrowserCheck(tags: ["live", "ready"])
+  .AddReportsEngineBrowserCheck(tags: ["ready"])
   .AddReportsEngineConversionCheck(tags: ["ready"]);
 ```
+
+The browser check is unhealthy, with the reason, while the most recent browser launch has failed;
+the engine retries the launch in the background until one succeeds, so readiness recovers without
+waiting for a conversion. Keep it out of liveness probes: a restart does not repair a browser that
+cannot start.
 
 ```json
 {

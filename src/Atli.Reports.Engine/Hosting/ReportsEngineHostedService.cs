@@ -30,7 +30,8 @@ internal sealed class ReportsEngineHostedService(
     }
     catch (BrowserUnavailableException exception)
     {
-      // A browser that cannot start must not stop the host: conversions report it instead.
+      // A browser that cannot start must not stop the host. The browser health check reports the
+      // failure, and the engine keeps retrying the launch in the background.
       LogMessages.WarmUpFailed(logger, exception);
     }
   }

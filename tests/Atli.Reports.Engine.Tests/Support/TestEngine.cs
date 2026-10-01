@@ -16,7 +16,10 @@ internal static class TestEngine
 {
   public static readonly TimeSpan GenerousTimeout = TimeSpan.FromSeconds(30);
 
-  public static ServiceProvider Create(Action<ReportsEngineOptions>? configure = null)
+  public static ServiceProvider Create(
+    Action<ReportsEngineOptions>? configure = null,
+    Action<IServiceCollection>? configureServices = null
+  )
   {
     ServiceCollection services = new();
     services.AddReportsEngine(options =>
@@ -24,6 +27,7 @@ internal static class TestEngine
       ConfigureForTests(options);
       configure?.Invoke(options);
     });
+    configureServices?.Invoke(services);
     return services.BuildServiceProvider();
   }
 

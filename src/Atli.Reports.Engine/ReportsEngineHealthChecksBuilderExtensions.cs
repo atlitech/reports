@@ -24,14 +24,30 @@ public static class ReportsEngineHealthChecksBuilderExtensions
   public const string ConversionCheckName = "reports_engine_conversions";
 
   /// <summary>
-  /// Adds a check that reports healthy when the configured browser executable exists, and unhealthy
-  /// when it cannot be found. Suited to liveness and readiness probes.
+  /// Adds a check that reports whether the engine can launch its browser. It reports unhealthy while
+  /// the most recent launch has failed, with the reason (the browser exited at once, did not report
+  /// its DevTools endpoint in time, or could not be found), until a launch succeeds; and while the
+  /// engine shuts down. It reports healthy while the browser runs and, when none runs (before the
+  /// first conversion, say), as long as the browser executable exists. Suited to readiness probes.
   /// </summary>
   /// <param name="builder">The health checks builder.</param>
   /// <param name="name">The name of the check. Defaults to <see cref="BrowserCheckName"/>.</param>
   /// <param name="failureStatus">The status to report when the check fails. <see langword="null"/> reports <see cref="HealthStatus.Unhealthy"/>.</param>
-  /// <param name="tags">Tags used to filter the check, for example <c>["live", "ready"]</c>.</param>
+  /// <param name="tags">Tags used to filter the check, for example <c>["ready"]</c>.</param>
   /// <returns><paramref name="builder"/>, for chaining.</returns>
+  /// <remarks>
+  /// <para>
+  /// After a failed launch, the engine retries in the background (after 1 second, doubling up to 30
+  /// seconds) until a launch succeeds, so an instance that a failing readiness probe keeps from
+  /// getting conversions still recovers once the cause goes away.
+  /// </para>
+  /// <para>
+  /// Keep the check out of liveness probes: restarting the host does not repair a browser that
+  /// cannot start, and a slow start under load would get a healthy host killed. The failure reason
+  /// quotes the browser's output, reduced to one line of at most 500 characters with URL credentials
+  /// and secret-looking parameters masked.
+  /// </para>
+  /// </remarks>
   public static IHealthChecksBuilder AddReportsEngineBrowserCheck(
     this IHealthChecksBuilder builder,
     string name = BrowserCheckName,
@@ -40,7 +56,7 @@ public static class ReportsEngineHealthChecksBuilderExtensions
   )
   {
     ArgumentNullException.ThrowIfNull(builder);
-    return builder.AddCheck<BrowserExecutableHealthCheck>(name, failureStatus, tags ?? []);
+    return builder.AddCheck<BrowserHealthCheck>(name, failureStatus, tags ?? []);
   }
 
   /// <summary>

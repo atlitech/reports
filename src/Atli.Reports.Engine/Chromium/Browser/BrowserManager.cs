@@ -31,6 +31,14 @@ internal interface IBrowserProvider
 /// launches at a time; every conversion that needs it waits for the same launch.
 /// </para>
 /// <para>
+/// A failed launch is remembered, for the health check, until a launch succeeds, and it starts a
+/// background retry loop: after <see cref="ReportsEngineBrowserOptions.LaunchRetryDelay"/>, doubling
+/// up to <see cref="ReportsEngineBrowserOptions.MaxLaunchRetryDelay"/>, until a launch succeeds or
+/// shutdown starts. Without it, an engine whose readiness probe fails would get no conversions, and
+/// so no launch, ever again. The retries lease the browser like warm-up does, so they never start a
+/// second launch beside a conversion's: whichever comes first launches, and the other waits for it.
+/// </para>
+/// <para>
 /// Closing a browser kills its process tree, waits for it to exit, and then deletes its temporary
 /// profile directory.
 /// </para>
@@ -46,8 +54,12 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   private readonly List<BrowserInstance> _retired = [];
   private readonly List<Task> _closing = [];
   private readonly CancellationTokenSource _stopping = new();
+  private readonly CancellationTokenSource _retryStopping = new();
   private BrowserInstance? _current;
   private Task<BrowserInstance>? _launch;
+  private Task? _retrying;
+  private string? _launchFailure;
+  private int _failedLaunches;
   private TaskCompletionSource? _drained;
   private Task? _shutdown;
   private ITimer? _idleTimer;
@@ -86,6 +98,23 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   /// The number of browsers launched so far. Exposed for tests.
   /// </summary>
   internal int Launches => Volatile.Read(ref _generation);
+
+  /// <summary>
+  /// What the engine knows about its browser right now, for the health check.
+  /// </summary>
+  internal BrowserStatus GetStatus()
+  {
+    lock (_lock)
+    {
+      return new BrowserStatus(
+        ShuttingDown: _shutdown is not null,
+        Running: _current is { Retired: false, IsAlive: true } current ? current : null,
+        LaunchFailure: _launchFailure,
+        FailedLaunches: _failedLaunches,
+        Retrying: _retrying is not null
+      );
+    }
+  }
 
   public async ValueTask<IConversionPage> OpenPageAsync(CancellationToken cancellationToken)
   {
@@ -138,6 +167,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   {
     await ShutdownAsync(_options.ShutdownTimeout, CancellationToken.None);
     _stopping.Dispose();
+    _retryStopping.Dispose();
   }
 
   public void Dispose()
@@ -342,7 +372,13 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
 
     // A child of the conversion whose page needed the browser; a trace of its own otherwise.
     var generation = Interlocked.Increment(ref _generation);
-    using var activity = EngineActivities.StartBrowserLaunch(generation);
+    int attempt;
+    lock (_lock)
+    {
+      attempt = _failedLaunches + 1;
+    }
+
+    using var activity = EngineActivities.StartBrowserLaunch(generation, attempt);
 
     BrowserInstance browser;
     try
@@ -357,28 +393,42 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     }
     catch (Exception exception)
     {
+      var failure =
+        exception as BrowserUnavailableException
+        ?? new BrowserUnavailableException(
+          exception is OperationCanceledException
+            ? "The reports engine is shutting down."
+            : $"The browser could not be started: {exception.Message}",
+          exception
+        );
+
+      // Before the retry loop can announce the next attempt.
+      EngineActivities.Failed(activity, exception);
+      activity?.AddException(exception);
+      LogMessages.BrowserLaunchFailed(_logger, exception, generation, attempt);
       lock (_lock)
       {
         _launch = null;
+
+        // A launch that shutdown cancelled says nothing about whether the browser can start.
+        if (_shutdown is null && exception is not OperationCanceledException)
+        {
+          _failedLaunches++;
+          _launchFailure = failure.Message;
+          ScheduleRetryLocked();
+        }
       }
 
-      EngineActivities.Failed(activity, exception);
-      activity?.AddException(exception);
-      LogMessages.BrowserLaunchFailed(_logger, exception);
       if (exception is BrowserUnavailableException)
       {
         throw;
       }
 
-      throw new BrowserUnavailableException(
-        exception is OperationCanceledException
-          ? "The reports engine is shutting down."
-          : $"The browser could not be started: {exception.Message}",
-        exception
-      );
+      throw failure;
     }
 
     activity?.SetTag(EngineActivities.Tags.BrowserProcessId, browser.ProcessId);
+    int failedLaunches;
     lock (_lock)
     {
       _launch = null;
@@ -392,9 +442,16 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       }
 
       _current = browser;
+      failedLaunches = _failedLaunches;
+      _failedLaunches = 0;
+      _launchFailure = null;
     }
 
     _metrics.BrowserLaunched();
+    if (failedLaunches > 0)
+    {
+      LogMessages.BrowserLaunchRecovered(_logger, generation, failedLaunches);
+    }
 
     // The browser outlives this launch: its crash is not part of whatever trace launched it.
     _ = WithoutExecutionContext(() =>
@@ -406,6 +463,92 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       )
     );
     return browser;
+  }
+
+  private void ScheduleRetryLocked()
+  {
+    if (_shutdown is not null || _retrying is not null)
+    {
+      return;
+    }
+
+    // The retries outlive the launch that failed: they trace and log on their own.
+    _retrying = WithoutExecutionContext(RetryLaunchAsync);
+  }
+
+  /// <summary>
+  /// Retries a failed launch until one succeeds (this loop's or a conversion's) or shutdown starts.
+  /// </summary>
+  private async Task RetryLaunchAsync()
+  {
+    // Leave the caller's lock before doing any work; the caller stores this task first.
+    await Task.Yield();
+
+    var stopping = _retryStopping.Token;
+    var delay = _options.LaunchRetryDelay;
+    try
+    {
+      while (true)
+      {
+        int attempt;
+        lock (_lock)
+        {
+          if (TryEndRetriesLocked())
+          {
+            return;
+          }
+
+          attempt = _failedLaunches + 1;
+        }
+
+        LogMessages.BrowserLaunchRetryScheduled(_logger, delay, attempt);
+        await Task.Delay(delay, _timeProvider, stopping);
+        lock (_lock)
+        {
+          // A conversion may have launched the browser in the meantime.
+          if (TryEndRetriesLocked())
+          {
+            return;
+          }
+        }
+
+        try
+        {
+          // Leased like warm-up: a launch already under way (a conversion's) is waited for, not
+          // duplicated.
+          Release(await AcquireAsync(stopping, countConversion: false));
+          delay = _options.LaunchRetryDelay;
+        }
+        catch (BrowserUnavailableException)
+        {
+          // The launch logged and traced its failure.
+          delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, _options.MaxLaunchRetryDelay.Ticks));
+        }
+      }
+    }
+    catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+    {
+      // Shutdown started.
+      lock (_lock)
+      {
+        _retrying = null;
+      }
+    }
+  }
+
+  /// <summary>
+  /// Ends the retry loop, in the same lock that decides it, unless the last launch failed and the
+  /// engine is not shutting down. A launch that fails after this sees no loop and starts a new one.
+  /// </summary>
+  private bool TryEndRetriesLocked()
+  {
+    if (_shutdown is null && _launchFailure is not null)
+    {
+      return false;
+    }
+
+    _retrying = null;
+    return true;
   }
 
   /// <summary>
@@ -490,6 +633,19 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   private async Task ShutdownCoreAsync(TimeSpan drainTimeout, CancellationToken cancellationToken)
   {
     await Task.Yield();
+
+    // Nothing may start a browser from now on: stop retrying failed launches at once, even mid-wait.
+    await _retryStopping.CancelAsync();
+    Task? retrying;
+    lock (_lock)
+    {
+      retrying = _retrying;
+    }
+
+    if (retrying is not null)
+    {
+      await retrying.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+    }
 
     Task drained;
     lock (_lock)
