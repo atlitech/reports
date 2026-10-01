@@ -8,11 +8,6 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
-    <!--
-      Aspire.Hosting 13.0, the floor these tests run against, brings MessagePack 2.5.192, which has
-      known vulnerabilities. The tests never start the RPC that uses it; the pin keeps the audit clean.
-    -->
-    <PackageReference Include="MessagePack" />
   </ItemGroup>
 
   <ItemGroup>

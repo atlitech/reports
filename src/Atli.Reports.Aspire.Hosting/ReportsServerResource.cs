@@ -27,12 +27,10 @@ public sealed class ReportsServerResource([ResourceName] string name)
   /// </summary>
   internal const string HttpEndpointName = "http";
 
-  private EndpointReference? _primaryEndpoint;
-
   /// <summary>
   /// The server's HTTP endpoint, which serves <c>/convert</c> and the <c>/health</c> probes.
   /// </summary>
-  public EndpointReference PrimaryEndpoint => _primaryEndpoint ??= new(this, HttpEndpointName);
+  public EndpointReference PrimaryEndpoint => field ??= new(this, HttpEndpointName);
 
   /// <summary>
   /// The host of <see cref="PrimaryEndpoint"/>.
