@@ -487,7 +487,7 @@ aspire stop
 
 | Resource | What it is |
 | --- | --- |
-| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker). The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
+| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker), and the dashboard links its OpenAPI document. The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
 | `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |

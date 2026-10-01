@@ -38,6 +38,7 @@ In the app, `builder.AddReportsClient("reports")` from `Atli.Reports.Client` reg
 - marks the resource healthy once `/health/ready` answers `200`; the server answers `503` while its
   browser fails to launch, so `WaitFor` waits for a server that can convert;
 - sends the server's logs, metrics, and traces to the dashboard over OTLP;
+- links the server's OpenAPI document, `/openapi/v1.json`, in the dashboard;
 - adds a `Convert a test page` dashboard command, which converts a one-page document and logs the
   PDF's size and the time it took.
 

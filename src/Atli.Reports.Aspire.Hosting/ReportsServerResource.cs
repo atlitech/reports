@@ -28,7 +28,8 @@ public sealed class ReportsServerResource([ResourceName] string name)
   internal const string HttpEndpointName = "http";
 
   /// <summary>
-  /// The server's HTTP endpoint, which serves <c>/convert</c> and the <c>/health</c> probes.
+  /// The server's HTTP endpoint, which serves <c>/convert</c>, its OpenAPI document
+  /// (<c>/openapi/v1.json</c>), and the <c>/health</c> probes.
   /// </summary>
   public EndpointReference PrimaryEndpoint => field ??= new(this, HttpEndpointName);
 
