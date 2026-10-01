@@ -1,0 +1,109 @@
+name: chrome-headless-shell update
+
+# Daily, proposes the newest stable chrome-headless-shell for the server image. When Chrome for
+# Testing's stable channel is newer than the version src/Atli.Reports.Server/Dockerfile pins (never
+# older), and both downloads the image needs (linux64 and linux-arm64) exist, it commits the new pin
+# on top of main to the automation/chrome-headless-shell branch, replacing what the branch had, and
+# proposes it for review. Merging the change runs server-image-refresh.yml, which rebuilds the
+# newest release's image with the new browser.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-headless-shell-bump
+  cancel-in-progress: false
+
+env:
+  BRANCH: automation/chrome-headless-shell
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Compare with Chrome for Testing
+        id: check
+        run: |
+          pinned="$(.github/scripts/chrome-headless-shell.sh pinned)"
+          stable="$(.github/scripts/chrome-headless-shell.sh stable)"
+          echo "Pinned: $pinned. Chrome for Testing stable: $stable."
+          echo "from=$pinned" >> "$GITHUB_OUTPUT"
+          echo "to=$stable" >> "$GITHUB_OUTPUT"
+          case "$(.github/scripts/chrome-headless-shell.sh compare "$stable" "$pinned")" in
+            newer) ;;
+            same)
+              echo "::notice::The server image already pins the stable chrome-headless-shell, $pinned."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            *)
+              echo "::notice::Chrome for Testing's stable $stable is older than the pinned $pinned, and the pin never moves back."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          status=0
+          .github/scripts/chrome-headless-shell.sh downloadable "$stable" || status=$?
+          case "$status" in
+            0) echo "update=true" >> "$GITHUB_OUTPUT" ;;
+            1)
+              echo "::notice::chrome-headless-shell $stable is not downloadable for both linux64 and linux-arm64 yet; the next run checks again."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Commit the new pin
+        if: steps.check.outputs.update == 'true'
+        env:
+          FROM: ${{ steps.check.outputs.from }}
+          TO: ${{ steps.check.outputs.to }}
+        run: |
+          .github/scripts/chrome-headless-shell.sh pin "$TO"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet --all \
+            --message "build(server): chrome-headless-shell $FROM → $TO" \
+            --message "Chrome for Testing's stable channel is at $TO, and its linux64 and linux-arm64 chrome-headless-shell downloads exist. Merging this rebuilds the newest release's server image with it (.github/workflows/server-image-refresh.yml)."
+          git show --stat HEAD
+
+      # Force-pushed, so the branch always holds one commit on top of the current main. It is left
+      # alone when it already has exactly that content, so an open pull request is not re-run daily.
+      - name: Push the branch
+        id: push
+        if: steps.check.outputs.update == 'true'
+        env:
+          # The token that writes the branch; the pull request step below uses the same one.
+          TOKEN: ${{ github.token }}
+        run: |
+          credentials="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$credentials"
+          auth="AUTHORIZATION: basic $credentials"
+          if git -c "http.extraheader=$auth" fetch --quiet --depth=1 origin "refs/heads/$BRANCH" 2>/dev/null &&
+            [ "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$(git rev-parse 'HEAD^{tree}')" ]; then
+            echo "$BRANCH already has this change on top of main."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            git -c "http.extraheader=$auth" push --force origin "HEAD:refs/heads/$BRANCH"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Proposing the change for review: PENDING. How the pull request is opened (a GitHub App token,
+      # the repository setting that lets Actions create pull requests, or an issue with a compare
+      # link) is not decided yet. Whichever it is, it uses the same token as the push step, so that
+      # pull request checks run, and it must also run when the branch was already up to date
+      # (steps.push.outputs.pushed == 'false'), in case the pull request was closed.
