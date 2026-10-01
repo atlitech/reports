@@ -1,5 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -10,15 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BlazorReports.Components\BlazorReports.Components.csproj"/>
+    <ProjectReference Include="..\BlazorReports.Components\BlazorReports.Components.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="OneOf" VersionOverride="3.*" />
   </ItemGroup>
-
 </Project>

@@ -217,13 +217,12 @@ internal sealed class BrowserFactory(
     watcher.Created += CreatedHandler;
 
     // Register the CancellationToken's callback
-    var callback = cts.Token.Register(
-      () =>
-        tcs.TrySetException(
-          new TimeoutException(
-            $"A timeout of 10 seconds exceeded, the file '{devToolsActivePortFile}' did not exist"
-          )
+    var callback = cts.Token.Register(() =>
+      tcs.TrySetException(
+        new TimeoutException(
+          $"A timeout of 10 seconds exceeded, the file '{devToolsActivePortFile}' did not exist"
         )
+      )
     );
 
     try

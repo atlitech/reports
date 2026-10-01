@@ -1,17 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
-
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-
   <ItemGroup>
-    <SupportedPlatform Include="browser"/>
+    <SupportedPlatform Include="browser" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web"  />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
   </ItemGroup>
-
 </Project>
