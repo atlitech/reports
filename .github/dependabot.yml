@@ -9,9 +9,12 @@ updates:
       github-actions:
         patterns: [ "*" ]
 
-  # Keeps the server image's base images (dotnet/sdk and dotnet/runtime-deps) current. They share
-  # Ubuntu 24.04 so the NativeAOT binary runs against the glibc it was linked with, so they move
-  # together in one pull request.
+  # Keeps the server image's base images (dotnet/sdk and dotnet/runtime-deps) current. The Dockerfile
+  # pins each as tag@digest (the multi-arch index digest), and Dependabot updates the digest when
+  # Microsoft republishes the tag (and the tag itself for a newer version), on every FROM line that
+  # uses the image. They share Ubuntu 24.04 so the NativeAOT binary runs against the glibc it was
+  # linked with, so they move together in one pull request. The chrome-headless-shell version is not
+  # a Docker image; .github/workflows/chrome-headless-shell-bump.yml updates it.
   - package-ecosystem: docker
     directory: /src/Atli.Reports.Server
     schedule:
