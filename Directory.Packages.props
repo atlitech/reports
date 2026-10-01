@@ -5,7 +5,7 @@
   <ItemGroup>
     <PackageVersion Include="OneOf" Version="3.0.271" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="9.0.3" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
     <PackageVersion Include="BlazorMonaco" Version="3.3.0" />
@@ -13,11 +13,13 @@
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup Label="Atli.Reports.Engine">
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     <PackageVersion
       Include="Microsoft.Extensions.Options.ConfigurationExtensions"
       Version="10.0.12"
     />
+    <PackageVersion Include="TUnit" Version="1.72.10" />
   </ItemGroup>
 </Project>
