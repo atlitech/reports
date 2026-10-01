@@ -39,9 +39,12 @@ public static class ReportsServerApplication
     });
     builder.Services.AddProblemDetails();
 
+    // Both checks gate readiness only. A browser that cannot start takes the server out of rotation
+    // while the engine retries the launch in the background; restarting the process would not repair
+    // it, so liveness asks no more than that the server answers.
     builder
       .Services.AddHealthChecks()
-      .AddReportsEngineBrowserCheck("browser_executable", tags: ["live", "ready"])
+      .AddReportsEngineBrowserCheck("browser", tags: ["ready"])
       .AddReportsEngineConversionCheck("conversion_health", tags: ["ready"]);
 
     builder.AddServerTelemetry();

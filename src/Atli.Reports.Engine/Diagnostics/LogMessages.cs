@@ -104,8 +104,17 @@ internal static partial class LogMessages
   )]
   public static partial void BrowserLaunched(ILogger logger, int generation, int processId);
 
-  [LoggerMessage(EventId = 301, Level = LogLevel.Error, Message = "The browser failed to start")]
-  public static partial void BrowserLaunchFailed(ILogger logger, Exception exception);
+  [LoggerMessage(
+    EventId = 301,
+    Level = LogLevel.Error,
+    Message = "Browser {Generation} failed to start (attempt {Attempt})"
+  )]
+  public static partial void BrowserLaunchFailed(
+    ILogger logger,
+    Exception exception,
+    int generation,
+    int attempt
+  );
 
   [LoggerMessage(
     EventId = 302,
@@ -160,9 +169,31 @@ internal static partial class LogMessages
   [LoggerMessage(
     EventId = 307,
     Level = LogLevel.Warning,
-    Message = "Warming up the browser failed; the next conversion will try again"
+    Message = "Warming up the browser failed; the engine retries the launch in the background"
   )]
   public static partial void WarmUpFailed(ILogger logger, Exception exception);
+
+  [LoggerMessage(
+    EventId = 309,
+    Level = LogLevel.Information,
+    Message = "Retrying the browser launch in {Delay} (attempt {Attempt})"
+  )]
+  public static partial void BrowserLaunchRetryScheduled(
+    ILogger logger,
+    TimeSpan delay,
+    int attempt
+  );
+
+  [LoggerMessage(
+    EventId = 310,
+    Level = LogLevel.Information,
+    Message = "Browser {Generation} started after {FailedLaunches} failed launch(es); the engine can convert again"
+  )]
+  public static partial void BrowserLaunchRecovered(
+    ILogger logger,
+    int generation,
+    int failedLaunches
+  );
 
   // Pages (400s)
 

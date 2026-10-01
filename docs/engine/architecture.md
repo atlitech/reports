@@ -18,6 +18,7 @@ Code map (all under `src/Atli.Reports.Engine/`):
 | The conversion flow and error mapping | `Conversion/HtmlToPdfConverter.cs`, `ConversionErrors.cs` |
 | PDF streaming | `Pdf/ChromiumPdfGenerator.cs` |
 | Host integration (warm-up, drain on stop) | `Hosting/ReportsEngineHostedService.cs` |
+| Health checks: browser launch, recent conversions | `Health/BrowserHealthCheck.cs`, `ConversionHealthCheck.cs` |
 | Telemetry names (public) | `ReportsEngineTelemetry.cs` |
 | Traces | `Diagnostics/EngineActivities.cs` |
 | Metrics | `Diagnostics/EngineMetrics.cs` |
@@ -50,8 +51,22 @@ Code map (all under `src/Atli.Reports.Engine/`):
 **One long-lived process.** `BrowserManager` owns the engine's browser. It launches lazily on the
 first conversion, or at host start-up with `Browser:WarmUpOnStartup`. Only one launch runs at a
 time: every conversion that needs the browser waits for the same launch. A failed launch is
-reported to the conversions waiting for it (`BrowserUnavailable`) and retried by the next one; it
-never stops the host.
+reported to the conversions waiting for it (`BrowserUnavailable`); it never stops the host.
+
+**Failed launches and readiness.** The engine remembers why the most recent launch failed (the
+browser exited at once, did not report its DevTools endpoint within `Browser:StartupTimeout`, or
+could not be found or connected to) until a launch succeeds, and the browser health check
+(`AddReportsEngineBrowserCheck`) reports it as unhealthy with that reason. Before the first launch
+the check is healthy as long as the executable exists, so lazy start keeps working; while a
+browser runs, it is healthy. Because an unhealthy readiness probe stops the traffic that would
+otherwise launch the browser again, a failed launch also starts a background retry loop: after 1
+second, doubling up to 30 seconds, until a launch succeeds (the loop's or a conversion's) or
+shutdown starts. The loop leases the browser the way warm-up does, so it never starts a second
+launch beside a conversion's: whichever asks first launches, and the other waits for that launch.
+Shutdown cancels the loop at once, even in the middle of a wait. The check's description quotes the
+browser's output, so it is reduced to one line of at most 500 characters, with URL credentials,
+DevTools target ids, and secret-looking parameters masked. Keep the check out of liveness probes:
+a restart does not repair a browser that cannot start.
 
 **Launching.** The browser starts with `--remote-debugging-port=0` and a fresh profile directory
 (`$TMPDIR/atli-reports-<guid>`). The engine reads the DevTools endpoint from the browser's standard
@@ -242,8 +257,9 @@ of it, in this order:
 
 A browser launch is a child of the `page.open` span of the conversion that needed it; conversions
 that arrive during the launch wait for the same launch inside their own `page.open`. The launch at
-host start-up (`Browser:WarmUpOnStartup`) and the background launch that replaces a browser retired
-for its conversion count have no parent: they are traces of their own. Work that outlives a
+host start-up (`Browser:WarmUpOnStartup`), the background launch that replaces a browser retired
+for its conversion count, and the background retries of a failed launch have no parent: they are
+traces of their own. Work that outlives a
 conversion (the crash watcher, the idle timer, the background launch) does not run in that
 conversion's execution context, so its logs are not attributed to it.
 
@@ -261,6 +277,7 @@ Attributes:
 | `atli.reports.page.wait_for` | `page.wait` | `load` or `signal` |
 | `atli.reports.browser.generation` | `page.open`, `browser.launch` | Which browser (1 for the first one launched) served the conversion or was launched |
 | `atli.reports.browser.pid` | `browser.launch` | The browser's process id |
+| `atli.reports.browser.launch.attempt` | `browser.launch` | Launches in a row, counting the failed ones before this one: 1 unless the previous launch failed |
 | `error.type` | `browser.launch` | The exception type, when the launch failed |
 
 **Failures.** A failed conversion's span has the error status, with the `ConversionError` message
@@ -277,9 +294,10 @@ browser, with `atli.reports.browser.generation` and `atli.reports.browser.recycl
 
 **Browser lifecycle logs.** The rest of the browser's lifecycle is in structured log events
 (category `Atli.Reports.Engine.*`), which an OpenTelemetry logging provider exports with the
-current trace context: 300 browser started, 301 launch failed, 302 recycling (with the reason), 303
-crashed or disconnected, 304 closed, 305 close failed, 306 shutdown drain timed out, 307 warm-up
-failed, 308 idle close; 900 and 901 for failed conversions.
+current trace context: 300 browser started, 301 launch failed (with the attempt), 302 recycling (with
+the reason), 303 crashed or disconnected, 304 closed, 305 close failed, 306 shutdown drain timed
+out, 307 warm-up failed, 308 idle close, 309 launch retry scheduled (with the delay and the
+attempt), 310 started again after failed launches; 900 and 901 for failed conversions.
 
 ### Metrics
 
@@ -319,7 +337,7 @@ All keys live under the `ReportsEngine` section (environment variables use `__`,
 | `Browser:ExtraArguments:N` | none | Extra command-line switches, after the engine's own |
 | `Browser:StartupTimeout` | `00:00:30` | Time for the browser to report its endpoint |
 | `Browser:CommandTimeout` | `00:00:30` | Time per DevTools command; also bounds the load wait and printing |
-| `Browser:WarmUpOnStartup` | `false` | Launch the browser with the host |
+| `Browser:WarmUpOnStartup` | `false` | Launch the browser with the host (a failed launch is retried in the background either way) |
 | `Browser:MaxConversionsPerProcess` | `1000` | Recycle after this many conversions; `0` never |
 | `Browser:MaxProcessLifetime` | `01:00:00` | Recycle after this long; infinite (`-00:00:00.001`) never |
 | `Browser:IdleTimeout` | infinite | Close the browser after this long without conversions |

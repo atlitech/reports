@@ -72,8 +72,10 @@ public sealed class ReportsEngineBrowserOptions
   /// <para>
   /// The engine runs one long-lived browser process for all conversions. By default it starts on
   /// first use, so the first conversion pays the browser's start-up time. Warming up moves that cost
-  /// to host start-up. A browser that fails to start is logged and retried on the next conversion;
-  /// it does not stop the host.
+  /// to host start-up. A browser that fails to start does not stop the host: the failure is logged,
+  /// the engine's browser health check reports it, and the engine retries the launch in the
+  /// background (after 1 second, doubling up to 30 seconds) until one succeeds. The same happens
+  /// whenever a launch fails, whether warm-up or a conversion started it.
   /// </para>
   /// <para>
   /// Warm-up runs from a hosted service, so it needs a host (for example a
@@ -126,6 +128,19 @@ public sealed class ReportsEngineBrowserOptions
   /// the wait.
   /// </remarks>
   public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+  /// <summary>
+  /// How long the engine waits before it retries a failed browser launch in the background. Each
+  /// further failure doubles the wait, up to <see cref="MaxLaunchRetryDelay"/>; a successful launch
+  /// resets it. Not bound from configuration; tests shorten it.
+  /// </summary>
+  internal TimeSpan LaunchRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
+
+  /// <summary>
+  /// The longest wait between background retries of a failed browser launch. Not bound from
+  /// configuration; tests shorten it.
+  /// </summary>
+  internal TimeSpan MaxLaunchRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
 
   /// <summary>
   /// How many PDF bytes to request from the browser per read. Not bound from configuration; tests

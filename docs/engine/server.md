@@ -51,9 +51,46 @@ The client sees a broken response, never a truncated `200`.
 
 ## Health
 
-- `GET /health/live`: the browser executable exists.
-- `GET /health/ready`: the executable exists and recent conversions mostly succeed (busy, canceled,
-  and invalid requests do not count).
+- `GET /health/live`: the server is up and answering. It runs no engine check: restarting the
+  process does not repair a browser that cannot start, and a browser that is slow to start under
+  load must not get a working server killed.
+- `GET /health/ready`: the server can take conversions. It answers `200` when both of its checks
+  are healthy and `503` otherwise:
+  - `browser`: whether the engine can launch its browser. Unhealthy while the most recent launch
+    has failed (the browser exited at once, for example because a shared library is missing, or did
+    not report its DevTools endpoint within `Browser:StartupTimeout`), with the reason, until a
+    launch succeeds. Healthy while the browser runs. Before the first launch (when
+    `Browser:WarmUpOnStartup` is off) and after the browser closed (idle, recycled, crashed), healthy
+    as long as the executable the next launch would start exists.
+  - `conversion_health`: unhealthy when recent conversions mostly failed (busy, canceled, and
+    invalid requests do not count).
+
+A failed launch does not keep the server out of rotation for good. The engine retries the launch in
+the background, after 1 second and then doubling up to 30 seconds, until one succeeds, so readiness
+recovers on its own once the cause is fixed, without waiting for a conversion. A retry never runs
+beside a conversion's own launch: only one launch runs at a time. Shutdown stops the retries at
+once. Each attempt is an `atli.reports.browser.launch` span (with
+`atli.reports.browser.launch.attempt`) and logs event 301 when it fails and 309 before the next
+retry; event 310 marks the recovery.
+
+The body reports every check:
+
+```json
+{
+  "status": "Unhealthy",
+  "checks": {
+    "browser": {
+      "status": "Unhealthy",
+      "description": "The browser failed to start (3 failed launch(es) in a row); retrying in the background. The browser exited with code 127 before it reported its DevTools endpoint. Browser output: /opt/chrome-headless-shell/chrome-headless-shell: error while loading shared libraries: libnss3.so: cannot open shared object file: No such file or directory"
+    },
+    "conversion_health": { "status": "Healthy", "description": "No conversions yet." }
+  }
+}
+```
+
+The reason quotes the browser's output, and health endpoints are usually reachable without
+authentication, so the check reduces it to one line of at most 500 characters and masks URL
+credentials, DevTools target ids, and secret-looking parameters (`token=`, `--password=`, ...).
 
 ## Configuration
 

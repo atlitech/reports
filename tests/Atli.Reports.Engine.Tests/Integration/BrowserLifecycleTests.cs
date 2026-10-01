@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.Versioning;
 using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Tests.Support;
@@ -366,50 +365,5 @@ public class BrowserLifecycleTests
     {
       return true;
     }
-  }
-
-  /// <summary>
-  /// A shell script standing in for the browser. It records its arguments, so the test can find the
-  /// profile directory the engine gave it.
-  /// </summary>
-  private sealed class FakeBrowser : IDisposable
-  {
-    private readonly string _directory;
-
-    private FakeBrowser(string directory)
-    {
-      _directory = directory;
-    }
-
-    public string Path => System.IO.Path.Combine(_directory, "fake-browser.sh");
-
-    private string ArgumentsFile => System.IO.Path.Combine(_directory, "arguments.txt");
-
-    [UnsupportedOSPlatform("windows")]
-    public static FakeBrowser Create(string body)
-    {
-      var directory = Directory.CreateTempSubdirectory("fake-browser-").FullName;
-      FakeBrowser fake = new(directory);
-      File.WriteAllText(
-        fake.Path,
-        $"#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> '{fake.ArgumentsFile}'; done\n{body}\n"
-      );
-      File.SetUnixFileMode(
-        fake.Path,
-        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-      );
-      return fake;
-    }
-
-    public async Task<string> ReadProfileDirectoryAsync()
-    {
-      const string prefix = "--user-data-dir=";
-      var lines = await File.ReadAllLinesAsync(ArgumentsFile);
-      return lines.Single(line => line.StartsWith(prefix, StringComparison.Ordinal))[
-        prefix.Length..
-      ];
-    }
-
-    public void Dispose() => Directory.Delete(_directory, recursive: true);
   }
 }

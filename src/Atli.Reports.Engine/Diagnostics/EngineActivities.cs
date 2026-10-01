@@ -126,10 +126,16 @@ internal static class EngineActivities
   /// <summary>
   /// Starts the span of a browser launch.
   /// </summary>
-  public static Activity? StartBrowserLaunch(int generation)
+  /// <param name="generation">The browser being launched.</param>
+  /// <param name="attempt">
+  /// The launches in a row this one makes, counting the failed ones before it: 1 unless the previous
+  /// launch failed.
+  /// </param>
+  public static Activity? StartBrowserLaunch(int generation, int attempt)
   {
     var activity = Source.StartActivity(Spans.BrowserLaunch);
     activity?.SetTag(Tags.BrowserGeneration, generation);
+    activity?.SetTag(Tags.BrowserLaunchAttempt, attempt);
     return activity;
   }
 
@@ -233,6 +239,7 @@ internal static class EngineActivities
     public const string WaitFor = "atli.reports.page.wait_for";
     public const string BrowserGeneration = "atli.reports.browser.generation";
     public const string BrowserProcessId = "atli.reports.browser.pid";
+    public const string BrowserLaunchAttempt = "atli.reports.browser.launch.attempt";
     public const string RecycleReason = "atli.reports.browser.recycle.reason";
   }
 }
