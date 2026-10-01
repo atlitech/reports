@@ -17,6 +17,8 @@ internal sealed class ReportsEngineOptionsValidator : IValidateOptions<ReportsEn
     RequirePositive(failures, "Browser:StartupTimeout", browser.StartupTimeout);
     RequirePositive(failures, "Browser:CommandTimeout", browser.CommandTimeout);
     RequirePositiveOrInfinite(failures, "Browser:MaxProcessLifetime", browser.MaxProcessLifetime);
+    RequirePositiveOrInfinite(failures, "ConversionTimeout", options.ConversionTimeout);
+    RequirePositiveOrInfinite(failures, "Browser:IdleTimeout", browser.IdleTimeout);
 
     if (browser.MaxConversionsPerProcess < 0)
     {

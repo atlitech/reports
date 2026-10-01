@@ -38,6 +38,7 @@ internal interface IBrowserProvider
 internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisposable
 {
   private readonly ReportsEngineBrowserOptions _options;
+  private readonly EngineMetrics _metrics;
   private readonly TimeProvider _timeProvider;
   private readonly ILoggerFactory _loggerFactory;
   private readonly ILogger _logger;
@@ -49,15 +50,19 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   private Task<BrowserInstance>? _launch;
   private TaskCompletionSource? _drained;
   private Task? _shutdown;
+  private ITimer? _idleTimer;
+  private long _idleSince;
   private int _generation;
 
   public BrowserManager(
     IOptions<ReportsEngineOptions> options,
+    EngineMetrics metrics,
     TimeProvider timeProvider,
     ILoggerFactory loggerFactory
   )
   {
     _options = options.Value.Browser;
+    _metrics = metrics;
     _timeProvider = timeProvider;
     _loggerFactory = loggerFactory;
     _logger = loggerFactory.CreateLogger<BrowserManager>();
@@ -198,6 +203,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     )
     {
       LogMessages.BrowserRecycling(_logger, browser.Generation, "it reached its maximum lifetime");
+      _metrics.BrowserRecycled();
       return false;
     }
 
@@ -217,6 +223,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         browser.Generation,
         "it served its maximum number of conversions"
       );
+      _metrics.BrowserRecycled();
       RetireLocked(browser);
       _launch ??= LaunchAsync();
     }
@@ -257,10 +264,54 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         CloseLocked(browser);
       }
 
+      if (browser == _current && browser.InFlight == 0)
+      {
+        ScheduleIdleCloseLocked();
+      }
+
       if (_drained is not null && InFlightLocked() == 0)
       {
         _drained.TrySetResult();
       }
+    }
+  }
+
+  private void ScheduleIdleCloseLocked()
+  {
+    if (_options.IdleTimeout == Timeout.InfiniteTimeSpan || _shutdown is not null)
+    {
+      return;
+    }
+
+    _idleSince = _timeProvider.GetTimestamp();
+    _idleTimer ??= _timeProvider.CreateTimer(
+      _ => CloseIfIdle(),
+      null,
+      Timeout.InfiniteTimeSpan,
+      Timeout.InfiniteTimeSpan
+    );
+    _idleTimer.Change(_options.IdleTimeout, Timeout.InfiniteTimeSpan);
+  }
+
+  private void CloseIfIdle()
+  {
+    lock (_lock)
+    {
+      if (_shutdown is not null || _current is not { InFlight: 0 } current)
+      {
+        // Busy again; the next release starts a new idle period.
+        return;
+      }
+
+      var idle = _timeProvider.GetElapsedTime(_idleSince);
+      if (idle < _options.IdleTimeout)
+      {
+        _idleTimer?.Change(_options.IdleTimeout - idle, Timeout.InfiniteTimeSpan);
+        return;
+      }
+
+      LogMessages.BrowserIdleClosing(_logger, current.Generation, _options.IdleTimeout);
+      RetireLocked(current);
     }
   }
 
@@ -325,6 +376,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       _current = browser;
     }
 
+    _metrics.BrowserLaunched();
     _ = browser.Terminated.ContinueWith(
       _ => OnTerminated(browser),
       CancellationToken.None,
@@ -346,6 +398,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       // Conversions still running on it fail on their own: their commands fail as the
       // connection closes. Kill whatever is left of the process right away.
       LogMessages.BrowserTerminated(_logger, browser.Generation, browser.ProcessId);
+      _metrics.BrowserCrashed();
       RetireLocked(browser);
       if (!browser.CloseStarted)
       {
@@ -430,6 +483,10 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     await _stopping.CancelAsync();
 
     Task<BrowserInstance>? launch;
+    lock (_lock)
+    {
+      _idleTimer?.Dispose();
+    }
 
     lock (_lock)
     {

@@ -104,6 +104,17 @@ public sealed class ReportsEngineBrowserOptions
   public TimeSpan MaxProcessLifetime { get; set; } = TimeSpan.FromHours(1);
 
   /// <summary>
+  /// How long the browser may sit without conversions before the engine closes it. Defaults to
+  /// <see cref="Timeout.InfiniteTimeSpan"/>: the browser stays up.
+  /// </summary>
+  /// <remarks>
+  /// A closed browser holds no memory; the next conversion starts a new one and pays its start-up
+  /// time. Useful on hosts that bill for memory or scale to zero between bursts of work. Must be
+  /// greater than zero, or infinite.
+  /// </remarks>
+  public TimeSpan IdleTimeout { get; set; } = Timeout.InfiniteTimeSpan;
+
+  /// <summary>
   /// How long shutting down the engine waits for running conversions to finish before it closes the
   /// browser. Defaults to 10 seconds.
   /// </summary>

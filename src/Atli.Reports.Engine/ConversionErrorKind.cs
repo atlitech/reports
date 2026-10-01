@@ -36,8 +36,9 @@ public enum ConversionErrorKind
 
   /// <summary>
   /// The browser did not answer a DevTools command within
-  /// <see cref="ReportsEngineBrowserOptions.CommandTimeout"/>, which also bounds the wait for the
-  /// document's <c>load</c> event.
+  /// <see cref="ReportsEngineBrowserOptions.CommandTimeout"/> (which also bounds the wait for the
+  /// document's <c>load</c> event), or the conversion as a whole ran past
+  /// <see cref="ReportsEngineOptions.ConversionTimeout"/>.
   /// </summary>
   Timeout,
 

@@ -1,10 +1,13 @@
+using System.Diagnostics.Metrics;
 using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Page;
 using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Conversion;
+using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Engine.Tests.Conversion;
 
@@ -213,6 +216,94 @@ public class HtmlToPdfConverterTests
   }
 
   [Test]
+  public async Task Running_out_of_the_conversion_timeout_is_Timeout()
+  {
+    FakePage page = new() { PrintGate = new TaskCompletionSource().Task };
+    var (converter, tracker) = CreateConverter(
+      new FakeBrowserProvider(_ => page),
+      conversionTimeout: TimeSpan.FromMilliseconds(200)
+    );
+
+    var result = await converter.ConvertAsync("<p>x</p>");
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+    await Assert.That(result.AsT1.Message).Contains("conversion timeout");
+    await Assert.That(page.Disposed).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().Failures).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task The_conversion_timeout_also_covers_the_wait_for_a_turn()
+  {
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    FakePage blocked = new() { PrintGate = release.Task };
+    var (converter, _) = CreateConverter(
+      new FakeBrowserProvider(_ => blocked),
+      new ReportsEngineConcurrencyOptions { MaxConcurrentConversions = 1, MaxQueueLength = 5 },
+      conversionTimeout: TimeSpan.FromMilliseconds(300)
+    );
+
+    var running = converter.ConvertAsync("<p>first</p>").AsTask();
+    await blocked.Printing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    var queued = await converter.ConvertAsync("<p>second</p>");
+    release.SetResult();
+    await running;
+
+    await Assert.That(queued.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+  }
+
+  [Test]
+  public async Task Conversions_are_measured_by_outcome()
+  {
+    List<(double Seconds, string? Outcome)> measurements = [];
+    using MeterListener listener = new();
+    listener.InstrumentPublished = (instrument, meterListener) =>
+    {
+      if (
+        instrument.Meter.Name == EngineMetrics.MeterName
+        && instrument.Name == "atli.reports.conversion.duration"
+      )
+      {
+        meterListener.EnableMeasurementEvents(instrument);
+      }
+    };
+    listener.SetMeasurementEventCallback<double>(
+      (_, value, tags, _) =>
+      {
+        string? outcome = null;
+        foreach (var tag in tags)
+        {
+          if (tag.Key == "outcome")
+          {
+            outcome = tag.Value as string;
+          }
+        }
+
+        lock (measurements)
+        {
+          measurements.Add((value, outcome));
+        }
+      }
+    );
+    listener.Start();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
+
+    var succeeded = await converter.ConvertAsync("<p>x</p>");
+    await succeeded.AsT0.DisposeAsync();
+    await converter.ConvertAsync(" ");
+
+    // Other tests may run converters in parallel; look for this test's two outcomes.
+    string[] outcomes;
+    lock (measurements)
+    {
+      outcomes = [.. measurements.Select(m => m.Outcome ?? "")];
+    }
+
+    await Assert.That(outcomes).Contains("success");
+    await Assert.That(outcomes).Contains("InvalidRequest");
+  }
+
+  [Test]
   public async Task The_streaming_overload_writes_the_pdf_to_the_destination()
   {
     var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
@@ -266,18 +357,27 @@ public class HtmlToPdfConverterTests
 
   private static (HtmlToPdfConverter Converter, ConversionHealthTracker Tracker) CreateConverter(
     IBrowserProvider browsers,
-    ReportsEngineConcurrencyOptions? concurrency = null
+    ReportsEngineConcurrencyOptions? concurrency = null,
+    TimeSpan? conversionTimeout = null
   )
   {
     ConversionHealthTracker tracker = new(TimeProvider.System);
+    ReportsEngineOptions options = new()
+    {
+      ConversionTimeout = conversionTimeout ?? Timeout.InfiniteTimeSpan,
+    };
     HtmlToPdfConverter converter = new(
       browsers,
       new ConversionLimiter(concurrency ?? new ReportsEngineConcurrencyOptions()),
       tracker,
+      Metrics,
+      Options.Create(options),
       NullLogger<HtmlToPdfConverter>.Instance
     );
     return (converter, tracker);
   }
+
+  private static readonly EngineMetrics Metrics = new();
 
   private sealed class FakeBrowserProvider(Func<CancellationToken, IConversionPage> open)
     : IBrowserProvider

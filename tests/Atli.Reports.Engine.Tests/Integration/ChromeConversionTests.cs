@@ -220,6 +220,27 @@ public class ChromeConversionTests(SharedChromeEngine engine)
     // The bitmap is noise and does not compress, so the PDF itself spans many WebSocket frames.
     await Assert.That(pdf.Length).IsGreaterThan(500 * 1024);
   }
+
+  [Test]
+  public async Task Tagging_can_be_turned_off()
+  {
+    var html =
+      "<!DOCTYPE html><html><body><h1>Heading</h1><table><tr><td>Cell</td></tr></table></body></html>";
+
+    var untagged = await engine.Converter.ConvertToBytesAsync(
+      html,
+      new PdfOptions { GenerateTaggedPdf = false }
+    );
+    var tagged = await engine.Converter.ConvertToBytesAsync(
+      html,
+      new PdfOptions { GenerateTaggedPdf = true }
+    );
+
+    await Assert
+      .That(System.Text.Encoding.Latin1.GetString(untagged))
+      .DoesNotContain("/StructTreeRoot");
+    await Assert.That(System.Text.Encoding.Latin1.GetString(tagged)).Contains("/StructTreeRoot");
+  }
 }
 
 /// <summary>

@@ -147,6 +147,17 @@ internal static partial class LogMessages
   public static partial void ShutdownDrainTimedOut(ILogger logger, int inFlight);
 
   [LoggerMessage(
+    EventId = 308,
+    Level = LogLevel.Information,
+    Message = "Closing browser {Generation}: no conversions for {IdleTimeout}"
+  )]
+  public static partial void BrowserIdleClosing(
+    ILogger logger,
+    int generation,
+    TimeSpan idleTimeout
+  );
+
+  [LoggerMessage(
     EventId = 307,
     Level = LogLevel.Warning,
     Message = "Warming up the browser failed; the next conversion will try again"

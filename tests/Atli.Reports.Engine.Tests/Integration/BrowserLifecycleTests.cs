@@ -182,6 +182,26 @@ public class BrowserLifecycleTests
   }
 
   [Test]
+  public async Task An_idle_browser_is_closed_and_the_next_conversion_starts_another()
+  {
+    await using var provider = TestEngine.Create(options =>
+      options.Browser.IdleTimeout = TimeSpan.FromMilliseconds(500)
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
+    var browsers = provider.GetRequiredService<BrowserManager>();
+
+    await converter.ConvertToBytesAsync("<p>Busy</p>");
+    var idle = browsers.Current!;
+    await Assert.That(await ProcessAndProfileGoneAsync(idle)).IsTrue();
+    await Assert.That(browsers.Current).IsNull();
+
+    var pdf = await converter.ConvertToBytesAsync("<p>Busy again</p>");
+
+    await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
+    await Assert.That(browsers.Launches).IsEqualTo(2);
+  }
+
+  [Test]
   public async Task Disposing_the_engine_kills_the_browser_and_deletes_its_profile()
   {
     var provider = TestEngine.Create();

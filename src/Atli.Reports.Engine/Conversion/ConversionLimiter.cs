@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Globalization;
+using Atli.Reports.Engine.Diagnostics;
 using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Engine.Conversion;
@@ -16,19 +18,21 @@ internal sealed class ConversionLimiter
   private readonly int _maxConcurrent;
   private readonly int _maxQueueLength;
   private readonly TimeSpan _queueTimeout;
+  private readonly EngineMetrics? _metrics;
   private readonly Lock _lock = new();
   private readonly LinkedList<Waiter> _queue = new();
   private int _active;
   private int _peakActive;
 
-  public ConversionLimiter(IOptions<ReportsEngineOptions> options)
-    : this(options.Value.Concurrency) { }
+  public ConversionLimiter(IOptions<ReportsEngineOptions> options, EngineMetrics metrics)
+    : this(options.Value.Concurrency, metrics) { }
 
-  internal ConversionLimiter(ReportsEngineConcurrencyOptions options)
+  internal ConversionLimiter(ReportsEngineConcurrencyOptions options, EngineMetrics? metrics = null)
   {
     _maxConcurrent = options.MaxConcurrentConversions;
     _maxQueueLength = options.MaxQueueLength;
     _queueTimeout = options.QueueTimeout;
+    _metrics = metrics;
   }
 
   /// <summary>
@@ -101,8 +105,9 @@ internal sealed class ConversionLimiter
         );
       }
 
-      waiter = new Waiter();
+      waiter = new Waiter(Stopwatch.GetTimestamp());
       waiter.Node = _queue.AddLast(waiter);
+      _metrics?.Enqueued();
     }
 
     try
@@ -118,6 +123,7 @@ internal sealed class ConversionLimiter
         {
           _queue.Remove(node);
           waiter.Node = null;
+          _metrics?.Dequeued(waiter.EnqueuedTimestamp);
           if (exception is TimeoutException)
           {
             throw new ConversionBusyException(
@@ -149,6 +155,7 @@ internal sealed class ConversionLimiter
   {
     _active++;
     _peakActive = Math.Max(_peakActive, _active);
+    _metrics?.SlotTaken();
   }
 
   private void Release()
@@ -160,11 +167,13 @@ internal sealed class ConversionLimiter
       {
         _queue.RemoveFirst();
         first.Value.Node = null;
+        _metrics?.Dequeued(first.Value.EnqueuedTimestamp);
         first.Value.TrySetResult();
         return;
       }
 
       _active--;
+      _metrics?.SlotReleased();
     }
   }
 
@@ -184,9 +193,11 @@ internal sealed class ConversionLimiter
     }
   }
 
-  private sealed class Waiter()
+  private sealed class Waiter(long enqueuedTimestamp)
     : TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
   {
+    public long EnqueuedTimestamp { get; } = enqueuedTimestamp;
+
     public LinkedListNode<Waiter>? Node { get; set; }
   }
 }

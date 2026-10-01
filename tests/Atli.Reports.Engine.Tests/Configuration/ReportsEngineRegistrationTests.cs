@@ -24,10 +24,12 @@ public class ReportsEngineRegistrationTests
           ["ReportsEngine:Browser:WarmUpOnStartup"] = "true",
           ["ReportsEngine:Browser:MaxConversionsPerProcess"] = "250",
           ["ReportsEngine:Browser:MaxProcessLifetime"] = "00:20:00",
+          ["ReportsEngine:Browser:IdleTimeout"] = "00:05:00",
           ["ReportsEngine:Browser:ShutdownTimeout"] = "00:00:03",
           ["ReportsEngine:Concurrency:MaxConcurrentConversions"] = "6",
           ["ReportsEngine:Concurrency:MaxQueueLength"] = "12",
           ["ReportsEngine:Concurrency:QueueTimeout"] = "00:00:09",
+          ["ReportsEngine:ConversionTimeout"] = "00:02:00",
         }
       )
       .Build();
@@ -48,11 +50,13 @@ public class ReportsEngineRegistrationTests
     await Assert.That(browser.WarmUpOnStartup).IsTrue();
     await Assert.That(browser.MaxConversionsPerProcess).IsEqualTo(250);
     await Assert.That(browser.MaxProcessLifetime).IsEqualTo(TimeSpan.FromMinutes(20));
+    await Assert.That(browser.IdleTimeout).IsEqualTo(TimeSpan.FromMinutes(5));
     await Assert.That(browser.ShutdownTimeout).IsEqualTo(TimeSpan.FromSeconds(3));
     var options = provider.GetRequiredService<IOptions<ReportsEngineOptions>>().Value;
     await Assert.That(options.Concurrency.MaxConcurrentConversions).IsEqualTo(6);
     await Assert.That(options.Concurrency.MaxQueueLength).IsEqualTo(12);
     await Assert.That(options.Concurrency.QueueTimeout).IsEqualTo(TimeSpan.FromSeconds(9));
+    await Assert.That(options.ConversionTimeout).IsEqualTo(TimeSpan.FromMinutes(2));
   }
 
   [Test]
@@ -63,8 +67,10 @@ public class ReportsEngineRegistrationTests
     await Assert.That(options.Concurrency.MaxConcurrentConversions).IsBetween(2, 8);
     await Assert.That(options.Concurrency.MaxQueueLength).IsEqualTo(100);
     await Assert.That(options.Concurrency.QueueTimeout).IsEqualTo(TimeSpan.FromSeconds(30));
+    await Assert.That(options.ConversionTimeout).IsEqualTo(Timeout.InfiniteTimeSpan);
     await Assert.That(options.Browser.MaxConversionsPerProcess).IsEqualTo(1000);
     await Assert.That(options.Browser.MaxProcessLifetime).IsEqualTo(TimeSpan.FromHours(1));
+    await Assert.That(options.Browser.IdleTimeout).IsEqualTo(Timeout.InfiniteTimeSpan);
     await Assert.That(options.Browser.WarmUpOnStartup).IsFalse();
   }
 
@@ -77,6 +83,7 @@ public class ReportsEngineRegistrationTests
       options.Concurrency.MaxConcurrentConversions = 0;
       options.Concurrency.MaxQueueLength = -1;
       options.Browser.CommandTimeout = TimeSpan.Zero;
+      options.ConversionTimeout = TimeSpan.FromSeconds(-5);
     });
     await using var provider = services.BuildServiceProvider();
 
@@ -84,7 +91,7 @@ public class ReportsEngineRegistrationTests
       .That(() => provider.GetRequiredService<IHtmlToPdfConverter>())
       .Throws<OptionsValidationException>();
 
-    await Assert.That(exception!.Failures.Count()).IsEqualTo(3);
+    await Assert.That(exception!.Failures.Count()).IsEqualTo(4);
   }
 
   [Test]

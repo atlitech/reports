@@ -1,9 +1,12 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Page;
 using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OneOf;
 using OneOf.Types;
 
@@ -16,9 +19,13 @@ internal sealed class HtmlToPdfConverter(
   IBrowserProvider browsers,
   ConversionLimiter limiter,
   ConversionHealthTracker healthTracker,
+  EngineMetrics metrics,
+  IOptions<ReportsEngineOptions> engineOptions,
   ILogger<HtmlToPdfConverter> logger
 ) : IHtmlToPdfConverter
 {
+  private readonly TimeSpan _conversionTimeout = engineOptions.Value.ConversionTimeout;
+
   private const string OpenStage = "Failed to open a browser page";
   private const string SignalStage = "Failed to register the signal";
   private const string ContentStage = "Failed to set HTML content";
@@ -75,19 +82,53 @@ internal sealed class HtmlToPdfConverter(
     CancellationToken cancellationToken
   )
   {
-    if (Validate(html, options) is { } invalid)
+    var started = Stopwatch.GetTimestamp();
+    var error = Validate(html, options);
+    if (error is null && cancellationToken.IsCancellationRequested)
     {
-      return invalid;
+      error = ConversionErrors.Canceled();
     }
 
-    if (cancellationToken.IsCancellationRequested)
+    if (error is null)
     {
-      return ConversionErrors.Canceled();
+      error = await RunWithDeadlineAsync(html, options, destination, cancellationToken);
+      RecordOutcome(error);
     }
 
-    var error = await RunAsync(html, options, destination, cancellationToken);
-    RecordOutcome(error);
+    metrics.ConversionFinished(Stopwatch.GetElapsedTime(started), error?.Kind);
     return error;
+  }
+
+  private async ValueTask<ConversionError?> RunWithDeadlineAsync(
+    string html,
+    PdfOptions options,
+    Stream destination,
+    CancellationToken cancellationToken
+  )
+  {
+    if (_conversionTimeout == Timeout.InfiniteTimeSpan)
+    {
+      return await RunAsync(html, options, destination, cancellationToken);
+    }
+
+    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    deadline.CancelAfter(_conversionTimeout);
+    var error = await RunAsync(html, options, destination, deadline.Token);
+
+    // The deadline surfaces as a cancellation; report it as the timeout it is.
+    return
+      error is { Kind: ConversionErrorKind.Canceled }
+      && !cancellationToken.IsCancellationRequested
+      && deadline.IsCancellationRequested
+      ? new ConversionError(
+        ConversionErrorKind.Timeout,
+        string.Create(
+          CultureInfo.InvariantCulture,
+          $"The conversion did not finish within the conversion timeout of {_conversionTimeout.TotalSeconds:0.###}s."
+        ),
+        error.Exception
+      )
+      : error;
   }
 
   private static ConversionError? Validate(string html, PdfOptions options)

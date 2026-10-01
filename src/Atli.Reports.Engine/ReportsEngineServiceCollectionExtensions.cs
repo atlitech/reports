@@ -1,6 +1,7 @@
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Configuration;
 using Atli.Reports.Engine.Conversion;
+using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
 using Atli.Reports.Engine.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -56,6 +57,7 @@ public static class ReportsEngineServiceCollectionExtensions
 
     services.AddLogging();
     services.TryAddSingleton(TimeProvider.System);
+    services.TryAddSingleton<EngineMetrics>();
     services.TryAddSingleton<BrowserManager>();
     services.TryAddSingleton<IBrowserProvider>(provider =>
       provider.GetRequiredService<BrowserManager>()
@@ -77,7 +79,8 @@ public static class ReportsEngineServiceCollectionExtensions
   /// <param name="services">The service collection to add the engine to.</param>
   /// <param name="configuration">
   /// The configuration section to bind, usually <c>configuration.GetSection(ReportsEngineOptions.SectionName)</c>.
-  /// Keys mirror the option properties, for example <c>Browser:ExecutablePath</c> or <c>Browser:NoSandbox</c>.
+  /// Keys mirror the option properties, for example <c>Browser:ExecutablePath</c>,
+  /// <c>Concurrency:MaxConcurrentConversions</c>, or <c>ConversionTimeout</c>.
   /// </param>
   /// <returns><paramref name="services"/>, for chaining.</returns>
   /// <remarks>Binding uses the configuration binding source generator, so it is safe in trimmed and NativeAOT apps.</remarks>
