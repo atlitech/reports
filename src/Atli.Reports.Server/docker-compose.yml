@@ -1,0 +1,9 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: src/Atli.Reports.Server/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production

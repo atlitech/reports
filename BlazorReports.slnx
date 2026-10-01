@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Atli.Reports.Engine/Atli.Reports.Engine.csproj" />
+    <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
     <Project Path="src/BlazorReports.Client/BlazorReports.Client.csproj" />
     <Project Path="src/BlazorReports.Components/BlazorReports.Components.csproj" />
     <Project Path="src/BlazorReports.Viewer/BlazorReports.Viewer.csproj" />
