@@ -215,7 +215,11 @@ internal static class ReportWriter
         continue;
       }
 
-      if (cell.Succeeded == 0 && !run.Settings.KeepGoing)
+      if (
+        cell.Succeeded == 0
+        && !run.Settings.KeepGoing
+        && run.Settings.Concurrency.Any(level => level > cell.Concurrency)
+      )
       {
         notes.Add($"{id}: produced no valid PDF, so higher concurrency levels were skipped");
       }
