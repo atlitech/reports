@@ -30,14 +30,35 @@ public static class ReportsServerApplication
       builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
     );
 
+    // Kestrel binds its endpoints from the Kestrel section but not its limits, so
+    // Kestrel__Limits__MaxRequestBodySize and the other KestrelServerLimits need binding here.
+    builder.WebHost.ConfigureKestrel(
+      (context, kestrel) => context.Configuration.GetSection("Kestrel:Limits").Bind(kestrel.Limits)
+    );
+
     builder.Services.ConfigureHttpJsonOptions(options =>
     {
       options.SerializerOptions.TypeInfoResolverChain.Insert(
         0,
         ServerJsonSerializerContext.Default
       );
+      // A repeated property is ambiguous (which html is meant?), so it is a bad request rather than
+      // last-one-wins. The source-generated context's options do not govern request bodies; these do.
+      options.SerializerOptions.AllowDuplicateProperties = false;
     });
-    builder.Services.AddProblemDetails();
+
+    // Every error response is problem details with a kind, including the 400, 413, and 415 that
+    // request binding sets before the endpoint runs and the 500 of an unhandled exception.
+    builder.Services.AddProblemDetails(options =>
+      options.CustomizeProblemDetails = ConversionProblems.Customize
+    );
+    builder.Services.AddExceptionHandler(options =>
+      // In Development, request binding throws its error status in a BadHttpRequestException.
+      options.StatusCodeSelector = exception =>
+        exception is BadHttpRequestException badRequest
+          ? badRequest.StatusCode
+          : StatusCodes.Status500InternalServerError
+    );
 
     // Both checks gate readiness only. A browser that cannot start takes the server out of rotation
     // while the engine retries the launch in the background; restarting the process would not repair
@@ -53,25 +74,34 @@ public static class ReportsServerApplication
 
     var app = builder.Build();
 
+    // A response that already started (a PDF partway through) is not rewritten: the exception
+    // handler rethrows, and Kestrel aborts the connection.
+    app.UseExceptionHandler();
+    app.UseStatusCodePages();
+
     app.MapConvertEndpoints();
 
+    // Probes poll these every few seconds; like their traces, their request metrics would drown the
+    // conversions.
     app.MapHealthChecks(
-      "/health/live",
-      new HealthCheckOptions
-      {
-        Predicate = r => r.Tags.Contains("live"),
-        ResponseWriter = HealthCheckResponseWriter.WriteResponse,
-      }
-    );
+        "/health/live",
+        new HealthCheckOptions
+        {
+          Predicate = r => r.Tags.Contains("live"),
+          ResponseWriter = HealthCheckResponseWriter.WriteResponse,
+        }
+      )
+      .DisableHttpMetrics();
 
     app.MapHealthChecks(
-      "/health/ready",
-      new HealthCheckOptions
-      {
-        Predicate = r => r.Tags.Contains("ready"),
-        ResponseWriter = HealthCheckResponseWriter.WriteResponse,
-      }
-    );
+        "/health/ready",
+        new HealthCheckOptions
+        {
+          Predicate = r => r.Tags.Contains("ready"),
+          ResponseWriter = HealthCheckResponseWriter.WriteResponse,
+        }
+      )
+      .DisableHttpMetrics();
 
     return app;
   }

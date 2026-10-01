@@ -55,8 +55,3 @@ public sealed class MarginsRequest
   public double? Left { get; set; }
   public double? Right { get; set; }
 }
-
-public sealed class ErrorResponse
-{
-  public required string Error { get; init; }
-}

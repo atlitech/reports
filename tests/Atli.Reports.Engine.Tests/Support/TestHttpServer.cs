@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 
 namespace Atli.Reports.Engine.Tests.Support;
@@ -11,17 +10,14 @@ namespace Atli.Reports.Engine.Tests.Support;
 /// </summary>
 internal sealed class TestHttpServer : IAsyncDisposable
 {
-  private readonly HttpListener _listener = new();
+  private readonly HttpListener _listener;
   private readonly Dictionary<string, Route> _routes = [];
   private readonly Lock _routesLock = new();
   private readonly Task _loop;
 
   public TestHttpServer()
   {
-    var port = FreePort();
-    BaseUrl = $"http://127.0.0.1:{port}";
-    _listener.Prefixes.Add(BaseUrl + "/");
-    _listener.Start();
+    (_listener, BaseUrl) = LoopbackHttpListener.Start();
     _loop = Task.Run(ServeAsync);
   }
 
@@ -138,13 +134,4 @@ internal sealed class TestHttpServer : IAsyncDisposable
     Task Gate,
     string CacheControl
   );
-
-  private static int FreePort()
-  {
-    TcpListener probe = new(IPAddress.Loopback, 0);
-    probe.Start();
-    var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-    probe.Stop();
-    return port;
-  }
 }
