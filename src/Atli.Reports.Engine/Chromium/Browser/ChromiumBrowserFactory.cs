@@ -75,7 +75,12 @@ internal sealed class ChromiumBrowserFactory(
     }
 
     // Read DevTools active port
-    var lines = await ReadDevToolsActiveFile(devToolsActivePortFile, devToolsActivePortDirectory);
+    var lines = await ReadDevToolsActiveFile(
+      devToolsActivePortFile,
+      devToolsActivePortDirectory,
+      browserOptions.StartupTimeout,
+      ct
+    );
     if (lines.Length != 2)
     {
       IOException error = new($"The file '{devToolsActivePortFile}' did not contain 2 lines");
@@ -185,9 +190,16 @@ internal sealed class ChromiumBrowserFactory(
     LogMessages.ChromiumProcessCrashed(factoryLogger, exception, process.ExitCode);
   }
 
+  /// <summary>
+  /// Waits until the browser writes its DevTools port file, for at most <paramref name="startupTimeout"/>.
+  /// Throws <see cref="TimeoutException"/> when the time runs out and
+  /// <see cref="OperationCanceledException"/> when <paramref name="ct"/> is canceled.
+  /// </summary>
   private static async ValueTask<string[]> ReadDevToolsActiveFile(
     string devToolsActivePortFile,
-    DirectoryInfo devToolsActivePortDirectory
+    DirectoryInfo devToolsActivePortDirectory,
+    TimeSpan startupTimeout,
+    CancellationToken ct
   )
   {
     if (devToolsActivePortDirectory is null || !devToolsActivePortDirectory.Exists)
@@ -202,7 +214,8 @@ internal sealed class ChromiumBrowserFactory(
       EnableRaisingEvents = true,
     };
 
-    CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
+    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    cts.CancelAfter(startupTimeout);
     TaskCompletionSource<string[]> tcs = new();
 
     void CreatedHandler(object s, FileSystemEventArgs e)
@@ -218,12 +231,19 @@ internal sealed class ChromiumBrowserFactory(
     watcher.Created += CreatedHandler;
 
     var callback = cts.Token.Register(() =>
+    {
+      if (ct.IsCancellationRequested)
+      {
+        tcs.TrySetCanceled(ct);
+        return;
+      }
+
       tcs.TrySetException(
         new TimeoutException(
-          $"A timeout of 10 seconds exceeded, the file '{devToolsActivePortFile}' did not exist"
+          $"The browser did not start within {startupTimeout.TotalSeconds}s: the file '{devToolsActivePortFile}' did not exist"
         )
-      )
-    );
+      );
+    });
 
     try
     {

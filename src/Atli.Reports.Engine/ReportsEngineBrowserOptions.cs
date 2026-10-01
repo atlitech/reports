@@ -45,6 +45,16 @@ public sealed class ReportsEngineBrowserOptions
   public IList<string> ExtraArguments { get; } = [];
 
   /// <summary>
+  /// How long to wait for a launched browser to start and report its DevTools endpoint. Defaults to 30 seconds.
+  /// </summary>
+  /// <remarks>
+  /// A browser that does not start in time fails the conversion with
+  /// <see cref="ConversionErrorKind.BrowserUnavailable"/>. Cold starts on small or busy machines (for
+  /// example CI runners with two cores) can take several seconds.
+  /// </remarks>
+  public TimeSpan StartupTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+  /// <summary>
   /// How long to wait for the browser to answer a single DevTools command. Defaults to 30 seconds.
   /// </summary>
   /// <remarks>

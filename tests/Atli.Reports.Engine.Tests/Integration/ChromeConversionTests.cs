@@ -8,9 +8,17 @@ namespace Atli.Reports.Engine.Tests.Integration;
 /// Converts real HTML in the Chrome (or Chromium) installed on the machine.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The browser runs without its sandbox: Ubuntu 24.04 runners block the user namespaces the sandbox
 /// needs, and the HTML here is trusted.
+/// </para>
+/// <para>
+/// The tests run one at a time because each conversion still launches its own browser; parallel cold
+/// starts on a two-core CI runner are slow enough to blur the outcomes under test. Every test builds its
+/// own service provider, so the health tracker is never shared between tests.
+/// </para>
 /// </remarks>
+[NotInParallel("chrome")]
 public class ChromeConversionTests
 {
   private static readonly TimeSpan GenerousTimeout = TimeSpan.FromSeconds(20);

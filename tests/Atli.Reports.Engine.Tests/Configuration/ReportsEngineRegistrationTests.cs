@@ -19,6 +19,7 @@ public class ReportsEngineRegistrationTests
           ["ReportsEngine:Browser:NoSandbox"] = "true",
           ["ReportsEngine:Browser:DisableDevShmUsage"] = "true",
           ["ReportsEngine:Browser:ExtraArguments:0"] = "--lang=es",
+          ["ReportsEngine:Browser:StartupTimeout"] = "00:01:00",
           ["ReportsEngine:Browser:CommandTimeout"] = "00:00:05",
         }
       )
@@ -35,6 +36,7 @@ public class ReportsEngineRegistrationTests
     await Assert.That(browser.NoSandbox).IsTrue();
     await Assert.That(browser.DisableDevShmUsage).IsTrue();
     await Assert.That(browser.ExtraArguments).IsEquivalentTo(["--lang=es"]);
+    await Assert.That(browser.StartupTimeout).IsEqualTo(TimeSpan.FromMinutes(1));
     await Assert.That(browser.CommandTimeout).IsEqualTo(TimeSpan.FromSeconds(5));
   }
 
