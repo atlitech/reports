@@ -19,8 +19,10 @@ formerly **BlazorReports**.
 | [`Atli.Reports.Engine`](src/Atli.Reports.Engine) | Converts HTML to PDF inside any .NET 10 app. One long-lived browser serves all conversions, each in a browser context of its own. Concurrency is bounded and the rest wait in a FIFO queue. The PDF streams out as the browser produces it. Also: JavaScript completion signals, crash recovery, metrics, and health checks. NativeAOT compatible. | NuGet package, from 0.26.0 |
 | [`Atli.Reports.Blazor`](src/Atli.Reports.Blazor) and [`Atli.Reports.Blazor.Components`](src/Atli.Reports.Blazor.Components) | Turns Blazor components into PDF (or HTML) reports. Map a component to an HTTP endpoint, or render it from your own code. Runs on the engine. | NuGet packages, from 0.26.0 |
 | [`Atli.Reports.Server`](src/Atli.Reports.Server) | A NativeAOT HTTP service over the engine: `POST /convert` with HTML and options, get a PDF back. Ships as a container image with `chrome-headless-shell`. | Build the image from this repository; no published image yet |
+| [`Atli.Reports.Aspire.Hosting`](src/Atli.Reports.Aspire.Hosting) | Runs the server in an [Aspire](https://aspire.dev) AppHost: `builder.AddReportsServer("reports")`, with its health check, telemetry, typed settings, and the connection string the client reads. See [docs/aspire.md](docs/aspire.md). | NuGet package, from 0.26.0 |
 
-The packages target .NET 10. Every component needs a Chromium-based browser; see
+The packages target .NET 10, except `Atli.Reports.Aspire.Hosting`, which targets .NET 8 so that any
+Aspire 13 AppHost can use it. Every component needs a Chromium-based browser; see
 [Browser requirements](#browser-requirements).
 
 ## Quick start: a Blazor report endpoint
@@ -454,6 +456,8 @@ and obsolete `IReportService` overloads. The
 - [Engine architecture](docs/engine/architecture.md): browser lifecycle, isolation, concurrency,
   streaming, metrics, and the configuration reference
 - [Server](docs/engine/server.md): the HTTP API, status codes, and the container image
+- [Aspire](docs/aspire.md): run the server from an AppHost and convert from your apps through
+  `Atli.Reports.Client`, locally and deployed
 - [JavaScript completion signals](docs/engine/reactive-signal-approach.md)
 - [Migrating from BlazorReports](docs/migration/from-blazorreports.md)
 - [Benchmarks](benchmarks/README.md)

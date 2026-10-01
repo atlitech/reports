@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Aspire 13 AppHosts may target net8.0 or later; a net8.0 library loads in all of them. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Aspire's convention: resources in Aspire.Hosting.ApplicationModel, extensions in Aspire.Hosting. -->
+    <RootNamespace>Aspire.Hosting</RootNamespace>
+    <Title>Atli Reports Aspire Hosting</Title>
+    <Description>An Aspire hosting integration for the Atli Reports server, the HTML to PDF container: builder.AddReportsServer("reports") runs the ghcr.io/atlitech/reports-server image released with this package, with its health check, telemetry, typed engine settings, and the connection string Atli.Reports.Client reads.</Description>
+    <PackageTags>pdf;html;html-to-pdf;reports;aspire;integration;hosting;container</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+  </ItemGroup>
+
+  <!--
+    The server image is tagged with the release's version, and so is this package, so the default tag
+    is generated from $(Version) rather than written down: each release runs the server it shipped with.
+  -->
+  <Target Name="GenerateReportsServerImageTag" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <ReportsServerImageTagFile>$(IntermediateOutputPath)ReportsServerContainerImageTags.g.cs</ReportsServerImageTagFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- %3B is a semicolon: MSBuild would otherwise split the line into two items. -->
+      <ReportsServerImageTagLine Include="// &lt;auto-generated /&gt;" />
+      <ReportsServerImageTagLine Include="namespace Aspire.Hosting%3B" />
+      <ReportsServerImageTagLine Include="internal static partial class ReportsServerContainerImageTags" />
+      <ReportsServerImageTagLine Include="{" />
+      <ReportsServerImageTagLine Include="  /// &lt;summary&gt;The version of this package, which the release tags the server image with.&lt;/summary&gt;" />
+      <ReportsServerImageTagLine Include="  internal const string Tag = &quot;$(Version)&quot;%3B" />
+      <ReportsServerImageTagLine Include="}" />
+    </ItemGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile
+      File="$(ReportsServerImageTagFile)"
+      Lines="@(ReportsServerImageTagLine)"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+    <ItemGroup>
+      <Compile Include="$(ReportsServerImageTagFile)" />
+      <FileWrites Include="$(ReportsServerImageTagFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

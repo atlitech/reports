@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <!-- Test names read as sentences (Runs_the_image_released_with_the_package); CA1707 only guards public API naming. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <!--
+      Aspire.Hosting 13.0, the floor these tests run against, brings MessagePack 2.5.192, which has
+      known vulnerabilities. The tests never start the RPC that uses it; the pin keeps the audit clean.
+    -->
+    <PackageReference Include="MessagePack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Builds against the integration's own Aspire.Hosting floor, so the tests cover the oldest supported release. -->
+    <ProjectReference Include="..\..\src\Atli.Reports.Aspire.Hosting\Atli.Reports.Aspire.Hosting.csproj" />
+    <!-- Binds the variables the integration sets to the options the server reads. -->
+    <ProjectReference Include="..\..\src\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+  </ItemGroup>
+</Project>
