@@ -4,7 +4,6 @@ using Atli.Reports.Engine;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,11 +18,6 @@ namespace Atli.Reports.Blazor.Extensions;
 /// </summary>
 public static partial class ReportExtensions
 {
-  /// <summary>
-  /// The status code returned when the client closed the request before the report was generated.
-  /// </summary>
-  internal const int Status499ClientClosedRequest = 499;
-
   /// <summary>
   /// Registers a Blazor report with data type <typeparamref name="TD" /> and component type <typeparamref name="T" />.
   /// </summary>
@@ -169,7 +163,7 @@ public static partial class ReportExtensions
       ConversionErrorKind.BrowserUnavailable => StatusCodes.Status503ServiceUnavailable,
       ConversionErrorKind.Timeout => StatusCodes.Status504GatewayTimeout,
       ConversionErrorKind.SignalTimeout => StatusCodes.Status504GatewayTimeout,
-      ConversionErrorKind.Canceled => Status499ClientClosedRequest,
+      ConversionErrorKind.Canceled => StatusCodes.Status499ClientClosedRequest,
       _ => StatusCodes.Status500InternalServerError,
     };
   }
@@ -194,8 +188,9 @@ public static partial class ReportExtensions
     BlazorReport blazorReport
   )
   {
+    // Stream makes OpenAPI describe the report as binary content, not as a JSON object.
     return builder
-      .Produces<FileStreamHttpResult>(StatusCodes.Status200OK, blazorReport.GetContentType())
+      .Produces<Stream>(StatusCodes.Status200OK, blazorReport.GetContentType())
       .ProducesProblem(StatusCodes.Status400BadRequest)
       .ProducesProblem(StatusCodes.Status500InternalServerError)
       .ProducesProblem(StatusCodes.Status503ServiceUnavailable)

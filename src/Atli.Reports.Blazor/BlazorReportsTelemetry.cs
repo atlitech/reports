@@ -33,8 +33,10 @@ public static class BlazorReportsTelemetry
   public const string ActivitySourceName = "Atli.Reports.Blazor";
 
   internal static readonly ActivitySource Source = new(
-    ActivitySourceName,
-    typeof(BlazorReportsTelemetry).Assembly.GetName().Version?.ToString(3)
+    new ActivitySourceOptions(ActivitySourceName)
+    {
+      Version = typeof(BlazorReportsTelemetry).Assembly.GetName().Version?.ToString(3),
+    }
   );
 
   internal static Activity? StartGenerate(
