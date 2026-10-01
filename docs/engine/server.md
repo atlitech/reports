@@ -211,8 +211,11 @@ checks, and releases all use it, so an image built from a given commit always ha
 - **Updates come as pull requests.** A daily workflow
   ([`chrome-headless-shell-bump.yml`](../../.github/workflows/chrome-headless-shell-bump.yml))
   compares the pin with Chrome for Testing's stable channel. When stable is newer and both
-  `linux64` and `linux-arm64` downloads exist, it proposes the new pin from the
-  `automation/chrome-headless-shell` branch. It never proposes an older version.
+  `linux64` and `linux-arm64` downloads exist, it opens (or updates) a pull request with the new
+  pin from the `automation/chrome-headless-shell` branch. It never proposes an older version. It
+  writes through a GitHub App, so the pull request's checks run; the comment at the top of the
+  workflow describes the one-time setup (an App with Contents and Pull requests write access,
+  the `AUTOMATION_APP_CLIENT_ID` variable, and the `AUTOMATION_APP_PRIVATE_KEY` secret).
 - **Merging a new pin refreshes the published image.**
   [`server-image-refresh.yml`](../../.github/workflows/server-image-refresh.yml) rebuilds the most
   recently published release from its own commit with the new browser, smoke-tests both
