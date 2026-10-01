@@ -2,7 +2,8 @@ namespace Atli.Reports.Client.Http;
 
 /// <summary>
 /// The body of a PDF response, handed to the caller. Disposing it disposes the response and the
-/// request, which releases the connection.
+/// request, which releases the connection; <see cref="DisposeAsync"/> disposes the body
+/// asynchronously. Disposing it again does nothing.
 /// </summary>
 internal sealed class ResponseBodyStream(
   Stream body,
@@ -10,6 +11,8 @@ internal sealed class ResponseBodyStream(
   HttpRequestMessage request
 ) : Stream
 {
+  private bool _disposed;
+
   public override bool CanRead => body.CanRead;
 
   public override bool CanSeek => false;
@@ -56,10 +59,25 @@ internal sealed class ResponseBodyStream(
   public override void Write(byte[] buffer, int offset, int count) =>
     throw new NotSupportedException();
 
+  public override async ValueTask DisposeAsync()
+  {
+    if (!_disposed)
+    {
+      _disposed = true;
+      await body.DisposeAsync();
+      response.Dispose();
+      request.Dispose();
+    }
+
+    // The base calls Dispose, which now only finishes disposing the base stream.
+    await base.DisposeAsync();
+  }
+
   protected override void Dispose(bool disposing)
   {
-    if (disposing)
+    if (disposing && !_disposed)
     {
+      _disposed = true;
       body.Dispose();
       response.Dispose();
       request.Dispose();

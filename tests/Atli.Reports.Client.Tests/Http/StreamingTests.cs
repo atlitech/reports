@@ -49,15 +49,41 @@ public class StreamingTests
   }
 
   [Test]
-  public async Task Disposing_the_returned_stream_releases_the_response()
+  [Arguments(true)]
+  [Arguments(false)]
+  public async Task Disposing_the_returned_stream_releases_the_response_and_the_request(
+    bool asynchronously
+  )
   {
     GatedStream body = new("%PDF-1.7 "u8.ToArray(), "%%EOF"u8.ToArray());
-    await using var server = StubServer.Start((_, _) => Task.FromResult(PdfResponse(body)));
+    HttpResponseMessage? response = null;
+    await using var server = StubServer.Start(
+      (_, _) => Task.FromResult(response = PdfResponse(body))
+    );
 
     var result = await server.Converter.ConvertAsync("<p>x</p>", cancellationToken: TestToken);
-    await result.AsT0.DisposeAsync();
+    var pdf = result.AsT0;
+    if (asynchronously)
+    {
+      await pdf.DisposeAsync();
+    }
+    else
+    {
+      pdf.Dispose();
+    }
 
-    await Assert.That(body.Disposed).IsTrue();
+    // The body goes the way the stream does: disposed asynchronously, it may release its
+    // connection without blocking.
+    await Assert.That(body.DisposedAsynchronously).IsEqualTo(asynchronously);
+    await Assert
+      .That(async () => await response!.Content.ReadAsStreamAsync(TestToken))
+      .Throws<ObjectDisposedException>();
+    await Assert
+      .That(async () => await response!.RequestMessage!.Content!.ReadAsStringAsync(TestToken))
+      .Throws<ObjectDisposedException>();
+    // Disposing it again, either way, does nothing.
+    await pdf.DisposeAsync();
+    pdf.Dispose();
   }
 
   private static HttpResponseMessage PdfResponse(Stream body)
@@ -80,7 +106,10 @@ public class StreamingTests
 
     public bool IsReleased => _released.Task.IsCompleted;
 
-    public bool Disposed { get; private set; }
+    /// <summary>
+    /// Whether the stream was first disposed asynchronously, once it is disposed.
+    /// </summary>
+    public bool? DisposedAsynchronously { get; private set; }
 
     public void Release() => _released.TrySetResult();
 
@@ -136,9 +165,15 @@ public class StreamingTests
     public override void Write(byte[] buffer, int offset, int count) =>
       throw new NotSupportedException();
 
+    public override ValueTask DisposeAsync()
+    {
+      DisposedAsynchronously ??= true;
+      return base.DisposeAsync();
+    }
+
     protected override void Dispose(bool disposing)
     {
-      Disposed = true;
+      DisposedAsynchronously ??= false;
       base.Dispose(disposing);
     }
   }
