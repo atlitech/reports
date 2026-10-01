@@ -130,9 +130,11 @@ internal static class EdgeFinder
     }
     else if (IsLinux)
     {
-      exeNames.AddRange(
-        [ChromeExecutableNameLinux1, ChromeExecutableNameLinux2, ChromeExecutableNameLinux3]
-      );
+      exeNames.AddRange([
+        ChromeExecutableNameLinux1,
+        ChromeExecutableNameLinux2,
+        ChromeExecutableNameLinux3,
+      ]);
     }
     else if (IsMacOs)
     {

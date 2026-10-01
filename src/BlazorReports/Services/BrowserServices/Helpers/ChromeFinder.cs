@@ -131,14 +131,12 @@ internal static class ChromeFinder
     }
     else if (IsLinux)
     {
-      exeNames.AddRange(
-        [
-          ChromeExecutableNameLinux1,
-          ChromeExecutableNameLinux2,
-          ChromeExecutableNameLinux3,
-          ChromeExecutableNameLinux4,
-        ]
-      );
+      exeNames.AddRange([
+        ChromeExecutableNameLinux1,
+        ChromeExecutableNameLinux2,
+        ChromeExecutableNameLinux3,
+        ChromeExecutableNameLinux4,
+      ]);
     }
     else if (IsMacOs)
     {
