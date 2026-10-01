@@ -54,12 +54,16 @@ RUN set -eux; \
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble
 # tini runs as PID 1: it forwards SIGTERM to the server (whose shutdown closes the browser cleanly)
 # and reaps the browser's exited child processes, so none linger as zombies.
+# The lib* packages are the browser's shared libraries that the base image lacks: the NEEDED entries
+# of chrome-headless-shell (readelf -d). The linux64 and linux-arm64 builds differ (only linux64
+# links libatk-bridge-2.0), so the ldd check below runs on every architecture.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     fontconfig \
     fonts-liberation \
     fonts-noto-color-emoji \
     libasound2t64 \
+    libatk-bridge2.0-0t64 \
     libatk1.0-0t64 \
     libatspi2.0-0t64 \
     libdbus-1-3 \
@@ -78,6 +82,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=browser /opt/chrome-headless-shell /opt/chrome-headless-shell
+# Fail the image build when the browser or a library it bundles needs a shared library that is not
+# installed; otherwise it only shows when the browser first starts, as failed conversions.
+RUN set -eu; \
+    status=0; \
+    for file in /opt/chrome-headless-shell/chrome-headless-shell /opt/chrome-headless-shell/*.so*; do \
+      [ -e "$file" ] || continue; \
+      libraries="$(ldd "$file")"; \
+      missing="$(echo "$libraries" | grep 'not found' || true)"; \
+      if [ -n "$missing" ]; then \
+        echo "$file needs shared libraries this image does not install:" >&2; \
+        echo "$missing" >&2; \
+        status=1; \
+      fi; \
+    done; \
+    exit "$status"
 ENV ReportsEngine__Browser__ExecutablePath=/opt/chrome-headless-shell/chrome-headless-shell
 ENV ASPNETCORE_HTTP_PORTS=8080
 WORKDIR /app
