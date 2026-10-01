@@ -182,11 +182,11 @@ internal sealed class ConversionLimiter
   /// </summary>
   public sealed class Permit(ConversionLimiter limiter) : IDisposable
   {
-    private int _released;
+    private bool _released;
 
     public void Dispose()
     {
-      if (Interlocked.Exchange(ref _released, 1) == 0)
+      if (!Interlocked.Exchange(ref _released, true))
       {
         limiter.Release();
       }

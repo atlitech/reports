@@ -9,6 +9,7 @@ Code map (all under `src/Atli.Reports.Engine/`):
 
 | Concern | Type |
 | --- | --- |
+| Finding the browser executable (one table of install locations per browser) | `Chromium/Discovery/BrowserFinder.cs` |
 | Browser process: launch, endpoint discovery, kill, profile cleanup | `Chromium/Browser/BrowserProcess.cs` |
 | One running browser and its connection; per-conversion pages | `Chromium/Browser/BrowserInstance.cs` |
 | Lazy start, crash recovery, recycling, idle close, shutdown | `Chromium/Browser/BrowserManager.cs` |
@@ -69,12 +70,14 @@ DevTools target ids, and secret-looking parameters masked. Keep the check out of
 a restart does not repair a browser that cannot start.
 
 **Launching.** The browser starts with `--remote-debugging-port=0` and a fresh profile directory
-(`$TMPDIR/atli-reports-<guid>`). The engine reads the DevTools endpoint from the browser's standard
-error (`DevTools listening on ws://…`) instead of polling for the `DevToolsActivePort` file, and keeps
-draining standard output and error (logged at debug level) so a chatty browser never blocks on a full
-pipe. Arguments go through `ProcessStartInfo.ArgumentList`, so paths with spaces need no quoting.
-If the browser exits before it reports its endpoint, the error includes its last lines of output
-(for example "Running as root without --no-sandbox is not supported").
+(`$TMPDIR/atli-reports-<random>`, made by `Directory.CreateTempSubdirectory`: unique, created
+atomically, and readable only by the current user on Unix). The engine reads the DevTools endpoint
+from the browser's standard error (`DevTools listening on ws://…`) instead of polling for the
+`DevToolsActivePort` file, and keeps draining standard output and error (logged at debug level) so
+a chatty browser never blocks on a full pipe. Arguments go through `ProcessStartInfo.ArgumentList`,
+so paths with spaces need no quoting. If the browser exits before it reports its endpoint, the error
+includes its last lines of output (for example "Running as root without --no-sandbox is not
+supported").
 
 **Crash recovery.** The engine watches the process (`Process.Exited`, with `EnableRaisingEvents`) and
 the DevTools connection. When either ends unexpectedly, the browser is retired: conversions running
@@ -225,8 +228,8 @@ destination throws reach the caller unchanged.
 ## Telemetry
 
 The engine publishes traces on the `Atli.Reports.Engine` activity source and metrics on the
-`Atli.Reports.Engine` meter. `ReportsEngineTelemetry.ActivitySourceName` and
-`ReportsEngineTelemetry.MeterName` hold the names:
+`Atli.Reports.Engine` meter, both versioned with the engine assembly's `major.minor.patch`.
+`ReportsEngineTelemetry.ActivitySourceName` and `ReportsEngineTelemetry.MeterName` hold the names:
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -312,6 +315,21 @@ Published through `IMeterFactory` when the host registers one:
 | `atli.reports.browser.launches` | counter | Browser processes started |
 | `atli.reports.browser.crashes` | counter | Browsers that exited or disconnected unexpectedly |
 | `atli.reports.browser.recycles` | counter | Browsers replaced for age or conversion count |
+
+The histograms record seconds and advise their own bucket boundaries, which OpenTelemetry uses
+unless a view overrides them (its defaults, 0 to 10,000, suit milliseconds and would put almost
+every conversion in one bucket):
+
+| Histogram | Bucket boundaries (s) |
+| --- | --- |
+| `atli.reports.conversion.duration` | 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 15, 30, 60, 120 |
+| `atli.reports.queue.wait` | 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 20, 30, 60 |
+
+A simple document converts in tens of milliseconds and a long one in seconds, so the conversion
+buckets are finest below a second. A conversion can wait up to `QueueTimeout` (30 seconds by
+default) for a slot and up to `CommandTimeout` (30 seconds) for each command, the load wait, or
+the signal (`WaitTimeout`), so the upper buckets keep slow and timed-out conversions apart. Waits
+that hit the default queue timeout land just above the 30-second boundary.
 
 ### Blazor reports
 

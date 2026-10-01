@@ -32,8 +32,8 @@ internal sealed class DevToolsProbe(DevToolsConnection connection) : IAsyncDispo
     {
       using (var reply = await connection.SendAsync(new("Target.getTargets"), null, deadline.Token))
       {
-        using var targets = JsonDocument.Parse(reply.Result.ToArray());
-        foreach (var target in targets.RootElement.GetProperty("targetInfos").EnumerateArray())
+        var targets = JsonElement.Parse(reply.Result);
+        foreach (var target in targets.GetProperty("targetInfos").EnumerateArray())
         {
           if (target.GetProperty("title").GetString() == title)
           {
@@ -63,8 +63,7 @@ internal sealed class DevToolsProbe(DevToolsConnection connection) : IAsyncDispo
       )
     )
     {
-      using var result = JsonDocument.Parse(reply.Result.ToArray());
-      sessionId = result.RootElement.GetProperty("sessionId").GetString()!;
+      sessionId = JsonElement.Parse(reply.Result).GetProperty("sessionId").GetString()!;
     }
 
     connection.AttachSession(sessionId, targetId);

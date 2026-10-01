@@ -22,11 +22,22 @@ namespace Atli.Reports.Engine.Diagnostics;
 internal static class EngineActivities
 {
   /// <summary>
+  /// The version the engine's activity source and meter report: the assembly version, as
+  /// <c>major.minor.patch</c>.
+  /// </summary>
+  /// <remarks>Declared before <see cref="Source"/>, whose initializer reads it.</remarks>
+  public static readonly string? TelemetryVersion = typeof(EngineActivities)
+    .Assembly.GetName()
+    .Version?.ToString(3);
+
+  /// <summary>
   /// The engine's activity source.
   /// </summary>
   public static readonly ActivitySource Source = new(
-    ReportsEngineTelemetry.ActivitySourceName,
-    typeof(EngineActivities).Assembly.GetName().Version?.ToString(3)
+    new ActivitySourceOptions(ReportsEngineTelemetry.ActivitySourceName)
+    {
+      Version = TelemetryVersion,
+    }
   );
 
   /// <summary>

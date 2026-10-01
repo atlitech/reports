@@ -17,6 +17,11 @@ namespace Atli.Reports.Engine.Diagnostics;
 /// <item><term><c>atli.reports.browser.crashes</c> (counter)</term><description>Browser processes that exited or disconnected unexpectedly.</description></item>
 /// <item><term><c>atli.reports.browser.recycles</c> (counter)</term><description>Browser processes replaced because of their age or conversion count.</description></item>
 /// </list>
+/// <para>
+/// The histograms advise bucket boundaries in seconds (<see cref="ConversionDurationBuckets"/> and
+/// <see cref="QueueWaitBuckets"/>); OpenTelemetry's defaults suit milliseconds and would put almost
+/// every conversion in the first bucket.
+/// </para>
 /// </remarks>
 internal sealed class EngineMetrics : IDisposable
 {
@@ -24,6 +29,57 @@ internal sealed class EngineMetrics : IDisposable
   /// The name of the engine's meter; see <see cref="ReportsEngineTelemetry.MeterName"/>.
   /// </summary>
   public const string MeterName = ReportsEngineTelemetry.MeterName;
+
+  /// <summary>
+  /// The bucket boundaries of <c>atli.reports.conversion.duration</c>, in seconds: fine-grained from
+  /// 10 ms, where a simple document converts, up to two minutes. A conversion can wait 30 seconds in
+  /// the queue and the same again for each DevTools command, the load wait, or the signal by
+  /// default, so the coarse upper buckets keep slow and timed-out conversions apart.
+  /// </summary>
+  internal static readonly double[] ConversionDurationBuckets =
+  [
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1,
+    2.5,
+    5,
+    7.5,
+    10,
+    15,
+    30,
+    60,
+    120,
+  ];
+
+  /// <summary>
+  /// The bucket boundaries of <c>atli.reports.queue.wait</c>, in seconds: from 5 ms, a slot freed
+  /// almost at once, up to a minute. The default queue timeout is 30 seconds, so waits that time out
+  /// with it land just above the 30-second boundary.
+  /// </summary>
+  internal static readonly double[] QueueWaitBuckets =
+  [
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1,
+    2.5,
+    5,
+    10,
+    15,
+    20,
+    30,
+    60,
+  ];
 
   private readonly Meter _meter;
   private readonly bool _ownsMeter;
@@ -38,11 +94,13 @@ internal sealed class EngineMetrics : IDisposable
   public EngineMetrics(IMeterFactory? meterFactory = null)
   {
     _ownsMeter = meterFactory is null;
-    _meter = meterFactory?.Create(MeterName) ?? new Meter(MeterName);
+    MeterOptions meterOptions = new(MeterName) { Version = EngineActivities.TelemetryVersion };
+    _meter = meterFactory?.Create(meterOptions) ?? new Meter(meterOptions);
     _conversionDuration = _meter.CreateHistogram<double>(
       "atli.reports.conversion.duration",
       unit: "s",
-      description: "Duration of finished conversions, including the wait in the queue."
+      description: "Duration of finished conversions, including the wait in the queue.",
+      advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = ConversionDurationBuckets }
     );
     _activeConversions = _meter.CreateUpDownCounter<long>(
       "atli.reports.conversion.active",
@@ -57,7 +115,8 @@ internal sealed class EngineMetrics : IDisposable
     _queueWait = _meter.CreateHistogram<double>(
       "atli.reports.queue.wait",
       unit: "s",
-      description: "Time conversions waited for a slot."
+      description: "Time conversions waited for a slot.",
+      advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = QueueWaitBuckets }
     );
     _browserLaunches = _meter.CreateCounter<long>(
       "atli.reports.browser.launches",

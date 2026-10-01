@@ -48,13 +48,13 @@ public class DevToolsConnectionTests
     var payload = new string('x', 300 * 1024);
 
     var send = pair.Connection.SendAsync(new("Test.big"), null, TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
-    var id = command.RootElement.GetProperty("id").GetInt32();
+    var command = await pair.Peer.ReceiveAsync();
+    var id = command.GetProperty("id").GetInt32();
     await pair.Peer.SendAsync(Reply(id, "{\"data\":\"" + payload + "\"}"), frameSize: 4096);
     using var reply = await send;
 
-    using var result = JsonDocument.Parse(reply.Result.ToArray());
-    await Assert.That(result.RootElement.GetProperty("data").GetString()).IsEqualTo(payload);
+    var result = JsonElement.Parse(reply.Result);
+    await Assert.That(result.GetProperty("data").GetString()).IsEqualTo(payload);
   }
 
   [Test]
@@ -67,16 +67,14 @@ public class DevToolsConnectionTests
     var session = pair.Connection.AttachSession("session-1", "target-1");
 
     var send = session.SendAsync(message, TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
-    var id = command.RootElement.GetProperty("id").GetInt32();
+    var command = await pair.Peer.ReceiveAsync();
+    var id = command.GetProperty("id").GetInt32();
     await pair.Peer.SendAsync(Reply(id, """{}"""));
     using var reply = await send;
 
-    var parameters = command.RootElement.GetProperty("params");
+    var parameters = command.GetProperty("params");
     await Assert.That(parameters.GetProperty("html").GetString()).IsEqualTo(html);
-    await Assert
-      .That(command.RootElement.GetProperty("sessionId").GetString())
-      .IsEqualTo("session-1");
+    await Assert.That(command.GetProperty("sessionId").GetString()).IsEqualTo("session-1");
   }
 
   [Test]
@@ -85,8 +83,8 @@ public class DevToolsConnectionTests
     await using var pair = await FakePeer.ConnectAsync(TimeSpan.FromSeconds(10));
 
     var send = pair.Connection.SendAsync(new("Page.printToPDF"), null, TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
-    var id = command.RootElement.GetProperty("id").GetInt32();
+    var command = await pair.Peer.ReceiveAsync();
+    var id = command.GetProperty("id").GetInt32();
     await pair.Peer.SendAsync(
       ErrorReply(id, """{"code":-32000,"message":"Page range syntax error"}""")
     );
@@ -103,24 +101,22 @@ public class DevToolsConnectionTests
     await using var pair = await FakePeer.ConnectAsync(TimeSpan.FromMilliseconds(200));
 
     var unanswered = pair.Connection.SendAsync(new("Test.slow"), null, TestToken);
-    using var slow = await pair.Peer.ReceiveAsync();
+    var slow = await pair.Peer.ReceiveAsync();
     await Assert.That(async () => await unanswered).Throws<DevToolsTimeoutException>();
     await Assert.That(pair.Connection.PendingCount).IsEqualTo(0);
 
     // The late reply is dropped quietly, and the next command still works. The next command gets
     // its own generous timeout: the connection's 200 ms default exists to make the first command
     // time out, and a busy CI runner can take longer than that to answer.
-    await pair.Peer.SendAsync(Reply(slow.RootElement.GetProperty("id").GetInt32(), """{}"""));
+    await pair.Peer.SendAsync(Reply(slow.GetProperty("id").GetInt32(), """{}"""));
     var next = pair.Connection.SendAsync(
       new("Test.next"),
       null,
       TestToken,
       TimeSpan.FromSeconds(10)
     );
-    using var command = await pair.Peer.ReceiveAsync();
-    await pair.Peer.SendAsync(
-      Reply(command.RootElement.GetProperty("id").GetInt32(), """{"ok":true}""")
-    );
+    var command = await pair.Peer.ReceiveAsync();
+    await pair.Peer.SendAsync(Reply(command.GetProperty("id").GetInt32(), """{"ok":true}"""));
     using var reply = await next;
 
     await Assert.That(Encoding.UTF8.GetString(reply.Result)).IsEqualTo("""{"ok":true}""");
@@ -132,7 +128,7 @@ public class DevToolsConnectionTests
     await using var pair = await FakePeer.ConnectAsync(TimeSpan.FromSeconds(10));
 
     var pending = pair.Connection.SendAsync(new("Test.pending"), null, TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
+    await pair.Peer.ReceiveAsync();
     pair.Peer.Abort();
 
     await Assert.That(async () => await pending).Throws<BrowserConnectionClosedException>();
@@ -156,7 +152,7 @@ public class DevToolsConnectionTests
       """{"method":"Runtime.bindingCalled","params":{"name":"x"},"sessionId":"session-1"}"""
     );
     var pending = session.SendAsync(new("Page.printToPDF"), TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
+    await pair.Peer.ReceiveAsync();
     await pair.Peer.SendAsync(
       """{"method":"Target.detachedFromTarget","params":{"sessionId":"session-1","targetId":"target-1"}}"""
     );
@@ -174,9 +170,9 @@ public class DevToolsConnectionTests
     await using var pair = await FakePeer.ConnectAsync(TimeSpan.FromSeconds(10));
 
     var send = pair.Connection.SendAsync(new("Test.after"), null, TestToken);
-    using var command = await pair.Peer.ReceiveAsync();
+    var command = await pair.Peer.ReceiveAsync();
     await pair.Peer.SendAsync("""{"id": "not a number" """);
-    await pair.Peer.SendAsync(Reply(command.RootElement.GetProperty("id").GetInt32(), """{}"""));
+    await pair.Peer.SendAsync(Reply(command.GetProperty("id").GetInt32(), """{}"""));
     using var reply = await send;
 
     await Assert.That(pair.Connection.IsOpen).IsTrue();
@@ -221,7 +217,7 @@ public class DevToolsConnectionTests
       return new Pair(connection, new FakePeer(serverSocket, client, server));
     }
 
-    public async Task<JsonDocument> ReceiveAsync()
+    public async Task<JsonElement> ReceiveAsync()
     {
       using MemoryStream message = new();
       var buffer = new byte[64 * 1024];
@@ -231,7 +227,9 @@ public class DevToolsConnectionTests
         message.Write(buffer, 0, received.Count);
         if (received.EndOfMessage)
         {
-          return JsonDocument.Parse(message.ToArray());
+          return JsonElement.Parse(
+            new ReadOnlySpan<byte>(message.GetBuffer(), 0, (int)message.Length)
+          );
         }
       }
     }
@@ -258,8 +256,8 @@ public class DevToolsConnectionTests
       {
         while (true)
         {
-          using var command = await ReceiveAsync();
-          await SendAsync(reply(command.RootElement.GetProperty("id").GetInt32()));
+          var command = await ReceiveAsync();
+          await SendAsync(reply(command.GetProperty("id").GetInt32()));
         }
       }
       catch (Exception exception)

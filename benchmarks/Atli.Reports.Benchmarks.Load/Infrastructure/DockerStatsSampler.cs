@@ -18,6 +18,7 @@ internal readonly record struct StatsSample(long Timestamp, double CpuPercent, l
 internal sealed class DockerStatsSampler : IAsyncDisposable
 {
   private readonly List<StatsSample> _samples = [];
+  private readonly Lock _samplesLock = new();
   private readonly CancellationTokenSource _stop = new();
   private readonly Task _loop;
 
@@ -41,7 +42,7 @@ internal sealed class DockerStatsSampler : IAsyncDisposable
       // Expected: the poll in flight is abandoned.
     }
 
-    lock (_samples)
+    lock (_samplesLock)
     {
       return [.. _samples];
     }
@@ -64,7 +65,7 @@ internal sealed class DockerStatsSampler : IAsyncDisposable
       );
       if (result.Succeeded && TryParse(result.Output, out var cpu, out var memory))
       {
-        lock (_samples)
+        lock (_samplesLock)
         {
           _samples.Add(new StatsSample(Stopwatch.GetTimestamp(), cpu, memory));
         }
