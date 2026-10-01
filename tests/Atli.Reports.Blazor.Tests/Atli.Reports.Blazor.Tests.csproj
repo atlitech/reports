@@ -11,6 +11,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Generates the OpenAPI document that OpenApiTests checks the report endpoints in. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="TUnit" />
   </ItemGroup>
 

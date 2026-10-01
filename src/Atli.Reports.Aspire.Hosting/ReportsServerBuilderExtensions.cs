@@ -240,24 +240,23 @@ public static class ReportsServerBuilderExtensions
       );
     }
 
+    // Both limits are checked before either is set, so a rejected call sets nothing.
+    List<(string Name, string Value)> variables = [];
     if (maxConversionsPerProcess is { } conversions)
     {
       ArgumentOutOfRangeException.ThrowIfNegative(conversions, nameof(maxConversionsPerProcess));
+      variables.Add((MaxConversionsPerProcessVariable, Format(conversions)));
     }
 
     if (maxProcessLifetime is { } lifetime)
     {
       ThrowIfNotPositiveOrInfinite(lifetime, nameof(maxProcessLifetime));
+      variables.Add((MaxProcessLifetimeVariable, Format(lifetime)));
     }
 
-    if (maxConversionsPerProcess is { } maxConversions)
+    foreach (var (name, value) in variables)
     {
-      builder.WithEnvironment(MaxConversionsPerProcessVariable, Format(maxConversions));
-    }
-
-    if (maxProcessLifetime is { } maxLifetime)
-    {
-      builder.WithEnvironment(MaxProcessLifetimeVariable, Format(maxLifetime));
+      builder.WithEnvironment(name, value);
     }
 
     return builder;

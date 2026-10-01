@@ -67,7 +67,7 @@ internal sealed class DevToolsConnection : IAsyncDisposable
   private readonly Task _receiveLoop;
   private Exception? _closeReason;
   private int _lastId;
-  private int _disposed;
+  private bool _disposed;
 
   private DevToolsConnection(WebSocket socket, Uri uri, TimeSpan commandTimeout, ILogger logger)
   {
@@ -206,23 +206,7 @@ internal sealed class DevToolsConnection : IAsyncDisposable
       return;
     }
 
-    _ = SendAsync(message, sessionId, CancellationToken.None)
-      .ContinueWith(
-        static task =>
-        {
-          if (task.IsCompletedSuccessfully)
-          {
-            task.Result.Dispose();
-          }
-          else
-          {
-            _ = task.Exception;
-          }
-        },
-        CancellationToken.None,
-        TaskContinuationOptions.ExecuteSynchronously,
-        TaskScheduler.Default
-      );
+    DevToolsReply.DisposeWhenReady(SendAsync(message, sessionId, CancellationToken.None));
   }
 
   /// <summary>
@@ -268,7 +252,7 @@ internal sealed class DevToolsConnection : IAsyncDisposable
 
   public async ValueTask DisposeAsync()
   {
-    if (Interlocked.Exchange(ref _disposed, 1) == 1)
+    if (Interlocked.Exchange(ref _disposed, true))
     {
       return;
     }
@@ -669,22 +653,7 @@ internal sealed class DevToolsConnection : IAsyncDisposable
       return;
     }
 
-    _ = pending.Task.ContinueWith(
-      static task =>
-      {
-        if (task.IsCompletedSuccessfully)
-        {
-          task.Result.Dispose();
-        }
-        else
-        {
-          _ = task.Exception;
-        }
-      },
-      CancellationToken.None,
-      TaskContinuationOptions.ExecuteSynchronously,
-      TaskScheduler.Default
-    );
+    DevToolsReply.DisposeWhenReady(pending.Task);
   }
 
   /// <summary>

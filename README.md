@@ -21,8 +21,8 @@ formerly **BlazorReports**.
 | [`Atli.Reports.Server`](src/Atli.Reports.Server) | A NativeAOT HTTP service over the engine: `POST /convert` with HTML and options, get a PDF back. Ships as a container image with `chrome-headless-shell`. | Build the image from this repository; no published image yet |
 | [`Atli.Reports.Aspire.Hosting`](src/Atli.Reports.Aspire.Hosting) | Runs the server in an [Aspire](https://aspire.dev) AppHost: `builder.AddReportsServer("reports")`, with its health check, telemetry, typed settings, and the connection string the client reads. See [docs/aspire.md](docs/aspire.md). | NuGet package, from 0.26.0 |
 
-The packages target .NET 10, except `Atli.Reports.Aspire.Hosting`, which targets .NET 8 so that any
-Aspire 13 AppHost can use it. Every component needs a Chromium-based browser; see
+The packages target .NET 10, so an AppHost that uses `Atli.Reports.Aspire.Hosting` targets .NET 10
+too. Every component needs a Chromium-based browser; see
 [Browser requirements](#browser-requirements).
 
 ## Quick start: a Blazor report endpoint
@@ -488,7 +488,7 @@ aspire stop
 | --- | --- |
 | `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker). The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
 | `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
-| `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); the dashboard links its Swagger UI |
+| `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |
 | `tailwind-css` | Generates the Tailwind example's stylesheet (`bun install`, then the Tailwind CLI) and exits |
 | `gotenberg` | [Gotenberg](https://gotenberg.dev) 8.37 with Chromium, for side-by-side comparisons. Off unless you start with `aspire start -- --Gotenberg:Enabled=true` |

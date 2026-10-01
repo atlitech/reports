@@ -3,7 +3,6 @@
   <PropertyGroup>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NuGetAudit>true</NuGetAudit>
     <AnalysisMode>Recommended</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Nullable>enable</Nullable>
@@ -11,6 +10,11 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Only projects that opt in with IsPackable=true are published to NuGet. -->
     <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Deterministic source paths in CI builds, so the published symbols carry no runner paths. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <PropertyGroup>

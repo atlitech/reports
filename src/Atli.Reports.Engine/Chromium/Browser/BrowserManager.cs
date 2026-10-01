@@ -729,7 +729,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     IConversionPage page
   ) : IConversionPage
   {
-    private int _disposed;
+    private bool _disposed;
 
     public Task EnableSignalAsync(string signalName, CancellationToken cancellationToken) =>
       page.EnableSignalAsync(signalName, cancellationToken);
@@ -751,7 +751,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
 
     public async ValueTask DisposeAsync()
     {
-      if (Interlocked.Exchange(ref _disposed, 1) == 1)
+      if (Interlocked.Exchange(ref _disposed, true))
       {
         return;
       }

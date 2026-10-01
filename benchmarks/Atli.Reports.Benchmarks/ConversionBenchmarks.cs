@@ -12,9 +12,9 @@ namespace Atli.Reports.Benchmarks;
 /// <remarks>
 /// <para>
 /// One converter is built per fixture in <see cref="SetupAsync"/> and reused for every operation, the
-/// way an application uses the registered singleton. Its first conversion runs in the setup, so a
-/// browser the engine keeps alive between conversions starts outside the measurement; today's engine
-/// launches a browser for every conversion, and that launch is part of each operation.
+/// way an application uses the registered singleton. Its first conversion runs in the setup, so the
+/// one long-lived browser that serves every conversion starts outside the measurement; each operation
+/// is one conversion in an isolated page of that browser.
 /// </para>
 /// <para>
 /// Engine options bind from <c>ReportsEngine__*</c> environment variables, exactly like the server, for

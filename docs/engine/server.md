@@ -170,8 +170,9 @@ export already wired to the AppHost's dashboard.
 docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
 ```
 
-- **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble`, `runtime-deps:10.0-noble`), so the
-  NativeAOT binary runs against the glibc it was linked with.
+- **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble-aot`, which carries the NativeAOT
+  toolchain, and `runtime-deps:10.0-noble`), so the NativeAOT binary runs against the glibc it was
+  linked with.
 - **The browser is `chrome-headless-shell`** from Chrome for Testing (`linux64` or `linux-arm64`),
   which renders and isolates conversions several times faster than the full browser (see
   [architecture.md](architecture.md#isolation)). The `CHROME_VERSION` build argument pins a version;
@@ -181,8 +182,9 @@ docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
 - **`tini` is PID 1.** It forwards `SIGTERM` to the server, whose shutdown drains conversions and
   closes the browser cleanly, and it reaps the browser's exited child processes so none linger as
   zombies.
-- **The server runs as the non-root `app` user.** The browser runs without its sandbox, which only
-  suits trusted HTML.
+- **The server runs as the non-root `app` user** (UID 1654, set by number so Kubernetes'
+  `runAsNonRoot` can verify it). The browser runs without its sandbox, which only suits trusted
+  HTML.
 
 ### Published image
 

@@ -12,6 +12,7 @@ internal sealed class TestHttpServer : IAsyncDisposable
 {
   private readonly HttpListener _listener;
   private readonly Dictionary<string, Route> _routes = [];
+  private readonly Lock _routesLock = new();
   private readonly Task _loop;
 
   public TestHttpServer()
@@ -40,7 +41,7 @@ internal sealed class TestHttpServer : IAsyncDisposable
     string cacheControl = "no-store"
   )
   {
-    lock (_routes)
+    lock (_routesLock)
     {
       _routes[path] = new Route(contentType, body, delay, gate ?? Task.CompletedTask, cacheControl);
     }
@@ -92,7 +93,7 @@ internal sealed class TestHttpServer : IAsyncDisposable
 
     Route? route;
     bool found;
-    lock (_routes)
+    lock (_routesLock)
     {
       found = _routes.TryGetValue(path, out route);
     }

@@ -19,8 +19,8 @@ checks that the app returns PDFs without starting a browser.
 ## Requirements
 
 - Aspire 13.0 or later. The hosting package depends on `Aspire.Hosting` 13.0.0 or later, so your
-  AppHost keeps the Aspire version it already has. It targets .NET 8, so the AppHost may target
-  .NET 8, 9, or 10.
+  AppHost keeps the Aspire version it already has.
+- An AppHost that targets .NET 10 (`net10.0`), like the hosting package.
 - Docker or Podman on the machine that runs the AppHost.
 - The packages and the image are released together, starting with 0.26.0. Until then, build the
   server from source (see [below](#build-the-server-from-source)).

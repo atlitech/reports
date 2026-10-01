@@ -9,7 +9,7 @@
     <Project Path="examples/ExampleTemplates/ExampleTemplates.csproj" />
     <Project Path="examples/RemoteReportServer/RemoteReportServer.csproj" />
     <Project Path="examples/SimpleReportServer/SimpleReportServer.csproj" />
-    <Project Path="examples\TailwindReportServer\TailwindReportServer.csproj" Type="Classic C#" />
+    <Project Path="examples/TailwindReportServer/TailwindReportServer.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Atli.Reports.Aspire.Hosting/Atli.Reports.Aspire.Hosting.csproj" />

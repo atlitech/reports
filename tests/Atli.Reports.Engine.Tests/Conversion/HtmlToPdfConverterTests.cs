@@ -259,6 +259,7 @@ public class HtmlToPdfConverterTests
   public async Task Conversions_are_measured_by_outcome()
   {
     List<(double Seconds, string? Outcome)> measurements = [];
+    Lock measurementsLock = new();
     using MeterListener listener = new();
     listener.InstrumentPublished = (instrument, meterListener) =>
     {
@@ -282,7 +283,7 @@ public class HtmlToPdfConverterTests
           }
         }
 
-        lock (measurements)
+        lock (measurementsLock)
         {
           measurements.Add((value, outcome));
         }
@@ -297,7 +298,7 @@ public class HtmlToPdfConverterTests
 
     // Other tests may run converters in parallel; look for this test's two outcomes.
     string[] outcomes;
-    lock (measurements)
+    lock (measurementsLock)
     {
       outcomes = [.. measurements.Select(m => m.Outcome ?? "")];
     }
