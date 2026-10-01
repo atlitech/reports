@@ -154,21 +154,13 @@ public class TelemetryTests
   /// </summary>
   private sealed class FakeOtlpCollector : IAsyncDisposable
   {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly ConcurrentDictionary<string, ConcurrentQueue<byte[]>> _bodies = new();
     private readonly Task _loop;
 
     public FakeOtlpCollector()
     {
-      using (var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0))
-      {
-        probe.Start();
-        Endpoint = $"http://127.0.0.1:{((IPEndPoint)probe.LocalEndpoint).Port}";
-        probe.Stop();
-      }
-
-      _listener.Prefixes.Add(Endpoint + "/");
-      _listener.Start();
+      (_listener, Endpoint) = LoopbackHttpListener.Start();
       _loop = Task.Run(ServeAsync);
     }
 
