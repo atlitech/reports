@@ -15,6 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- A library the AppHost calls, not a service it runs. -->
+    <ProjectReference
+      Include="..\..\src\Atli.Reports.Aspire.Hosting\Atli.Reports.Aspire.Hosting.csproj"
+      IsAspireProjectResource="false"
+    />
     <ProjectReference Include="..\SimpleReportServer\SimpleReportServer.csproj" />
     <ProjectReference Include="..\TailwindReportServer\TailwindReportServer.csproj" />
   </ItemGroup>

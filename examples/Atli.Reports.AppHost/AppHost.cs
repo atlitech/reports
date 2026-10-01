@@ -2,14 +2,13 @@ using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Atli.Reports.Server: the image src/Atli.Reports.Server/docker-compose.yml builds, with the
-// repository root as the build context. It renders with its own chrome-headless-shell.
-// A later change replaces this block with the hosting integration: builder.AddReportsServer("reports").
+// Atli.Reports.Server, through its hosting integration (src/Atli.Reports.Aspire.Hosting). On its own,
+// AddReportsServer pulls the image released with the package; WithDockerfile builds this checkout's
+// server instead, with the repository root as the build context. It renders with its own
+// chrome-headless-shell.
 builder
-  .AddDockerfile("reports-server", "../..", "src/Atli.Reports.Server/Dockerfile")
-  .WithHttpEndpoint(targetPort: 8080)
-  .WithHttpHealthCheck("/health/ready")
-  .WithOtlpExporter();
+  .AddReportsServer("reports-server")
+  .WithDockerfile("../..", "src/Atli.Reports.Server/Dockerfile");
 
 // The examples run the engine in-process, so they need a browser on this machine. The engine finds
 // Chrome or Chromium in the standard install locations. To use another browser, for example
