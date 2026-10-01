@@ -26,11 +26,13 @@ builder
 // (user secrets, appsettings.json, or the ReportsEngine__Browser__ExecutablePath environment variable).
 var browserExecutablePath = builder.Configuration["ReportsEngine:Browser:ExecutablePath"];
 
-// The launch profile's launchUrl already points the endpoint's URL at /swagger; only name it.
 var simpleReportServer = builder
   .AddProject<Projects.SimpleReportServer>("simple-report-server")
   .WithHttpHealthCheck("/health")
-  .WithUrlForEndpoint("http", url => url.DisplayText = "Swagger UI");
+  .WithUrlForEndpoint(
+    "http",
+    _ => new() { Url = "/openapi/v1.json", DisplayText = "OpenAPI document" }
+  );
 
 // The Tailwind example inlines wwwroot/styles/base.css, which is generated rather than checked in:
 // build it with the Tailwind CLI (bun install, then the package.json script) before the example starts.

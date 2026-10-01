@@ -8,8 +8,8 @@ var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.AddServiceDefaults();
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// Describes the report endpoints at /openapi/v1.json; ReportServer.http has requests to try them with.
+builder.Services.AddOpenApi();
 builder.Services.AddBlazorReports();
 
 // Reads ReportsEngine:* from configuration, for example the browser path the AppHost can pass on.
@@ -24,8 +24,7 @@ app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())
 {
-  app.UseSwagger();
-  app.UseSwaggerUI();
+  app.MapOpenApi();
 }
 
 var reportsGroup = app.MapGroup("reports");

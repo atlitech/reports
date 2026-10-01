@@ -14,8 +14,4 @@
     <ProjectReference Include="..\ExampleTemplates\ExampleTemplates.csproj" />
     <ProjectReference Include="..\Atli.Reports.ServiceDefaults\Atli.Reports.ServiceDefaults.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="wwwroot\styles\" />
-  </ItemGroup>
 </Project>

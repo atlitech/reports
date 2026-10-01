@@ -29,6 +29,12 @@ public static class Extensions
   private const string BlazorReportsTelemetryName = "Atli.Reports.Blazor";
 
   /// <summary>
+  /// The .NET runtime's built-in meter (GC, thread pool, JIT, exceptions). Since .NET 9 the runtime
+  /// publishes these itself, so no instrumentation package is needed.
+  /// </summary>
+  private const string RuntimeMeterName = "System.Runtime";
+
+  /// <summary>
   /// Adds OpenTelemetry, the default health checks, service discovery, and the standard resilience
   /// handler for every <see cref="HttpClient"/>.
   /// </summary>
@@ -70,7 +76,7 @@ public static class Extensions
         metrics
           .AddAspNetCoreInstrumentation()
           .AddHttpClientInstrumentation()
-          .AddRuntimeInstrumentation()
+          .AddMeter(RuntimeMeterName)
           .AddMeter(ReportsEngineTelemetryName);
       })
       .WithTracing(tracing =>

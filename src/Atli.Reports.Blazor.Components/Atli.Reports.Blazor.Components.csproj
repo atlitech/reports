@@ -14,10 +14,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <SupportedPlatform Include="browser" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
   </ItemGroup>
 </Project>
