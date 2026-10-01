@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Invoice INV-2026-0042</title>
+    <!--
+      Benchmark fixture "invoice": a one-page invoice with embedded CSS, an inline SVG logo and a
+      line-item table. Fully self-contained: no network or file fetches.
+    -->
+    <style>
+      @page {
+        size: A4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Liberation Sans", Arial, Helvetica, sans-serif;
+        font-size: 10pt;
+        color: #1f2933;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 3px solid #0f4c81;
+        padding-bottom: 12px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand h1 {
+        margin: 0;
+        font-size: 18pt;
+        color: #0f4c81;
+      }
+      .brand p {
+        margin: 2px 0 0;
+        color: #52606d;
+      }
+      .meta {
+        text-align: right;
+      }
+      .meta h2 {
+        margin: 0 0 6px;
+        font-size: 22pt;
+        letter-spacing: 2px;
+        color: #0f4c81;
+      }
+      .meta table td {
+        padding: 1px 0 1px 12px;
+      }
+      .parties {
+        display: flex;
+        gap: 24px;
+        margin: 20px 0;
+      }
+      .party {
+        flex: 1;
+        background: #f0f4f8;
+        border-radius: 6px;
+        padding: 10px 14px;
+      }
+      .party h3 {
+        margin: 0 0 6px;
+        font-size: 9pt;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #52606d;
+      }
+      .party p {
+        margin: 0;
+        line-height: 1.45;
+      }
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      table.items th {
+        background: #0f4c81;
+        color: #ffffff;
+        text-align: left;
+        padding: 7px 8px;
+        font-size: 9pt;
+      }
+      table.items td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #d9e2ec;
+      }
+      table.items tr:nth-child(even) td {
+        background: #f8fafc;
+      }
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .totals {
+        margin-left: auto;
+        margin-top: 14px;
+        width: 45%;
+        border-collapse: collapse;
+      }
+      .totals td {
+        padding: 5px 8px;
+      }
+      .totals tr.grand td {
+        border-top: 2px solid #0f4c81;
+        font-weight: bold;
+        font-size: 12pt;
+        color: #0f4c81;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: #e3f8ff;
+        color: #0b69a3;
+        font-size: 8pt;
+        font-weight: bold;
+      }
+      footer {
+        margin-top: 28px;
+        padding-top: 10px;
+        border-top: 1px solid #d9e2ec;
+        color: #52606d;
+        font-size: 8.5pt;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <svg width="56" height="56" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0f4c81" />
+              <stop offset="1" stop-color="#2bb0ed" />
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="52" height="52" rx="12" fill="url(#g)" />
+          <path d="M14 40 L28 14 L42 40 Z" fill="none" stroke="#ffffff" stroke-width="4" />
+          <circle cx="28" cy="33" r="4" fill="#ffffff" />
+        </svg>
+        <div>
+          <h1>Northwind Analytics</h1>
+          <p>221 Harbor Street, Suite 400 · Portland, OR 97204</p>
+          <p>billing@northwind.example · +1 (503) 555-0142</p>
+        </div>
+      </div>
+      <div class="meta">
+        <h2>INVOICE</h2>
+        <table>
+          <tr>
+            <td>Invoice no.</td>
+            <td><strong>INV-2026-0042</strong></td>
+          </tr>
+          <tr>
+            <td>Issue date</td>
+            <td>2026-09-30</td>
+          </tr>
+          <tr>
+            <td>Due date</td>
+            <td>2026-10-30</td>
+          </tr>
+          <tr>
+            <td>Status</td>
+            <td><span class="badge">DUE</span></td>
+          </tr>
+        </table>
+      </div>
+    </header>
+
+    <section class="parties">
+      <div class="party">
+        <h3>Bill to</h3>
+        <p>
+          <strong>Contoso Retail Group</strong><br />
+          Attn: Accounts Payable<br />
+          1800 Lakeview Avenue<br />
+          Seattle, WA 98109
+        </p>
+      </div>
+      <div class="party">
+        <h3>Ship to</h3>
+        <p>
+          <strong>Contoso Distribution Center</strong><br />
+          Dock 7, 4400 Industrial Way<br />
+          Tacoma, WA 98421<br />
+          PO reference: CR-55821
+        </p>
+      </div>
+      <div class="party">
+        <h3>Payment</h3>
+        <p>
+          Terms: Net 30<br />
+          Bank: First Pacific Bank<br />
+          IBAN: US00 0000 0000 0000 4242<br />
+          Reference: INV-2026-0042
+        </p>
+      </div>
+    </section>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th style="width: 6%">#</th>
+          <th>Description</th>
+          <th style="width: 10%" class="num">Qty</th>
+          <th style="width: 15%" class="num">Unit price</th>
+          <th style="width: 16%" class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Analytics platform subscription (Q4)</td><td class="num">1</td><td class="num">$12,000.00</td><td class="num">$12,000.00</td></tr>
+        <tr><td>2</td><td>Additional seats — analyst tier</td><td class="num">25</td><td class="num">$48.00</td><td class="num">$1,200.00</td></tr>
+        <tr><td>3</td><td>Data warehouse connector — Postgres</td><td class="num">2</td><td class="num">$350.00</td><td class="num">$700.00</td></tr>
+        <tr><td>4</td><td>Data warehouse connector — object storage</td><td class="num">1</td><td class="num">$420.00</td><td class="num">$420.00</td></tr>
+        <tr><td>5</td><td>Dashboard design workshop (on site)</td><td class="num">2</td><td class="num">$1,850.00</td><td class="num">$3,700.00</td></tr>
+        <tr><td>6</td><td>Custom report templates</td><td class="num">12</td><td class="num">$275.00</td><td class="num">$3,300.00</td></tr>
+        <tr><td>7</td><td>Priority support plan</td><td class="num">3</td><td class="num">$600.00</td><td class="num">$1,800.00</td></tr>
+        <tr><td>8</td><td>Historical data backfill (per million rows)</td><td class="num">40</td><td class="num">$18.50</td><td class="num">$740.00</td></tr>
+        <tr><td>9</td><td>Single sign-on integration</td><td class="num">1</td><td class="num">$950.00</td><td class="num">$950.00</td></tr>
+        <tr><td>10</td><td>Audit log retention — 24 months</td><td class="num">1</td><td class="num">$1,100.00</td><td class="num">$1,100.00</td></tr>
+        <tr><td>11</td><td>Sandbox environment</td><td class="num">1</td><td class="num">$480.00</td><td class="num">$480.00</td></tr>
+        <tr><td>12</td><td>Training credits</td><td class="num">10</td><td class="num">$95.00</td><td class="num">$950.00</td></tr>
+        <tr><td>13</td><td>Travel and expenses (workshop)</td><td class="num">1</td><td class="num">$1,284.37</td><td class="num">$1,284.37</td></tr>
+        <tr><td>14</td><td>Early renewal discount</td><td class="num">1</td><td class="num">−$1,500.00</td><td class="num">−$1,500.00</td></tr>
+      </tbody>
+    </table>
+
+    <table class="totals">
+      <tr>
+        <td>Subtotal</td>
+        <td class="num">$27,124.37</td>
+      </tr>
+      <tr>
+        <td>Tax (8.5%)</td>
+        <td class="num">$2,305.57</td>
+      </tr>
+      <tr>
+        <td>Shipping</td>
+        <td class="num">$0.00</td>
+      </tr>
+      <tr class="grand">
+        <td>Total due</td>
+        <td class="num">$29,429.94</td>
+      </tr>
+    </table>
+
+    <footer>
+      <p>
+        Thank you for your business. Payments received after the due date accrue interest at 1% per
+        month. Please include the invoice number with your payment. Questions about this invoice can
+        be sent to billing@northwind.example.
+      </p>
+      <p>Northwind Analytics LLC · Tax ID 00-0000000 · This document was generated for benchmarking purposes.</p>
+    </footer>
+  </body>
+</html>

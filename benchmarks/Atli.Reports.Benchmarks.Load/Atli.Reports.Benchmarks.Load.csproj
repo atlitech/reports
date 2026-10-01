@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Load driver for the Atli.Reports vs Gotenberg comparison. Starts each target container through
+    benchmarks/load/compose.yaml, drives it over HTTP, samples the container, and writes the results.
+    It also regenerates the generated fixtures. Run it through benchmarks/run.sh.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\BenchmarkFixtures.cs" Link="Shared\BenchmarkFixtures.cs" />
+  </ItemGroup>
+</Project>

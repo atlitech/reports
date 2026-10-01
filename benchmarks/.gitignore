@@ -1,0 +1,7 @@
+# Per-request samples, container logs, and BenchmarkDotNet artifacts of each run. The committed
+# results are the .md/.json/.csv files next to these folders.
+results/*.work/
+BenchmarkDotNet.Artifacts/
+
+# Local tuning for the Atli container (see load/compose.yaml).
+load/atli.env
