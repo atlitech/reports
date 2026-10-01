@@ -7,7 +7,7 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/BlazorReports.sln",
+                "${workspaceFolder}/Atli.Reports.slnx",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -19,7 +19,7 @@
             "type": "process",
             "args": [
                 "publish",
-                "${workspaceFolder}/BlazorReports.sln",
+                "${workspaceFolder}/Atli.Reports.slnx",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -33,7 +33,7 @@
                 "watch",
                 "run",
                 "--project",
-                "${workspaceFolder}/BlazorReports.sln"
+                "${workspaceFolder}/examples/SimpleReportServer/SimpleReportServer.csproj"
             ],
             "problemMatcher": "$msCompile"
         }
