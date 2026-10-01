@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Models;
 
@@ -34,7 +35,15 @@ public static partial class ConvertEndpoints
       return;
     }
 
-    var options = MapOptions(request.Options);
+    if (!TryMapOptions(request.Options, out var options, out var invalidOptions))
+    {
+      await ConversionProblems.WriteAsync(
+        context,
+        new ConversionError(ConversionErrorKind.InvalidRequest, invalidOptions)
+      );
+      return;
+    }
+
     PdfResponseStream body = new(context.Response);
     var result = await converter.ConvertAsync(request.Html, body, options, context.RequestAborted);
 
@@ -69,14 +78,21 @@ public static partial class ConvertEndpoints
     string message
   );
 
-  private static PdfOptions MapOptions(PdfOptionsRequest? request)
+  /// <summary>
+  /// Maps the request options onto <see cref="PdfOptions"/>, or explains why they are invalid.
+  /// </summary>
+  private static bool TryMapOptions(
+    PdfOptionsRequest? request,
+    out PdfOptions options,
+    [NotNullWhen(false)] out string? error
+  )
   {
+    options = new PdfOptions();
+    error = null;
     if (request is null)
     {
-      return new PdfOptions();
+      return true;
     }
-
-    PdfOptions options = new();
 
     if (request.Orientation is not null)
     {
@@ -90,12 +106,37 @@ public static partial class ConvertEndpoints
 
     if (request.PaperSize is not null)
     {
-      options.PaperSize = request.PaperSize.ToLowerInvariant() switch
+      PaperSize? paperSize = request.PaperSize.ToLowerInvariant() switch
       {
+        "letter" => PaperSize.Letter,
+        "legal" => PaperSize.Legal,
         "a4" => PaperSize.A4,
         "a3" => PaperSize.A3,
-        "legal" => PaperSize.Legal,
-        _ => PaperSize.Letter,
+        _ => null,
+      };
+      if (paperSize is null)
+      {
+        error =
+          $"Unknown paper size '{request.PaperSize}'. Use letter, legal, a4, or a3, or set paperWidth and paperHeight.";
+        return false;
+      }
+
+      options.PaperSize = paperSize;
+    }
+
+    if (request.PaperWidth is not null || request.PaperHeight is not null)
+    {
+      if (request.PaperWidth is not > 0 || request.PaperHeight is not > 0)
+      {
+        error =
+          "paperWidth and paperHeight must be set together, in inches, and be greater than zero.";
+        return false;
+      }
+
+      options.PaperSize = new PaperSize
+      {
+        Width = request.PaperWidth.Value,
+        Height = request.PaperHeight.Value,
       };
     }
 
@@ -135,6 +176,8 @@ public static partial class ConvertEndpoints
       options.PreferCssPageSize = request.PreferCSSPageSize.Value;
     }
 
+    options.GenerateTaggedPdf = request.GenerateTaggedPdf;
+
     if (request.WaitForSignal is not null)
     {
       options.WaitForSignal = request.WaitForSignal;
@@ -145,6 +188,6 @@ public static partial class ConvertEndpoints
       options.WaitTimeout = TimeSpan.FromSeconds(request.WaitTimeoutSeconds.Value);
     }
 
-    return options;
+    return true;
   }
 }
