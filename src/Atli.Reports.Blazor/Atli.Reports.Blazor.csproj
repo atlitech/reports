@@ -5,7 +5,13 @@
     <Title>Atli Reports Blazor</Title>
     <Description>Generate PDF reports from Blazor components. Map a component to an HTTP endpoint or render it from your own code. Formerly BlazorReports.</Description>
     <IsPackable>true</IsPackable>
+    <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
