@@ -1,6 +1,7 @@
-﻿namespace Atli.Reports.Blazor.Services.BrowserServices.Problems;
+namespace Atli.Reports.Blazor.Services.BrowserServices.Problems;
 
 /// <summary>
-/// Represents a problem when the operation is cancelled
+/// Represents a report generation that was canceled.
 /// </summary>
+[Obsolete(ObsoleteMessages.LegacyProblems)]
 public readonly record struct OperationCancelledProblem;

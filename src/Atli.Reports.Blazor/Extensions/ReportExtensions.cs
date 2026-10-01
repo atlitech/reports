@@ -1,5 +1,6 @@
 using Atli.Reports.Blazor.Models;
 using Atli.Reports.Blazor.Services;
+using Atli.Reports.Engine;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Http;
@@ -7,15 +8,22 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace Atli.Reports.Blazor.Extensions;
 
 /// <summary>
 ///  Extension methods for <see cref="IApplicationBuilder" />.
 /// </summary>
-public static class ReportExtensions
+public static partial class ReportExtensions
 {
+  /// <summary>
+  /// The status code returned when the client closed the request before the report was generated.
+  /// </summary>
+  internal const int Status499ClientClosedRequest = 499;
+
   /// <summary>
   /// Registers a Blazor report with data type <typeparamref name="TD" /> and component type <typeparamref name="T" />.
   /// </summary>
@@ -72,6 +80,15 @@ public static class ReportExtensions
   /// <typeparam name="T"> The component type. </typeparam>
   /// <returns> The <see cref="RouteHandlerBuilder" />. </returns>
   /// <exception cref="InvalidOperationException"></exception>
+  /// <remarks>
+  /// The endpoint streams the report to the response. When generation fails before anything was written,
+  /// it answers with a problem details response whose status code depends on <see cref="ConversionError.Kind"/>:
+  /// 400 for <see cref="ConversionErrorKind.InvalidRequest"/>; 503 for <see cref="ConversionErrorKind.Busy"/>
+  /// and <see cref="ConversionErrorKind.BrowserUnavailable"/>; 504 for <see cref="ConversionErrorKind.Timeout"/>
+  /// and <see cref="ConversionErrorKind.SignalTimeout"/>; 499 for <see cref="ConversionErrorKind.Canceled"/>;
+  /// and 500 otherwise. When it fails after part of the report was sent, the request fails with an
+  /// exception and the response ends incomplete.
+  /// </remarks>
   public static RouteHandlerBuilder MapBlazorReport<T>(
     this IEndpointRouteBuilder endpoints,
     Action<BlazorReportRegistrationOptions>? setupAction = null
@@ -87,41 +104,13 @@ public static class ReportExtensions
     return endpoints
       .MapPost(
         $"{blazorReport.NormalizedName}",
-        async (
+        (
           [FromServices] IReportService reportService,
           HttpContext context,
           CancellationToken token
-        ) =>
-        {
-          var contentType = blazorReport.GetContentType();
-          var extension = blazorReport.GetFileExtension();
-          context.Response.ContentType = contentType;
-          context.Response.Headers.Append(
-            "Content-Disposition",
-            $"attachment; filename=\"{blazorReport.Name}.{extension}\""
-          );
-          var result = await reportService.GenerateReport(
-            context.Response.BodyWriter,
-            blazorReport,
-            token
-          );
-
-          var errorStatusCode = result.Match(
-            _ => (int?)null,
-            _ => StatusCodes.Status503ServiceUnavailable,
-            _ => StatusCodes.Status499ClientClosedRequest,
-            _ => StatusCodes.Status500InternalServerError
-          );
-
-          if (errorStatusCode is not null)
-          {
-            context.Response.StatusCode = errorStatusCode.Value;
-            await context.Response.BodyWriter.CompleteAsync();
-          }
-        }
+        ) => WriteReportAsync(context, reportService, blazorReport, null, token)
       )
-      .Produces<FileStreamHttpResult>(200, blazorReport.GetContentType())
-      .Produces(StatusCodes.Status503ServiceUnavailable);
+      .WithReportResponses(blazorReport);
   }
 
   /// <summary>
@@ -133,6 +122,15 @@ public static class ReportExtensions
   /// <typeparam name="TD"> The data type. </typeparam>
   /// <returns> The <see cref="RouteHandlerBuilder" />. </returns>
   /// <exception cref="InvalidOperationException"></exception>
+  /// <remarks>
+  /// The endpoint streams the report to the response. When generation fails before anything was written,
+  /// it answers with a problem details response whose status code depends on <see cref="ConversionError.Kind"/>:
+  /// 400 for <see cref="ConversionErrorKind.InvalidRequest"/>; 503 for <see cref="ConversionErrorKind.Busy"/>
+  /// and <see cref="ConversionErrorKind.BrowserUnavailable"/>; 504 for <see cref="ConversionErrorKind.Timeout"/>
+  /// and <see cref="ConversionErrorKind.SignalTimeout"/>; 499 for <see cref="ConversionErrorKind.Canceled"/>;
+  /// and 500 otherwise. When it fails after part of the report was sent, the request fails with an
+  /// exception and the response ends incomplete.
+  /// </remarks>
   public static RouteHandlerBuilder MapBlazorReport<T, TD>(
     this IEndpointRouteBuilder endpoints,
     Action<BlazorReportRegistrationOptions>? setupAction = null
@@ -149,43 +147,102 @@ public static class ReportExtensions
     return endpoints
       .MapPost(
         $"{blazorReport.NormalizedName}",
-        async (
+        (
           TD data,
           [FromServices] IReportService reportService,
           HttpContext context,
           CancellationToken token
-        ) =>
-        {
-          var contentType = blazorReport.GetContentType();
-          var extension = blazorReport.GetFileExtension();
-          context.Response.ContentType = contentType;
-          context.Response.Headers.Append(
-            "Content-Disposition",
-            $"attachment; filename=\"{blazorReport.Name}.{extension}\""
-          );
-          var result = await reportService.GenerateReport(
-            context.Response.BodyWriter,
-            blazorReport,
-            data,
-            token
-          );
-
-          var errorStatusCode = result.Match(
-            _ => (int?)null,
-            _ => StatusCodes.Status503ServiceUnavailable,
-            _ => StatusCodes.Status499ClientClosedRequest,
-            _ => StatusCodes.Status500InternalServerError
-          );
-
-          if (errorStatusCode is not null)
-          {
-            context.Response.StatusCode = errorStatusCode.Value;
-            await context.Response.BodyWriter.CompleteAsync();
-          }
-        }
+        ) => WriteReportAsync(context, reportService, blazorReport, data, token)
       )
-      .Produces<FileStreamHttpResult>(200, blazorReport.GetContentType())
-      .Produces(StatusCodes.Status503ServiceUnavailable);
+      .WithReportResponses(blazorReport);
+  }
+
+  /// <summary>
+  /// Gets the HTTP status code that report endpoints answer with for a failed conversion.
+  /// </summary>
+  internal static int GetStatusCode(ConversionErrorKind kind)
+  {
+    return kind switch
+    {
+      ConversionErrorKind.InvalidRequest => StatusCodes.Status400BadRequest,
+      ConversionErrorKind.Busy => StatusCodes.Status503ServiceUnavailable,
+      ConversionErrorKind.BrowserUnavailable => StatusCodes.Status503ServiceUnavailable,
+      ConversionErrorKind.Timeout => StatusCodes.Status504GatewayTimeout,
+      ConversionErrorKind.SignalTimeout => StatusCodes.Status504GatewayTimeout,
+      ConversionErrorKind.Canceled => Status499ClientClosedRequest,
+      _ => StatusCodes.Status500InternalServerError,
+    };
+  }
+
+  private static string GetProblemTitle(ConversionErrorKind kind)
+  {
+    return kind switch
+    {
+      ConversionErrorKind.InvalidRequest => "The report could not be converted to PDF.",
+      ConversionErrorKind.Busy => "The report engine is busy. Try again later.",
+      ConversionErrorKind.BrowserUnavailable => "The browser that renders reports is unavailable.",
+      ConversionErrorKind.Timeout => "The browser that renders reports did not respond in time.",
+      ConversionErrorKind.SignalTimeout =>
+        "The report did not signal that its JavaScript completed in time.",
+      ConversionErrorKind.Canceled => "The request was canceled.",
+      _ => "The report could not be rendered.",
+    };
+  }
+
+  private static RouteHandlerBuilder WithReportResponses(
+    this RouteHandlerBuilder builder,
+    BlazorReport blazorReport
+  )
+  {
+    return builder
+      .Produces<FileStreamHttpResult>(StatusCodes.Status200OK, blazorReport.GetContentType())
+      .ProducesProblem(StatusCodes.Status400BadRequest)
+      .ProducesProblem(StatusCodes.Status500InternalServerError)
+      .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
+      .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+  }
+
+  private static async Task<IResult> WriteReportAsync(
+    HttpContext context,
+    IReportService reportService,
+    BlazorReport blazorReport,
+    object? data,
+    CancellationToken token
+  )
+  {
+    var response = context.Response;
+    response.ContentType = blazorReport.GetContentType();
+    response.Headers.ContentDisposition =
+      $"attachment; filename=\"{blazorReport.Name}.{blazorReport.GetFileExtension()}\"";
+
+    var result = await reportService.GenerateReport(response.Body, blazorReport, data, token);
+    if (!result.TryPickT1(out var error, out _))
+    {
+      return Results.Empty;
+    }
+
+    if (response.HasStarted)
+    {
+      // Part of the report is already on the wire with a 200 status. Failing the request makes the
+      // server end the response without completing it, so the client sees a broken response instead
+      // of a truncated report that looks complete.
+      throw new InvalidOperationException(
+        $"Report '{blazorReport.Name}' failed after part of it was sent: {error.Kind}: {error.Message}",
+        error.Exception
+      );
+    }
+
+    var logger = context
+      .RequestServices.GetRequiredService<ILoggerFactory>()
+      .CreateLogger(typeof(ReportExtensions).FullName!);
+    LogReportFailed(logger, error.Exception, blazorReport.Name, error.Kind, error.Message);
+
+    response.Headers.Remove(HeaderNames.ContentDisposition);
+    response.ContentType = null;
+    return Results.Problem(
+      statusCode: GetStatusCode(error.Kind),
+      title: GetProblemTitle(error.Kind)
+    );
   }
 
   private static BlazorReportRegistrationOptions GetReportRegistrationOptions(
@@ -201,4 +258,16 @@ public static class ReportExtensions
     setupAction?.Invoke(options);
     return options;
   }
+
+  [LoggerMessage(
+    Level = LogLevel.Warning,
+    Message = "Report {ReportName} failed: {ErrorKind}: {ErrorMessage}"
+  )]
+  private static partial void LogReportFailed(
+    ILogger logger,
+    Exception? exception,
+    string reportName,
+    ConversionErrorKind errorKind,
+    string errorMessage
+  );
 }

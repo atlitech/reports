@@ -1,8 +1,9 @@
 using System.IO.Pipelines;
+using System.Text;
 using Atli.Reports.Blazor.Components;
 using Atli.Reports.Blazor.Models;
-using Atli.Reports.Blazor.Services.BrowserServices;
 using Atli.Reports.Blazor.Services.BrowserServices.Problems;
+using Atli.Reports.Engine;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,29 +14,103 @@ using OneOf.Types;
 namespace Atli.Reports.Blazor.Services;
 
 /// <summary>
-/// Service for generating reports
+/// Renders Blazor components to PDF or HTML reports.
 /// </summary>
 /// <remarks>
 /// Creates a new instance of <see cref="ReportService"/>
 /// </remarks>
-/// <param name="serviceProvider"> The service provider </param>
+/// <param name="serviceProvider"> The service provider used to render components </param>
 /// <param name="reportRegistry"> The report registry </param>
-/// <param name="browserService"></param>
+/// <param name="converter"> The HTML-to-PDF converter </param>
 public sealed class ReportService(
   IServiceProvider serviceProvider,
   BlazorReportRegistry reportRegistry,
-  IBrowserService browserService
+  IHtmlToPdfConverter converter
 ) : IReportService
 {
-  /// <summary>
-  /// Generates a report using the specified component and data
-  /// </summary>
-  /// <param name="pipeWriter"> The pipe writer to write the report to </param>
-  /// <param name="data"> The data to use in the report </param>
-  /// <param name="cancellationToken"> The cancellation token </param>
-  /// <typeparam name="T"> The component to use in the report </typeparam>
-  /// <typeparam name="TD"> The type of data to use in the report </typeparam>
-  /// <returns> The generated report </returns>
+  /// <inheritdoc />
+  public async ValueTask<OneOf<Success, ConversionError>> GenerateReport<T, TD>(
+    Stream destination,
+    TD data,
+    CancellationToken cancellationToken = default
+  )
+    where T : ComponentBase
+    where TD : class
+  {
+    ArgumentNullException.ThrowIfNull(destination);
+
+    Dictionary<string, object?> componentParameters = new()
+    {
+      { "BaseStyles", reportRegistry.BaseStyles },
+      { "Data", data },
+      { "GlobalAssets", reportRegistry.GlobalAssets },
+    };
+
+    var html = await RenderAsync(typeof(T), componentParameters);
+    return await converter.ConvertAsync(
+      html,
+      destination,
+      PdfOptionsMapper.Map(reportRegistry.DefaultPageSettings),
+      cancellationToken
+    );
+  }
+
+  /// <inheritdoc />
+  public async ValueTask<OneOf<Success, ConversionError>> GenerateReport<T>(
+    Stream destination,
+    BlazorReport blazorReport,
+    T? data,
+    CancellationToken cancellationToken = default
+  )
+    where T : class
+  {
+    ArgumentNullException.ThrowIfNull(destination);
+    ArgumentNullException.ThrowIfNull(blazorReport);
+
+    var html = await RenderAsync(
+      typeof(BlazorReportsTemplate),
+      GetTemplateParameters(blazorReport, data)
+    );
+
+    if (blazorReport.OutputFormat == ReportOutputFormat.Html)
+    {
+      try
+      {
+        await destination.WriteAsync(Encoding.UTF8.GetBytes(html), cancellationToken);
+      }
+      catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
+      {
+        return new ConversionError(
+          ConversionErrorKind.Canceled,
+          "The report generation was canceled.",
+          exception
+        );
+      }
+
+      return new Success();
+    }
+
+    var pageSettings = blazorReport.PageSettings ?? reportRegistry.DefaultPageSettings;
+    return await converter.ConvertAsync(
+      html,
+      destination,
+      PdfOptionsMapper.Map(pageSettings),
+      cancellationToken
+    );
+  }
+
+  /// <inheritdoc />
+  public ValueTask<OneOf<Success, ConversionError>> GenerateReport(
+    Stream destination,
+    BlazorReport blazorReport,
+    CancellationToken cancellationToken = default
+  )
+  {
+    return GenerateReport<object>(destination, blazorReport, null, cancellationToken);
+  }
+
+  /// <inheritdoc />
+  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
   public async ValueTask<
     OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
   > GenerateReport<T, TD>(
@@ -46,47 +121,18 @@ public sealed class ReportService(
     where T : ComponentBase
     where TD : class
   {
-    using var scope = serviceProvider.CreateScope();
-    var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+    ArgumentNullException.ThrowIfNull(pipeWriter);
 
-    var baseStyles = string.Empty;
-    if (!string.IsNullOrEmpty(reportRegistry.BaseStyles))
-    {
-      baseStyles = reportRegistry.BaseStyles;
-    }
-
-    Dictionary<string, object?> componentParameters = new()
-    {
-      { "BaseStyles", baseStyles },
-      { "Data", data },
-      { "GlobalAssets", reportRegistry.GlobalAssets },
-    };
-
-    await using HtmlRenderer htmlRenderer = new(scope.ServiceProvider, loggerFactory);
-    var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
-    {
-      ParameterView parameters = ParameterView.FromDictionary(componentParameters);
-      var output = await htmlRenderer.RenderComponentAsync<T>(parameters);
-      return output.ToHtmlString();
-    });
-
-    return await browserService.GenerateReport(
-      pipeWriter,
-      html,
-      reportRegistry.DefaultPageSettings,
+    var result = await GenerateReport<T, TD>(
+      pipeWriter.AsStream(leaveOpen: true),
+      data,
       cancellationToken
     );
+    return await LegacyResults.ToLegacyResultAsync(pipeWriter, result, completeOnSuccess: true);
   }
 
-  /// <summary>
-  /// Generates a report using the specified component and data
-  /// </summary>
-  /// <param name="pipeWriter"> The pipe writer to write the report to </param>
-  /// <param name="blazorReport"> The report to generate </param>
-  /// <param name="data"> The data to use in the report </param>
-  /// <param name="cancellationToken"> The cancellation token </param>
-  /// <typeparam name="T"> The type of data to use in the report </typeparam>
-  /// <returns> The generated report </returns>
+  /// <inheritdoc />
+  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
   public async ValueTask<
     OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
   > GenerateReport<T>(
@@ -97,83 +143,24 @@ public sealed class ReportService(
   )
     where T : class
   {
-    using var scope = serviceProvider.CreateScope();
-    var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+    ArgumentNullException.ThrowIfNull(pipeWriter);
+    ArgumentNullException.ThrowIfNull(blazorReport);
 
-    var baseStyles = string.Empty;
-    if (!string.IsNullOrEmpty(blazorReport.BaseStyles))
-    {
-      baseStyles = blazorReport.BaseStyles;
-    }
-    else if (!string.IsNullOrEmpty(reportRegistry.BaseStyles))
-    {
-      baseStyles = reportRegistry.BaseStyles;
-    }
-
-    Dictionary<string, object?> childComponentParameters = [];
-    if (
-      blazorReport.Component.BaseType == typeof(BlazorReportsBase)
-      && reportRegistry.GlobalAssets.Count != 0
-    )
-    {
-      childComponentParameters.Add("GlobalAssets", reportRegistry.GlobalAssets);
-    }
-
-    if (blazorReport.Assets.Count != 0)
-    {
-      childComponentParameters.Add("ReportAssets", blazorReport.Assets);
-    }
-
-    if (data is not null)
-    {
-      childComponentParameters.Add("Data", data);
-    }
-
-    Dictionary<string, object?> baseComponentParameters = [];
-    if (!string.IsNullOrEmpty(baseStyles))
-    {
-      baseComponentParameters.Add("BaseStyles", baseStyles);
-    }
-
-    baseComponentParameters.Add("ChildComponentType", blazorReport.Component);
-    baseComponentParameters.Add("ChildComponentParameters", childComponentParameters);
-
-    await using HtmlRenderer htmlRenderer = new(scope.ServiceProvider, loggerFactory);
-
-    if (blazorReport.OutputFormat == ReportOutputFormat.Pdf)
-    {
-      var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
-      {
-        ParameterView parameters = ParameterView.FromDictionary(baseComponentParameters);
-        var output = await htmlRenderer.RenderComponentAsync<BlazorReportsTemplate>(parameters);
-        return output.ToHtmlString();
-      });
-
-      var pageSettings = blazorReport.PageSettings ?? reportRegistry.DefaultPageSettings;
-
-      return await browserService.GenerateReport(pipeWriter, html, pageSettings, cancellationToken);
-    }
-    else
-    {
-      var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
-      {
-        ParameterView parameters = ParameterView.FromDictionary(baseComponentParameters);
-        var output = await htmlRenderer.RenderComponentAsync<BlazorReportsTemplate>(parameters);
-        return output.ToHtmlString();
-      });
-
-      await pipeWriter.WriteAsync(System.Text.Encoding.UTF8.GetBytes(html), cancellationToken);
-      return new Success();
-    }
+    var result = await GenerateReport(
+      pipeWriter.AsStream(leaveOpen: true),
+      blazorReport,
+      data,
+      cancellationToken
+    );
+    return await LegacyResults.ToLegacyResultAsync(
+      pipeWriter,
+      result,
+      completeOnSuccess: blazorReport.OutputFormat == ReportOutputFormat.Pdf
+    );
   }
 
-  /// <summary>
-  /// Generates a report using the specified component
-  /// </summary>
-  /// <param name="pipeWriter"> The pipe writer to write the report to </param>
-  /// <param name="blazorReport"> The report to generate </param>
-  /// <param name="cancellationToken"> The cancellation token </param>
-  /// <returns> The generated report </returns>
+  /// <inheritdoc />
+  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
   public ValueTask<
     OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
   > GenerateReport(
@@ -195,5 +182,60 @@ public sealed class ReportService(
     var reportNormalizedName = name.ToLowerInvariant().Trim();
     var foundReport = reportRegistry.Reports.TryGetValue(reportNormalizedName, out var report);
     return foundReport ? report : null;
+  }
+
+  private Dictionary<string, object?> GetTemplateParameters(BlazorReport blazorReport, object? data)
+  {
+    var baseStyles = !string.IsNullOrEmpty(blazorReport.BaseStyles)
+      ? blazorReport.BaseStyles
+      : reportRegistry.BaseStyles;
+
+    Dictionary<string, object?> childComponentParameters = [];
+    if (
+      blazorReport.Component.BaseType == typeof(BlazorReportsBase)
+      && reportRegistry.GlobalAssets.Count != 0
+    )
+    {
+      childComponentParameters.Add("GlobalAssets", reportRegistry.GlobalAssets);
+    }
+
+    if (blazorReport.Assets.Count != 0)
+    {
+      childComponentParameters.Add("ReportAssets", blazorReport.Assets);
+    }
+
+    if (data is not null)
+    {
+      childComponentParameters.Add("Data", data);
+    }
+
+    Dictionary<string, object?> templateParameters = [];
+    if (!string.IsNullOrEmpty(baseStyles))
+    {
+      templateParameters.Add("BaseStyles", baseStyles);
+    }
+
+    templateParameters.Add("ChildComponentType", blazorReport.Component);
+    templateParameters.Add("ChildComponentParameters", childComponentParameters);
+    return templateParameters;
+  }
+
+  private async Task<string> RenderAsync(
+    Type componentType,
+    IDictionary<string, object?> parameters
+  )
+  {
+    await using var scope = serviceProvider.CreateAsyncScope();
+    var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+    await using HtmlRenderer htmlRenderer = new(scope.ServiceProvider, loggerFactory);
+
+    return await htmlRenderer.Dispatcher.InvokeAsync(async () =>
+    {
+      var output = await htmlRenderer.RenderComponentAsync(
+        componentType,
+        ParameterView.FromDictionary(parameters)
+      );
+      return output.ToHtmlString();
+    });
   }
 }

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -13,9 +13,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Atli.Reports.Blazor.Components\Atli.Reports.Blazor.Components.csproj" />
+    <ProjectReference Include="..\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="OneOf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atli.Reports.Blazor.Tests" />
   </ItemGroup>
 </Project>

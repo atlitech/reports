@@ -13,6 +13,7 @@
     <Project Path="src/Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Engine.Tests/Atli.Reports.Engine.Tests.csproj" />
   </Folder>
 </Solution>
