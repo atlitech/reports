@@ -79,7 +79,9 @@ docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
 - **The browser is `chrome-headless-shell`** from Chrome for Testing (`linux64` or `linux-arm64`),
   which renders and isolates conversions several times faster than the full browser (see
   [architecture.md](architecture.md#isolation)). The `CHROME_VERSION` build argument pins a version;
-  the default takes the current stable release, so a rebuild picks up browser security fixes.
+  the default takes the current stable release, so a rebuild picks up browser security fixes. The
+  image build fails if the browser links a shared library the image does not install (the `linux64`
+  and `linux-arm64` builds link different sets).
 - **`tini` is PID 1.** It forwards `SIGTERM` to the server, whose shutdown drains conversions and
   closes the browser cleanly, and it reaps the browser's exited child processes so none linger as
   zombies.
