@@ -3,8 +3,16 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Atli.Reports.Server.Health;
 
+/// <summary>
+/// Writes a health report as JSON: the overall status and each check's status and description.
+/// </summary>
 public static class HealthCheckResponseWriter
 {
+  /// <summary>
+  /// Writes <paramref name="report"/> as the response.
+  /// </summary>
+  /// <param name="context">The request's context.</param>
+  /// <param name="report">The health report.</param>
   public static Task WriteResponse(HttpContext context, HealthReport report)
   {
     Dictionary<string, HealthCheckEntry> checks = [];

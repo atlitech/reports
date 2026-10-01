@@ -61,6 +61,21 @@ here the client sends the document, so it is a problem with the request.
 **Failures after the first PDF byte** (the browser dies mid-transfer, say, or the server fails
 unexpectedly) abort the connection. The client sees a broken response, never a truncated `200`.
 
+## OpenAPI
+
+`GET /openapi/v1.json` returns the server's OpenAPI 3.1 document, in every environment. It describes
+`POST /convert` as above, for client generators and API tools:
+
+- the request body, with a description of every option and the values of `orientation` and
+  `paperSize` (the document lists them in lower case; the server accepts any case);
+- the `200` response as binary `application/pdf` content;
+- a problem details response for each status in the table above except the bodiless `499`, with
+  the `ConversionErrorKind` names as the values of `kind`, and the `Retry-After` header of the
+  `503`.
+
+Its `info.version` is the server's release. The `/health` endpoints are left out: they serve
+probes, not clients.
+
 ## Health
 
 - `GET /health/live`: the server is up and answering. It runs no engine check: restarting the
@@ -227,8 +242,8 @@ docker run -p 8080:8080 atli-reports-server
 ```
 
 `.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
-image change: the server becomes ready, converts a document to a PDF, runs as a non-root user under
-`tini`, and shuts down cleanly.
+image change: the server becomes ready, converts a document to a PDF, serves its OpenAPI document,
+runs as a non-root user under `tini`, and shuts down cleanly.
 
 ### Throughput
 

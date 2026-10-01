@@ -145,6 +145,7 @@ The options mirror `PdfOptions`: `orientation`, `paperSize` (`letter`, `a4`, `a3
 `margins`, `printBackground`, `scale`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`,
 `pageRanges`, `preferCSSPageSize`, `waitForSignal`, and `waitTimeoutSeconds`. Failures, including
 a body the server cannot read, are RFC 9457 problem details with a `kind` member.
+`GET /openapi/v1.json` returns the OpenAPI document that describes the endpoint.
 `GET /health/live` and `GET /health/ready` serve container probes. The image runs as a non-root
 user under `tini`, and its browser runs without the sandbox, so send it trusted HTML only. See
 [docs/engine/server.md](docs/engine/server.md) for status codes, configuration, and the image.

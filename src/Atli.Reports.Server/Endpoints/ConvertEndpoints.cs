@@ -1,9 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Models;
+using Microsoft.AspNetCore.OpenApi;
+using Microsoft.Net.Http.Headers;
+using Microsoft.OpenApi;
 
 namespace Atli.Reports.Server.Endpoints;
 
+/// <summary>
+/// Maps <c>POST /convert</c>, which converts the posted HTML to a PDF.
+/// </summary>
 public static partial class ConvertEndpoints
 {
   /// <summary>
@@ -12,20 +18,84 @@ public static partial class ConvertEndpoints
   /// </summary>
   private const double MaxWaitTimeoutSeconds = 4_294_967;
 
+  /// <summary>
+  /// Maps <c>POST /convert</c> and describes it to OpenAPI.
+  /// </summary>
+  /// <param name="app">The application.</param>
   public static void MapConvertEndpoints(this WebApplication app)
   {
-    app.MapPost("/convert", ConvertHtmlToPdf);
+    // The OpenAPI operation takes its summary, description, and response descriptions from the XML
+    // comments of ConvertHtmlToPdf, which is internal because the generator that compiles them into
+    // the binary skips private members. The responses are every status ConversionProblems gives a
+    // written error, and the 413 and 415 of request binding; not the 499 of a canceled request,
+    // which no client sees.
+    app.MapPost("/convert", ConvertHtmlToPdf)
+      .WithName("Convert")
+      .WithTags("Conversion")
+      // Stream makes OpenAPI describe the PDF as binary content, not as a JSON object.
+      .Produces<Stream>(StatusCodes.Status200OK, "application/pdf")
+      .ProducesProblem(StatusCodes.Status400BadRequest)
+      .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+      .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+      .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+      .ProducesProblem(StatusCodes.Status500InternalServerError)
+      .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
+      .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+      .AddOpenApiOperationTransformer(DescribeRetryAfter);
   }
 
   /// <summary>
-  /// Converts the posted HTML and streams the PDF into the response as the browser produces it.
+  /// Adds the <c>Retry-After</c> header of the 503 response to the OpenAPI operation; XML comments
+  /// cannot describe headers.
+  /// </summary>
+  private static Task DescribeRetryAfter(
+    OpenApiOperation operation,
+    OpenApiOperationTransformerContext context,
+    CancellationToken cancellationToken
+  )
+  {
+    if (operation.Responses?.GetValueOrDefault("503") is OpenApiResponse response)
+    {
+      response.Headers ??= new Dictionary<string, IOpenApiHeader>();
+      response.Headers[HeaderNames.RetryAfter] = new OpenApiHeader
+      {
+        Description = "Seconds to wait before retrying: 1 for `Busy`, 5 for `BrowserUnavailable`.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.Integer },
+      };
+    }
+
+    return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// Converts HTML to a PDF.
   /// </summary>
   /// <remarks>
-  /// The response stays uncommitted until the first PDF byte, so failures before that become problem
-  /// details with the status from <see cref="ConversionProblems"/>. A failure after the first byte
-  /// aborts the connection: the client sees a broken response, never a truncated 200.
+  /// The PDF streams into the response as the browser produces it. A failure before its first byte
+  /// is problem details with a <c>kind</c> member, the name of the error kind; a failure after it
+  /// aborts the connection, so the client sees a broken response, never a truncated <c>200</c>.
   /// </remarks>
-  private static async Task ConvertHtmlToPdf(
+  /// <response code="200">The PDF, as an attachment named <c>output.pdf</c>.</response>
+  /// <response code="400">
+  /// <c>InvalidRequest</c>: the body is not a conversion request, the HTML is blank, or an option is
+  /// invalid.
+  /// </response>
+  /// <response code="413"><c>InvalidRequest</c>: the body is larger than the server accepts.</response>
+  /// <response code="415"><c>InvalidRequest</c>: the body is not sent as <c>application/json</c>.</response>
+  /// <response code="422"><c>SignalTimeout</c>: the document never called its signal function.</response>
+  /// <response code="500">
+  /// <c>RenderFailed</c>: the browser could not render or print the document, or the server failed
+  /// unexpectedly.
+  /// </response>
+  /// <response code="503">
+  /// <c>Busy</c>: the queue is full, or the wait for a turn timed out (<c>Retry-After: 1</c>).
+  /// <c>BrowserUnavailable</c>: the browser is restarting or missing, or the server is shutting down
+  /// (<c>Retry-After: 5</c>).
+  /// </response>
+  /// <response code="504">
+  /// <c>Timeout</c>: a browser command, the page load, or the conversion as a whole took too long.
+  /// </response>
+  internal static async Task ConvertHtmlToPdf(
     HttpContext context,
     ConvertRequest request,
     IHtmlToPdfConverter converter,
