@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./src/BlazorReports.Viewer/Pages/ReportsViewer.razor'],
+  content: ['./src/Atli.Reports.Viewer/**/*.razor'],
   theme: {
     extend: {},
   },
