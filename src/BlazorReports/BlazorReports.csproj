@@ -6,6 +6,7 @@
     <Title>Blazor Reports</Title>
     <Description>Generate PDF reports using Blazor Components. Easily create a report server or generate reports from existing projects.</Description>
     <LangVersion>preview</LangVersion>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

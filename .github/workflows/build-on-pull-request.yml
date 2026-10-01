@@ -6,17 +6,23 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   format-and-build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: 'Checkout GitHub Action'
-        uses: actions/checkout@main
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup dotnet
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '9.x'
+          global-json-file: global.json
 
       - name: Restore dotnet tools
         run: dotnet tool restore
@@ -24,8 +30,13 @@ jobs:
       - name: Validate formatting
         run: dotnet csharpier --check .
 
-      - name: Build BlazorReports
+      - name: Build
         run: dotnet build
 
       - name: Run tests
         run: dotnet test
+
+      # Packs exactly what release.yml would publish, so packaging and package
+      # validation failures surface on the pull request instead of on release day.
+      - name: Pack
+        run: dotnet pack --configuration Release --output artifacts/release-packages

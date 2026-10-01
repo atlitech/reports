@@ -4,6 +4,7 @@
     <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
+    <IsPackable>true</IsPackable>
     <Title>Blazor Reports Components</Title>
     <Description>Blazor components for BlazorReports. Generate PDF reports using Blazor Components. Easily create a report server or generate reports from existing projects.</Description>
   </PropertyGroup>
