@@ -1,0 +1,111 @@
+name: Release
+
+# Publishes the packable projects to nuget.org when a GitHub release is
+# published.
+#
+# Authentication is NuGet Trusted Publishing (OIDC), so no API key is stored in
+# this repository. The nuget.org policy of the `atli` organization trusts this
+# workflow file name (release.yml) in atlitech/reports running in the `release`
+# environment, and that environment only accepts tags matching `[0-9]*`.
+# Renaming this file or the environment breaks publishing until the policy on
+# nuget.org is updated to match.
+
+on:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Pack
+        run: dotnet pack --configuration Release --output artifacts/release-packages
+
+      # The BlazorReports and BlazorReports.Components package IDs are frozen at
+      # 0.25.1 and stay with their original owner, so only Atli.Reports.* IDs may
+      # be published. Every package must also carry the version being released.
+      - name: Verify package IDs and versions
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          shopt -s nullglob
+          packages=(artifacts/release-packages/*.nupkg)
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "::error::dotnet pack produced no packages."
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            name="$(basename "$package" .nupkg)"
+            case "$name" in
+              Atli.Reports.*) ;;
+              *)
+                echo "::error::$name is not an Atli.Reports.* package and must not be published."
+                exit 1
+                ;;
+            esac
+            if [[ "$name" != *".$TAG" ]]; then
+              echo "::error::$name does not match release $TAG. Set <Version> in Directory.Build.props to $TAG first."
+              exit 1
+            fi
+            echo "$name"
+          done
+
+      - name: Upload packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packages
+          path: artifacts/release-packages/
+          if-no-files-found: error
+
+  publish:
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packages
+          path: packages
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Log in to nuget.org
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: gabynevada
+
+      # Symbol packages (.snupkg) next to each .nupkg are pushed with it.
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: >
+          dotnet nuget push "packages/*.nupkg"
+          --api-key "$NUGET_API_KEY"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

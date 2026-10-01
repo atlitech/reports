@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/dotnet:8.0
+FROM mcr.microsoft.com/devcontainers/dotnet:10.0
 
 # Install Node and Bun
 COPY tools/node_bun-install.sh /tmp/node_bun-install.sh

@@ -7,7 +7,7 @@
       "commands": [
         "dotnet-csharpier"
       ],
-      "rollForward": false
+      "rollForward": true
     }
   }
 }
