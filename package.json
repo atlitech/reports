@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "build:tailwind-example": "tailwindcss -i examples/TailwindReportServer/wwwroot/tailwindcss/input.css -o examples/TailwindReportServer/wwwroot/styles/base.css --minify"
+  },
   "dependencies": {
     "@tailwindcss/cli": "^4.0.14",
     "tailwindcss": "^4.0.14"

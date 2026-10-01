@@ -1,15 +1,26 @@
 using Atli.Reports.Blazor.Extensions;
 using Atli.Reports.Blazor.Models;
+using Atli.Reports.Engine;
 using ExampleTemplates.Reports;
 using SimpleReportServer;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
+builder.AddServiceDefaults();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddBlazorReports();
 
+// Reads ReportsEngine:* from configuration, for example the browser path the AppHost can pass on.
+builder.Services.AddReportsEngine(
+  builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
+);
+builder.Services.AddHealthChecks().AddReportsEngineBrowserCheck();
+
 var app = builder.Build();
+
+app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())
 {

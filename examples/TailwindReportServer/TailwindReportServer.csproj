@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atli.Reports.Blazor\Atli.Reports.Blazor.csproj" />
     <ProjectReference Include="..\ExampleTemplates\ExampleTemplates.csproj" />
+    <ProjectReference Include="..\Atli.Reports.ServiceDefaults\Atli.Reports.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,4 @@
 @TailwindReportServer_HostAddress = http://localhost:5174
 
-GET {{TailwindReportServer_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
+### A PDF report styled with Tailwind CSS
+POST {{TailwindReportServer_HostAddress}}/reports/reportwithtailwind

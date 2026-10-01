@@ -463,6 +463,33 @@ and obsolete `IReportService` overloads. The
 - [`examples/ExampleTemplates`](examples/ExampleTemplates): shared report components, including a
   header that repeats on every page
 
+## Run it locally
+
+An [Aspire](https://aspire.dev) AppHost, [`examples/Atli.Reports.AppHost`](examples/Atli.Reports.AppHost),
+runs the server and the examples together, with their logs, traces, and metrics (the engine's
+included) in the Aspire dashboard. You need the .NET 10 SDK, the
+[Aspire CLI](https://aspire.dev/get-started/install-cli/), Docker, Chrome or Chromium, and
+[Bun](https://bun.sh) for the Tailwind example. From the repository root:
+
+```bash
+aspire start   # builds and starts everything in the background, and prints the dashboard URL
+aspire stop
+```
+
+| Resource | What it is |
+| --- | --- |
+| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker). The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
+| `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); the dashboard links its Swagger UI |
+| `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |
+| `tailwind-css` | Generates the Tailwind example's stylesheet (`bun install`, then the Tailwind CLI) and exits |
+| `gotenberg` | [Gotenberg](https://gotenberg.dev) 8.37 with Chromium, for side-by-side comparisons. Off unless you start with `aspire start -- --Gotenberg:Enabled=true` |
+
+Ports are assigned when the AppHost starts; the dashboard and `aspire describe` list each
+resource's URLs. The examples run the engine in-process with the Chrome or Chromium installed on
+your machine. To use another browser, such as `chrome-headless-shell`, pass its path:
+`aspire start -- --ReportsEngine:Browser:ExecutablePath=/path/to/chrome-headless-shell`. Both
+settings can also live in the AppHost's `appsettings.json` or user secrets.
+
 ## History
 
 The project started as **BlazorReports**, which turned Blazor components into PDF reports and was

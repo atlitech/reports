@@ -4,6 +4,8 @@
     <Project Path="benchmarks/Atli.Reports.Benchmarks/Atli.Reports.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/examples/">
+    <Project Path="examples/Atli.Reports.AppHost/Atli.Reports.AppHost.csproj" />
+    <Project Path="examples/Atli.Reports.ServiceDefaults/Atli.Reports.ServiceDefaults.csproj" />
     <Project Path="examples/ExampleTemplates/ExampleTemplates.csproj" />
     <Project Path="examples/SimpleReportServer/SimpleReportServer.csproj" />
     <Project Path="examples\TailwindReportServer\TailwindReportServer.csproj" Type="Classic C#" />
