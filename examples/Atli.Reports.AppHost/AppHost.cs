@@ -6,9 +6,19 @@ var builder = DistributedApplication.CreateBuilder(args);
 // AddReportsServer pulls the image released with the package; WithDockerfile builds this checkout's
 // server instead, with the repository root as the build context. It renders with its own
 // chrome-headless-shell.
-builder
+var reportsServer = builder
   .AddReportsServer("reports-server")
   .WithDockerfile("../..", "src/Atli.Reports.Server/Dockerfile");
+
+// The remote example renders its Blazor reports in-process and converts them on the reports server,
+// through Atli.Reports.Client: it needs no browser on this machine. WithReference passes the server's
+// address as ConnectionStrings__reports-server, and its /health includes the client's probe of the
+// server, so it turns healthy once both are ready.
+builder
+  .AddProject<Projects.RemoteReportServer>("remote-report-server")
+  .WithReference(reportsServer)
+  .WaitFor(reportsServer)
+  .WithHttpHealthCheck("/health");
 
 // The examples run the engine in-process, so they need a browser on this machine. The engine finds
 // Chrome or Chromium in the standard install locations. To use another browser, for example

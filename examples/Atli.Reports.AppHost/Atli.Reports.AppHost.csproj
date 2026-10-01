@@ -20,6 +20,7 @@
       Include="..\..\src\Atli.Reports.Aspire.Hosting\Atli.Reports.Aspire.Hosting.csproj"
       IsAspireProjectResource="false"
     />
+    <ProjectReference Include="..\RemoteReportServer\RemoteReportServer.csproj" />
     <ProjectReference Include="..\SimpleReportServer\SimpleReportServer.csproj" />
     <ProjectReference Include="..\TailwindReportServer\TailwindReportServer.csproj" />
   </ItemGroup>

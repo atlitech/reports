@@ -1,0 +1,15 @@
+# Needs a reports server. Start the AppHost (aspire start), which passes the server's address to the
+# app; the dashboard and `aspire describe` show the app's URL. Or run the app on its own against any
+# server: dotnet run -- --ConnectionStrings:reports-server=http://localhost:8080
+@RemoteReportServer_HostAddress = http://localhost:5294
+
+### A Blazor report from ExampleTemplates, rendered here and converted on the reports server
+POST {{RemoteReportServer_HostAddress}}/reports/reportwithrepeatingheaderperpage
+
+### Any HTML document, converted on the reports server
+POST {{RemoteReportServer_HostAddress}}/html-to-pdf
+Content-Type: application/json
+
+{
+  "html": "<!DOCTYPE html><h1>Hello, PDF</h1><p>Converted by the reports server.</p>"
+}

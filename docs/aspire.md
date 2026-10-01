@@ -10,6 +10,12 @@ Two packages connect an [Aspire](https://aspire.dev) app to the
 Apps then convert HTML (or Blazor reports) without a browser of their own, and the server's logs,
 metrics, and traces show up in the Aspire dashboard next to theirs.
 
+The reference consumer is [`examples/RemoteReportServer`](../examples/RemoteReportServer): an app
+with no browser that renders Blazor reports and converts any HTML on the server. This repository's
+AppHost, [`examples/Atli.Reports.AppHost`](../examples/Atli.Reports.AppHost), runs it against a server
+built from source, and [an end-to-end test](../tests/Atli.Reports.AppHost.Tests) starts both and
+checks that the app returns PDFs without starting a browser.
+
 ## Requirements
 
 - Aspire 13.0 or later. The hosting package depends on `Aspire.Hosting` 13.0.0 or later, so your
@@ -127,7 +133,8 @@ app.Run();
 
 `AddReportsClient` replaces the engine's converter whichever of the two calls comes first, and turns
 off the engine's browser warm-up. `IReportService` and `MapBlazorReport` work as they do with the
-in-process engine.
+in-process engine. [`examples/RemoteReportServer`](../examples/RemoteReportServer) is this app in
+full, with a Blazor report and an endpoint that converts any HTML through `IHtmlToPdfConverter`.
 
 ## Configure the server
 
