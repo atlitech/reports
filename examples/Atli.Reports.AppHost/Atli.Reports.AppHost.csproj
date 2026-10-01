@@ -1,0 +1,21 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.0">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <UserSecretsId>b6120fee-98c2-453c-9eb3-8e2c9a55d125</UserSecretsId>
+    <!-- Takes the orchestrator and dashboard from the Aspire CLI instead of restoring them as packages. -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <!-- Runs the repository locally and is never packed; keeps `dotnet pack` of the solution quiet. -->
+    <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SimpleReportServer\SimpleReportServer.csproj" />
+    <ProjectReference Include="..\TailwindReportServer\TailwindReportServer.csproj" />
+  </ItemGroup>
+</Project>
