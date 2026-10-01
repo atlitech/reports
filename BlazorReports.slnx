@@ -5,10 +5,14 @@
     <Project Path="examples\TailwindReportServer\TailwindReportServer.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/Atli.Reports.Engine/Atli.Reports.Engine.csproj" />
+    <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
     <Project Path="src/BlazorReports.Client/BlazorReports.Client.csproj" />
     <Project Path="src/BlazorReports.Components/BlazorReports.Components.csproj" />
     <Project Path="src/BlazorReports.Viewer/BlazorReports.Viewer.csproj" />
     <Project Path="src/BlazorReports/BlazorReports.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Atli.Reports.Engine.Tests/Atli.Reports.Engine.Tests.csproj" />
+  </Folder>
 </Solution>

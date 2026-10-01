@@ -50,3 +50,6 @@ msbuild.wrn
 # Javascript
 node_modules/
 base.css
+
+# Test results
+TestResults/

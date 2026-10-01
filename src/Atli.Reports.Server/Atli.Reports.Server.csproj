@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PublishAot>true</PublishAot>
+    <IsPackable>false</IsPackable>
+    <!-- Ships as a container image, not a package; keeps `dotnet pack` of the solution quiet. -->
+    <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+  </ItemGroup>
+</Project>
