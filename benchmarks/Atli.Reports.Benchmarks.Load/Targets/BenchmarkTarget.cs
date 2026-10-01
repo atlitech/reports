@@ -65,7 +65,10 @@ internal abstract class BenchmarkTarget(
 internal sealed class AtliTarget(int port)
   : BenchmarkTarget("atli", "atli", new Uri($"http://localhost:{port}/"), "health/ready")
 {
-  public override string BrowserVersionCommand => "/usr/bin/chromium --version";
+  // The image points the engine at its browser through this variable, so the version always comes
+  // from the browser the server actually runs.
+  public override string BrowserVersionCommand =>
+    "\"$ReportsEngine__Browser__ExecutablePath\" --version";
 
   public override Task<PreparedRequest> PrepareAsync(BenchmarkFixture fixture, string html)
   {
