@@ -143,11 +143,11 @@ curl -X POST http://localhost:8080/convert \
 
 The options mirror `PdfOptions`: `orientation`, `paperSize` (`letter`, `a4`, `a3`, `legal`),
 `margins`, `printBackground`, `scale`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`,
-`pageRanges`, `preferCSSPageSize`, `waitForSignal`, and `waitTimeoutSeconds`. Failures are
-RFC 9457 problem details with a `kind` member. `GET /health/live` and `GET /health/ready` serve
-container probes. The image runs as a non-root user under `tini`, and its browser runs without
-the sandbox, so send it trusted HTML only. See [docs/engine/server.md](docs/engine/server.md) for
-status codes, configuration, and the image.
+`pageRanges`, `preferCSSPageSize`, `waitForSignal`, and `waitTimeoutSeconds`. Failures, including
+a body the server cannot read, are RFC 9457 problem details with a `kind` member.
+`GET /health/live` and `GET /health/ready` serve container probes. The image runs as a non-root
+user under `tini`, and its browser runs without the sandbox, so send it trusted HTML only. See
+[docs/engine/server.md](docs/engine/server.md) for status codes, configuration, and the image.
 
 ## Waiting for JavaScript
 

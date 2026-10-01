@@ -1,4 +1,5 @@
 using Atli.Reports.Engine;
+using Microsoft.AspNetCore.Diagnostics;
 
 namespace Atli.Reports.Server.Endpoints;
 
@@ -17,7 +18,9 @@ namespace Atli.Reports.Server.Endpoints;
 /// <item><term><see cref="ConversionErrorKind.RenderFailed"/></term><description>500 Internal Server Error</description></item>
 /// </list>
 /// Error bodies are RFC 9457 problem details with an extra <c>kind</c> member holding the
-/// <see cref="ConversionErrorKind"/> name.
+/// <see cref="ConversionErrorKind"/> name. Errors raised before the endpoint runs (a body that is not
+/// a conversion request, a wrong content type, a body over the size limit) and unhandled exceptions
+/// get the same shape, with the kind from <see cref="KindForStatus"/>.
 /// </remarks>
 public static class ConversionProblems
 {
@@ -54,6 +57,48 @@ public static class ConversionProblems
     };
 
   /// <summary>
+  /// The kind for an error status that no <see cref="ConversionError"/> produced: the kind
+  /// <c>Atli.Reports.Client</c> infers from that status alone, so naming it changes nothing for the
+  /// client. A body the server cannot read (<c>400</c>, <c>413</c>, <c>415</c>) is
+  /// <see cref="ConversionErrorKind.InvalidRequest"/>; an unhandled exception (<c>500</c>) is
+  /// <see cref="ConversionErrorKind.RenderFailed"/>.
+  /// </summary>
+  public static ConversionErrorKind KindForStatus(int status) =>
+    status switch
+    {
+      StatusCodes.Status422UnprocessableEntity => ConversionErrorKind.SignalTimeout,
+      StatusCodes.Status408RequestTimeout or StatusCodes.Status504GatewayTimeout =>
+        ConversionErrorKind.Timeout,
+      StatusCodes.Status429TooManyRequests => ConversionErrorKind.Busy,
+      Status499ClientClosedRequest => ConversionErrorKind.Canceled,
+      StatusCodes.Status502BadGateway or StatusCodes.Status503ServiceUnavailable =>
+        ConversionErrorKind.BrowserUnavailable,
+      >= 400 and < 500 => ConversionErrorKind.InvalidRequest,
+      _ => ConversionErrorKind.RenderFailed,
+    };
+
+  /// <summary>
+  /// Completes every problem the server writes, including those from the exception handler and
+  /// status code pages: adds the <c>kind</c> member when it is missing, and a detail for the request
+  /// bodies the endpoint never got to see.
+  /// </summary>
+  internal static void Customize(ProblemDetailsContext context)
+  {
+    var problem = context.ProblemDetails;
+    var status = problem.Status ?? context.HttpContext.Response.StatusCode;
+    problem.Extensions.TryAdd("kind", KindForStatus(status).ToString());
+    problem.Detail ??= status switch
+    {
+      StatusCodes.Status400BadRequest =>
+        "The request body is not a conversion request. Send a JSON object with an html string and, optionally, options.",
+      StatusCodes.Status413PayloadTooLarge => "The request body is larger than the server accepts.",
+      StatusCodes.Status415UnsupportedMediaType =>
+        "The request body must be JSON, sent with Content-Type: application/json.",
+      _ => null,
+    };
+  }
+
+  /// <summary>
   /// Writes <paramref name="error"/> as the response. Nothing is written for a canceled request.
   /// </summary>
   public static Task WriteAsync(HttpContext context, ConversionError error)
@@ -62,6 +107,12 @@ public static class ConversionProblems
     if (error.Kind == ConversionErrorKind.Canceled)
     {
       context.Response.StatusCode = status;
+      // Status code pages would otherwise write a problem body for the bare 499.
+      if (context.Features.Get<IStatusCodePagesFeature>() is { } statusCodePages)
+      {
+        statusCodePages.Enabled = false;
+      }
+
       return Task.CompletedTask;
     }
 
