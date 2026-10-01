@@ -14,5 +14,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Server\Atli.Reports.Server.csproj" />
   </ItemGroup>
 </Project>
