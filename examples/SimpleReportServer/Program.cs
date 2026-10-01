@@ -1,5 +1,5 @@
-using BlazorReports.Extensions;
-using BlazorReports.Models;
+using Atli.Reports.Blazor.Extensions;
+using Atli.Reports.Blazor.Models;
 using ExampleTemplates.Reports;
 using SimpleReportServer;
 

@@ -8,7 +8,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BlazorReports\BlazorReports.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Blazor\Atli.Reports.Blazor.csproj" />
     <ProjectReference Include="..\ExampleTemplates\ExampleTemplates.csproj" />
   </ItemGroup>
 

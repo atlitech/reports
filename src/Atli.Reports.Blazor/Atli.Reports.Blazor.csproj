@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Title>Atli Reports Blazor</Title>
+    <Description>Generate PDF reports from Blazor components. Map a component to an HTTP endpoint or render it from your own code. Formerly BlazorReports.</Description>
+    <LangVersion>preview</LangVersion>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Atli.Reports.Blazor.Components\Atli.Reports.Blazor.Components.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OneOf" VersionOverride="3.*" />
+  </ItemGroup>
+</Project>
