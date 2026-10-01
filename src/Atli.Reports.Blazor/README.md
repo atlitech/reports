@@ -113,6 +113,18 @@ Components still render in the app; the HTML is converted by an
 [Atli Reports server](https://github.com/atlitech/reports/blob/main/docs/engine/server.md), and
 the app never starts a browser.
 
+## Telemetry
+
+Report generation is traced on the `Atli.Reports.Blazor` activity source: an
+`atli.reports.blazor.generate` span per report, with an `atli.reports.blazor.render` child and,
+for PDF output, the engine's conversion span. Add both sources to see the whole report:
+
+```csharp
+builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
+  .AddSource(BlazorReportsTelemetry.ActivitySourceName)
+  .AddSource(ReportsEngineTelemetry.ActivitySourceName));
+```
+
 ## Learn more
 
 - [Atli Reports README](https://github.com/atlitech/reports#readme): base styles, Tailwind CSS,

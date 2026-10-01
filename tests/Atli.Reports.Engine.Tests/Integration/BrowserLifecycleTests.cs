@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
@@ -310,6 +311,39 @@ public class BrowserLifecycleTests
     await Assert.That(result.AsT1.Message).Contains("exited with code 3");
     await Assert.That(result.AsT1.Message).Contains("Missing X server");
     await Assert.That(Directory.Exists(await fake.ReadProfileDirectoryAsync())).IsFalse();
+  }
+
+  [Test]
+  public async Task A_browser_that_fails_to_start_fails_its_launch_span()
+  {
+    if (OperatingSystem.IsWindows())
+    {
+      Skip.Test("Uses a shell script as the browser executable.");
+      return;
+    }
+
+    using var fake = FakeBrowser.Create("exit 3");
+    using var spans = new SpanCollector();
+    await using var provider = TestEngine.Create(options =>
+      options.Browser.ExecutablePath = fake.Path
+    );
+
+    var result = await provider
+      .GetRequiredService<IHtmlToPdfConverter>()
+      .ConvertAsync("<p>x</p>", cancellationToken: TestToken);
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
+    var conversion = spans.Single("atli.reports.convert");
+    await Assert.That(conversion.GetTagItem("error.type")).IsEqualTo("BrowserUnavailable");
+    var open = spans.Single("atli.reports.page.open");
+    await Assert.That(open.Status).IsEqualTo(ActivityStatusCode.Error);
+    var launch = spans.Single("atli.reports.browser.launch");
+    await Assert.That(launch.ParentSpanId).IsEqualTo(open.SpanId);
+    await Assert.That(launch.Status).IsEqualTo(ActivityStatusCode.Error);
+    await Assert
+      .That(launch.GetTagItem("error.type"))
+      .IsEqualTo(typeof(BrowserUnavailableException).FullName);
+    await Assert.That(launch.Events.Select(e => e.Name)).Contains("exception");
   }
 
   private static async Task<bool> ProcessAndProfileGoneAsync(BrowserInstance browser) =>

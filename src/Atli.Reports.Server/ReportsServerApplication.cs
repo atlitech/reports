@@ -2,13 +2,14 @@ using Atli.Reports.Engine;
 using Atli.Reports.Server.Endpoints;
 using Atli.Reports.Server.Health;
 using Atli.Reports.Server.Serialization;
+using Atli.Reports.Server.Telemetry;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 namespace Atli.Reports.Server;
 
 /// <summary>
 /// Builds the reports server: the <c>/convert</c> endpoint and the health endpoints over the reports
-/// engine.
+/// engine, and the OTLP export of its telemetry when an endpoint is configured.
 /// </summary>
 public static class ReportsServerApplication
 {
@@ -42,6 +43,8 @@ public static class ReportsServerApplication
       .Services.AddHealthChecks()
       .AddReportsEngineBrowserCheck("browser_executable", tags: ["live", "ready"])
       .AddReportsEngineConversionCheck("conversion_health", tags: ["ready"]);
+
+    builder.AddServerTelemetry();
 
     configure?.Invoke(builder);
 

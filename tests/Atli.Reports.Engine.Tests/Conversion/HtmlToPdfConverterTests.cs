@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
@@ -6,8 +7,10 @@ using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Conversion;
 using Atli.Reports.Engine.Diagnostics;
 using Atli.Reports.Engine.Health;
+using Atli.Reports.Engine.Tests.Support;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TUnit.Assertions.Enums;
 
 namespace Atli.Reports.Engine.Tests.Conversion;
 
@@ -304,6 +307,178 @@ public class HtmlToPdfConverterTests
   }
 
   [Test]
+  public async Task A_conversion_is_a_span_with_a_child_span_per_stage()
+  {
+    using var spans = new SpanCollector();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
+
+    var result = await converter.ConvertAsync(
+      "<p>x</p>",
+      new PdfOptions
+      {
+        PaperSize = PaperSize.A4,
+        Orientation = PageOrientation.Landscape,
+        GenerateTaggedPdf = false,
+      }
+    );
+    await result.AsT0.DisposeAsync();
+
+    var conversion = spans.Single("atli.reports.convert");
+    await Assert.That(conversion.ParentSpanId).IsEqualTo(spans.Root.SpanId);
+    await Assert
+      .That(spans.ChildrenOf(conversion))
+      .IsEquivalentTo(
+        [
+          "atli.reports.page.open",
+          "atli.reports.page.set_content",
+          "atli.reports.page.wait",
+          "atli.reports.pdf.print",
+        ],
+        CollectionOrdering.Matching
+      );
+    await Assert.That(conversion.Status).IsEqualTo(ActivityStatusCode.Unset);
+    await Assert.That(conversion.GetTagItem("error.type")).IsNull();
+    await Assert.That(conversion.GetTagItem("atli.reports.pdf.paper_size")).IsEqualTo("a4");
+    await Assert.That(conversion.GetTagItem("atli.reports.pdf.orientation")).IsEqualTo("landscape");
+    await Assert.That((bool)conversion.GetTagItem("atli.reports.pdf.tagged")!).IsFalse();
+    await Assert.That((bool)conversion.GetTagItem("atli.reports.pdf.wait_for_signal")!).IsFalse();
+    await Assert.That(conversion.GetTagItem("atli.reports.html.length")).IsEqualTo(8);
+    await Assert
+      .That(conversion.GetTagItem("atli.reports.pdf.size"))
+      .IsEqualTo((long)FakePage.Pdf.Length);
+    await Assert
+      .That(spans.Single("atli.reports.page.wait").GetTagItem("atli.reports.page.wait_for"))
+      .IsEqualTo("load");
+    await Assert.That(spans.Named("atli.reports.queue.wait")).IsEmpty();
+  }
+
+  [Test]
+  public async Task No_span_holds_the_html()
+  {
+    const string secret = "tenant-secret-4711";
+    using var spans = new SpanCollector();
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
+
+    var result = await converter.ConvertAsync(
+      $"<p>{secret}</p>",
+      new PdfOptions { WaitForSignal = "ready" }
+    );
+    await result.AsT0.DisposeAsync();
+
+    await Assert.That(spans.Spans).IsNotEmpty();
+    foreach (var span in spans.Spans)
+    {
+      foreach (var tag in span.TagObjects)
+      {
+        await Assert.That(tag.Value?.ToString() ?? "").DoesNotContain(secret);
+      }
+    }
+  }
+
+  [Test]
+  public async Task A_failed_conversion_has_its_kind_as_error_type_and_marks_the_failed_stage()
+  {
+    using var spans = new SpanCollector();
+    FakePage page = new()
+    {
+      PrintFailure = new DevToolsTimeoutException("Page.printToPDF", TimeSpan.FromSeconds(30)),
+    };
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    var result = await converter.ConvertAsync("<p>x</p>");
+
+    var conversion = spans.Single("atli.reports.convert");
+    await Assert.That(conversion.Status).IsEqualTo(ActivityStatusCode.Error);
+    await Assert.That(conversion.StatusDescription).IsEqualTo(result.AsT1.Message);
+    await Assert.That(conversion.GetTagItem("error.type")).IsEqualTo("Timeout");
+    await Assert.That(conversion.GetTagItem("atli.reports.pdf.size")).IsNull();
+    await Assert
+      .That(spans.Single("atli.reports.pdf.print").Status)
+      .IsEqualTo(ActivityStatusCode.Error);
+    await Assert
+      .That(spans.Single("atli.reports.page.wait").Status)
+      .IsEqualTo(ActivityStatusCode.Unset);
+  }
+
+  [Test]
+  public async Task A_signal_that_never_comes_fails_the_wait_span()
+  {
+    using var spans = new SpanCollector();
+    FakePage page = new() { SignalArrives = false };
+    var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => page));
+
+    await converter.ConvertAsync(
+      "<p>x</p>",
+      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TimeSpan.FromSeconds(2) }
+    );
+
+    var conversion = spans.Single("atli.reports.convert");
+    await Assert.That(conversion.GetTagItem("error.type")).IsEqualTo("SignalTimeout");
+    await Assert.That((bool)conversion.GetTagItem("atli.reports.pdf.wait_for_signal")!).IsTrue();
+    var wait = spans.Single("atli.reports.page.wait");
+    await Assert.That(wait.GetTagItem("atli.reports.page.wait_for")).IsEqualTo("signal");
+    await Assert.That(wait.Status).IsEqualTo(ActivityStatusCode.Error);
+    await Assert.That(spans.Named("atli.reports.pdf.print")).IsEmpty();
+  }
+
+  [Test]
+  public async Task An_invalid_request_is_a_failed_span_without_stages()
+  {
+    using var spans = new SpanCollector();
+    var (converter, _) = CreateConverter(
+      new FakeBrowserProvider(_ => throw new InvalidOperationException("unreachable"))
+    );
+
+    await converter.ConvertAsync(" ");
+
+    var conversion = spans.Single("atli.reports.convert");
+    await Assert.That(conversion.GetTagItem("error.type")).IsEqualTo("InvalidRequest");
+    await Assert.That(conversion.Status).IsEqualTo(ActivityStatusCode.Error);
+    await Assert.That(spans.ChildrenOf(conversion)).IsEmpty();
+  }
+
+  [Test]
+  public async Task Only_a_conversion_that_waits_for_its_turn_has_a_queue_span()
+  {
+    using var spans = new SpanCollector();
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    FakePage blocked = new() { PrintGate = release.Task };
+    var (converter, _) = CreateConverter(
+      new FakeBrowserProvider(_ => blocked),
+      new ReportsEngineConcurrencyOptions { MaxConcurrentConversions = 1, MaxQueueLength = 5 }
+    );
+
+    var first = converter.ConvertAsync("<p>first</p>").AsTask();
+    await blocked.Printing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    var second = converter.ConvertAsync("<p>second</p>").AsTask();
+    await Task.Delay(100);
+    release.SetResult();
+    await (await first).AsT0.DisposeAsync();
+    await (await second).AsT0.DisposeAsync();
+
+    var queued = spans.Single("atli.reports.queue.wait");
+    var conversions = spans.Named("atli.reports.convert");
+    await Assert.That(conversions.Count).IsEqualTo(2);
+    await Assert
+      .That(conversions.Count(conversion => conversion.SpanId == queued.ParentSpanId))
+      .IsEqualTo(1);
+    await Assert.That(queued.Status).IsEqualTo(ActivityStatusCode.Unset);
+  }
+
+  [Test]
+  [Arguments(8.5, 11, "letter")]
+  [Arguments(8.27, 11.69, "a4")]
+  [Arguments(8, 10, "8x10in")]
+  public async Task Paper_sizes_are_named_or_measured(double width, double height, string expected)
+  {
+    var described = EngineActivities.DescribePaperSize(
+      new PaperSize { Width = width, Height = height }
+    );
+
+    await Assert.That(described).IsEqualTo(expected);
+  }
+
+  [Test]
   public async Task The_streaming_overload_writes_the_pdf_to_the_destination()
   {
     var (converter, _) = CreateConverter(new FakeBrowserProvider(_ => new FakePage()));
@@ -432,7 +607,7 @@ public class HtmlToPdfConverterTests
       return Task.CompletedTask;
     }
 
-    public async Task PrintToPdfAsync(
+    public async Task<long> PrintToPdfAsync(
       PdfOptions options,
       Stream destination,
       CancellationToken cancellationToken
@@ -454,6 +629,8 @@ public class HtmlToPdfConverterTests
       {
         throw new DestinationWriteException(exception);
       }
+
+      return Pdf.Length;
     }
 
     public ValueTask DisposeAsync()

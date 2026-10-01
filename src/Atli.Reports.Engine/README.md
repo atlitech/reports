@@ -10,7 +10,7 @@ over the Chrome DevTools Protocol and returns the PDF. It is NativeAOT compatibl
 - The PDF streams to your `Stream` as the browser produces it.
 - JavaScript completion signals let a page say when it is ready to print.
 - The engine recovers from browser crashes, recycles the browser, and can close it when idle.
-- It publishes metrics (meter `Atli.Reports.Engine`) and provides health checks.
+- It publishes OpenTelemetry-ready traces and metrics and provides health checks.
 
 Part of [Atli Reports](https://github.com/atlitech/reports).
 
@@ -92,6 +92,20 @@ var result = await converter.ConvertAsync(
 The page calls `window.pdfReady()` when its asynchronous work is done, and the engine prints at
 that moment. Without a signal, the engine prints after the `load` event, once web fonts are ready.
 
+## Telemetry
+
+The engine traces every conversion (a span per stage: queue wait, page open and browser launch,
+content, load or signal wait, print, and streaming) and publishes metrics. Both use the name
+`Atli.Reports.Engine`, available as constants:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+  .WithTracing(tracing => tracing.AddSource(ReportsEngineTelemetry.ActivitySourceName))
+  .WithMetrics(metrics => metrics.AddMeter(ReportsEngineTelemetry.MeterName));
+```
+
+Spans and metrics never contain the HTML. Without a listener, the engine creates no spans.
+
 ## Browser
 
 The engine finds Chrome, Chromium, or Edge in the standard install locations, or uses
@@ -105,7 +119,7 @@ conversions a second. In Linux containers, set `Browser:NoSandbox` (trusted HTML
 
 - [Atli Reports README](https://github.com/atlitech/reports#readme): quick starts and benchmarks
 - [Engine architecture](https://github.com/atlitech/reports/blob/main/docs/engine/architecture.md):
-  lifecycle, isolation, concurrency, streaming, and metrics
+  lifecycle, isolation, concurrency, streaming, and telemetry
 - [Atli.Reports.Server](https://github.com/atlitech/reports/blob/main/docs/engine/server.md): the
   engine as an HTTP service in a container
 - [Atli.Reports.Client](https://www.nuget.org/packages/Atli.Reports.Client): the same

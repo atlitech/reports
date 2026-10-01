@@ -21,9 +21,9 @@ namespace Atli.Reports.Engine.Diagnostics;
 internal sealed class EngineMetrics : IDisposable
 {
   /// <summary>
-  /// The name of the engine's meter.
+  /// The name of the engine's meter; see <see cref="ReportsEngineTelemetry.MeterName"/>.
   /// </summary>
-  public const string MeterName = "Atli.Reports.Engine";
+  public const string MeterName = ReportsEngineTelemetry.MeterName;
 
   private readonly Meter _meter;
   private readonly bool _ownsMeter;

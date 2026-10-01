@@ -94,6 +94,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     for (var attempt = 1; ; attempt++)
     {
       var browser = await AcquireAsync(cancellationToken);
+      EngineActivities.Current?.SetTag(EngineActivities.Tags.BrowserGeneration, browser.Generation);
       try
       {
         var page = await browser.CreatePageAsync(cancellationToken);
@@ -203,6 +204,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     )
     {
       LogMessages.BrowserRecycling(_logger, browser.Generation, "it reached its maximum lifetime");
+      EngineActivities.BrowserRecycling(browser.Generation, "max_lifetime");
       _metrics.BrowserRecycled();
       return false;
     }
@@ -223,9 +225,12 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         browser.Generation,
         "it served its maximum number of conversions"
       );
+      EngineActivities.BrowserRecycling(browser.Generation, "max_conversions");
       _metrics.BrowserRecycled();
       RetireLocked(browser);
-      _launch ??= LaunchAsync();
+
+      // Nobody waits for this launch yet, so it is not part of this conversion: it traces on its own.
+      _launch ??= WithoutExecutionContext(LaunchAsync);
     }
 
     return true;
@@ -284,11 +289,15 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     }
 
     _idleSince = _timeProvider.GetTimestamp();
-    _idleTimer ??= _timeProvider.CreateTimer(
-      _ => CloseIfIdle(),
-      null,
-      Timeout.InfiniteTimeSpan,
-      Timeout.InfiniteTimeSpan
+
+    // The timer outlives the conversion that creates it; it must not log or trace against it.
+    _idleTimer ??= WithoutExecutionContext(() =>
+      _timeProvider.CreateTimer(
+        _ => CloseIfIdle(),
+        null,
+        Timeout.InfiniteTimeSpan,
+        Timeout.InfiniteTimeSpan
+      )
     );
     _idleTimer.Change(_options.IdleTimeout, Timeout.InfiniteTimeSpan);
   }
@@ -331,12 +340,16 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     // Leave the caller's lock before doing any work; the caller stores this task first.
     await Task.Yield();
 
+    // A child of the conversion whose page needed the browser; a trace of its own otherwise.
+    var generation = Interlocked.Increment(ref _generation);
+    using var activity = EngineActivities.StartBrowserLaunch(generation);
+
     BrowserInstance browser;
     try
     {
       browser = await BrowserInstance.LaunchAsync(
         _options,
-        Interlocked.Increment(ref _generation),
+        generation,
         _timeProvider,
         _loggerFactory,
         _stopping.Token
@@ -349,6 +362,8 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         _launch = null;
       }
 
+      EngineActivities.Failed(activity, exception);
+      activity?.AddException(exception);
       LogMessages.BrowserLaunchFailed(_logger, exception);
       if (exception is BrowserUnavailableException)
       {
@@ -363,6 +378,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       );
     }
 
+    activity?.SetTag(EngineActivities.Tags.BrowserProcessId, browser.ProcessId);
     lock (_lock)
     {
       _launch = null;
@@ -370,20 +386,44 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       {
         browser.Retired = true;
         CloseLocked(browser);
-        throw new BrowserUnavailableException("The reports engine is shutting down.");
+        BrowserUnavailableException shuttingDown = new("The reports engine is shutting down.");
+        EngineActivities.Failed(activity, shuttingDown);
+        throw shuttingDown;
       }
 
       _current = browser;
     }
 
     _metrics.BrowserLaunched();
-    _ = browser.Terminated.ContinueWith(
-      _ => OnTerminated(browser),
-      CancellationToken.None,
-      TaskContinuationOptions.ExecuteSynchronously,
-      TaskScheduler.Default
+
+    // The browser outlives this launch: its crash is not part of whatever trace launched it.
+    _ = WithoutExecutionContext(() =>
+      browser.Terminated.ContinueWith(
+        _ => OnTerminated(browser),
+        CancellationToken.None,
+        TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default
+      )
     );
     return browser;
+  }
+
+  /// <summary>
+  /// Starts background work without the caller's execution context, so work that outlives a
+  /// conversion (a launch nobody waits for yet, a timer, a crash watcher) neither runs in its trace
+  /// nor carries its logging scopes.
+  /// </summary>
+  private static T WithoutExecutionContext<T>(Func<T> start)
+  {
+    if (ExecutionContext.IsFlowSuppressed())
+    {
+      return start();
+    }
+
+    using (ExecutionContext.SuppressFlow())
+    {
+      return start();
+    }
   }
 
   private void OnTerminated(BrowserInstance browser)
@@ -547,7 +587,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
     public Task WaitForLoadAsync(CancellationToken cancellationToken) =>
       page.WaitForLoadAsync(cancellationToken);
 
-    public Task PrintToPdfAsync(
+    public Task<long> PrintToPdfAsync(
       PdfOptions options,
       Stream destination,
       CancellationToken cancellationToken

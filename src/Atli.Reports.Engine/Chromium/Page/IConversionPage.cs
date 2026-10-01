@@ -32,8 +32,13 @@ internal interface IConversionPage : IAsyncDisposable
   /// Prints the page and writes the PDF to <paramref name="destination"/>. Nothing is written
   /// unless the browser printed the page successfully.
   /// </summary>
+  /// <returns>The number of PDF bytes written to <paramref name="destination"/>.</returns>
   /// <exception cref="DestinationWriteException"><paramref name="destination"/> threw.</exception>
-  Task PrintToPdfAsync(PdfOptions options, Stream destination, CancellationToken cancellationToken);
+  Task<long> PrintToPdfAsync(
+    PdfOptions options,
+    Stream destination,
+    CancellationToken cancellationToken
+  );
 }
 
 /// <summary>

@@ -145,7 +145,7 @@ internal sealed class IsolatedPage : IConversionPage
     }
   }
 
-  public async Task PrintToPdfAsync(
+  public async Task<long> PrintToPdfAsync(
     PdfOptions options,
     Stream destination,
     CancellationToken cancellationToken
@@ -164,13 +164,28 @@ internal sealed class IsolatedPage : IConversionPage
         ?? throw new DevToolsProtocolException("Page.printToPDF returned no PDF stream.");
     }
 
-    await ChromiumPdfGenerator.CopyToAsync(
-      _session,
-      handle,
-      destination,
-      _pdfReadChunkSize,
-      cancellationToken
-    );
+    // The browser has printed; what remains is moving the PDF out of it.
+    using var activity = EngineActivities.Source.StartActivity(EngineActivities.Spans.Stream);
+    try
+    {
+      var size = await ChromiumPdfGenerator.CopyToAsync(
+        _session,
+        handle,
+        destination,
+        _pdfReadChunkSize,
+        cancellationToken
+      );
+      activity?.SetTag(EngineActivities.Tags.PdfSize, size);
+      return size;
+    }
+    catch (Exception exception) when (activity is not null)
+    {
+      EngineActivities.StageFailed(
+        activity,
+        exception is DestinationWriteException { InnerException: { } inner } ? inner : exception
+      );
+      throw;
+    }
   }
 
   public async ValueTask DisposeAsync()

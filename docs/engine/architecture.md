@@ -18,6 +18,8 @@ Code map (all under `src/Atli.Reports.Engine/`):
 | The conversion flow and error mapping | `Conversion/HtmlToPdfConverter.cs`, `ConversionErrors.cs` |
 | PDF streaming | `Pdf/ChromiumPdfGenerator.cs` |
 | Host integration (warm-up, drain on stop) | `Hosting/ReportsEngineHostedService.cs` |
+| Telemetry names (public) | `ReportsEngineTelemetry.cs` |
+| Traces | `Diagnostics/EngineActivities.cs` |
 | Metrics | `Diagnostics/EngineMetrics.cs` |
 
 ## The conversion flow
@@ -205,10 +207,83 @@ arrived with the end-of-file flag.) The buffered `ConvertAsync` overload streams
 `MemoryStream`; the streaming overload writes to the caller's stream directly. Exceptions the
 destination throws reach the caller unchanged.
 
-## Metrics
+## Telemetry
 
-The engine publishes on the `Atli.Reports.Engine` meter (through `IMeterFactory` when the host
-registers one):
+The engine publishes traces on the `Atli.Reports.Engine` activity source and metrics on the
+`Atli.Reports.Engine` meter. `ReportsEngineTelemetry.ActivitySourceName` and
+`ReportsEngineTelemetry.MeterName` hold the names:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+  .WithTracing(tracing => tracing.AddSource(ReportsEngineTelemetry.ActivitySourceName))
+  .WithMetrics(metrics => metrics.AddMeter(ReportsEngineTelemetry.MeterName));
+```
+
+No span, attribute, event, metric, or log message contains the HTML being converted. Without a
+listener for the source, `ActivitySource.StartActivity` returns `null` and the engine creates no
+spans; attributes are computed only for sampled spans.
+
+### Spans
+
+Every call to either `ConvertAsync` overload is one `atli.reports.convert` span, a child of the
+caller's current span (an ASP.NET Core request, say). Each stage the conversion reaches is a child
+of it, in this order:
+
+| Span | Parent | Covers |
+| --- | --- | --- |
+| `atli.reports.convert` | the caller's span | The whole conversion, queue wait included |
+| `atli.reports.queue.wait` | conversion | Waiting for a slot; only conversions that had to wait have one |
+| `atli.reports.page.open` | conversion | Leasing the browser and opening the isolated page (usually prepared in advance) |
+| `atli.reports.browser.launch` | `page.open`, or none | Starting a browser and connecting to it (see below) |
+| `atli.reports.page.set_content` | conversion | Registering the completion signal, if any, and `Page.setDocumentContent` |
+| `atli.reports.page.wait` | conversion | Waiting for the `load` event and fonts, or for the signal |
+| `atli.reports.pdf.print` | conversion | `Page.printToPDF` and the streaming below |
+| `atli.reports.pdf.stream` | `pdf.print` | Moving the printed PDF out of the browser into the destination with `IO.read` |
+
+A browser launch is a child of the `page.open` span of the conversion that needed it; conversions
+that arrive during the launch wait for the same launch inside their own `page.open`. The launch at
+host start-up (`Browser:WarmUpOnStartup`) and the background launch that replaces a browser retired
+for its conversion count have no parent: they are traces of their own. Work that outlives a
+conversion (the crash watcher, the idle timer, the background launch) does not run in that
+conversion's execution context, so its logs are not attributed to it.
+
+Attributes:
+
+| Attribute | Span | Value |
+| --- | --- | --- |
+| `error.type` | `convert` | The `ConversionErrorKind` (`Timeout`, `Busy`, ...), when the conversion fails |
+| `atli.reports.html.length` | `convert` | Length of the HTML in characters (never its content) |
+| `atli.reports.pdf.paper_size` | `convert` | `letter`, `legal`, `a4`, `a3`, or the size in inches (`8x10in`) |
+| `atli.reports.pdf.orientation` | `convert` | `portrait` or `landscape` |
+| `atli.reports.pdf.wait_for_signal` | `convert` | Whether the conversion waits for a completion signal |
+| `atli.reports.pdf.tagged` | `convert` | `PdfOptions.GenerateTaggedPdf`, when set |
+| `atli.reports.pdf.size` | `convert`, `pdf.print`, `pdf.stream` | PDF bytes written to the destination |
+| `atli.reports.page.wait_for` | `page.wait` | `load` or `signal` |
+| `atli.reports.browser.generation` | `page.open`, `browser.launch` | Which browser (1 for the first one launched) served the conversion or was launched |
+| `atli.reports.browser.pid` | `browser.launch` | The browser's process id |
+| `error.type` | `browser.launch` | The exception type, when the launch failed |
+
+**Failures.** A failed conversion's span has the error status, with the `ConversionError` message
+as its description, and `error.type` set to the `ConversionErrorKind`. The stage span the
+conversion failed in also has the error status (a conversion that runs out of
+`ConversionTimeout` shows there as canceled); an unexpected failure (a defect, logged as event 901)
+adds an `exception` event to it. A failed launch has the error status, `error.type`, and an
+`exception` event. When the caller's destination stream throws, the exception reaches the caller
+unchanged, and the conversion span records its type as `error.type`.
+
+**Events.** `atli.reports.browser.recycle` on the `page.open` span of the conversion that retired a
+browser, with `atli.reports.browser.generation` and `atli.reports.browser.recycle.reason`
+(`max_lifetime` or `max_conversions`).
+
+**Browser lifecycle logs.** The rest of the browser's lifecycle is in structured log events
+(category `Atli.Reports.Engine.*`), which an OpenTelemetry logging provider exports with the
+current trace context: 300 browser started, 301 launch failed, 302 recycling (with the reason), 303
+crashed or disconnected, 304 closed, 305 close failed, 306 shutdown drain timed out, 307 warm-up
+failed, 308 idle close; 900 and 901 for failed conversions.
+
+### Metrics
+
+Published through `IMeterFactory` when the host registers one:
 
 | Instrument | Type | Meaning |
 | --- | --- | --- |
@@ -219,6 +294,15 @@ registers one):
 | `atli.reports.browser.launches` | counter | Browser processes started |
 | `atli.reports.browser.crashes` | counter | Browsers that exited or disconnected unexpectedly |
 | `atli.reports.browser.recycles` | counter | Browsers replaced for age or conversion count |
+
+### Blazor reports
+
+`Atli.Reports.Blazor` traces on its own source, `Atli.Reports.Blazor`
+(`BlazorReportsTelemetry.ActivitySourceName`): an `atli.reports.blazor.generate` span per report
+(attributes `atli.reports.blazor.report`, `atli.reports.blazor.component`,
+`atli.reports.blazor.output_format`, and `error.type` on failure), with an
+`atli.reports.blazor.render` child for rendering the component and, for PDF output, the engine's
+`atli.reports.convert` span.
 
 ## Configuration reference
 

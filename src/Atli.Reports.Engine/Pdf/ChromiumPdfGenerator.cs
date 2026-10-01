@@ -78,8 +78,9 @@ internal static class ChromiumPdfGenerator
   /// destination writes. Chunks are decoded straight from the reply's UTF-8 JSON into a pooled
   /// buffer: no base64 string is ever materialized.
   /// </remarks>
+  /// <returns>The number of bytes written to <paramref name="destination"/>.</returns>
   /// <exception cref="DestinationWriteException"><paramref name="destination"/> threw.</exception>
-  public static async Task CopyToAsync(
+  public static async Task<long> CopyToAsync(
     DevToolsSession session,
     string handle,
     Stream destination,
@@ -91,6 +92,7 @@ internal static class ChromiumPdfGenerator
     read.Parameters.Add("handle", handle);
     read.Parameters.Add("size", chunkSize);
 
+    long written = 0;
     Task<DevToolsReply>? pending = session.SendAsync(read, cancellationToken);
     try
     {
@@ -108,6 +110,7 @@ internal static class ChromiumPdfGenerator
           if (chunk.Length > 0)
           {
             await WriteAsync(destination, chunk, cancellationToken);
+            written += chunk.Length;
           }
         }
         finally
@@ -115,6 +118,8 @@ internal static class ChromiumPdfGenerator
           chunk.Return();
         }
       }
+
+      return written;
     }
     finally
     {
