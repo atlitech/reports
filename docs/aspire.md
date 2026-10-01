@@ -41,7 +41,7 @@ builder.Build().Run();
 | --- | --- |
 | Image | `ghcr.io/atlitech/reports-server:<version>`, where `<version>` is the hosting package's version |
 | Endpoint | `http`, to the server's port 8080 in the container. `port` fixes the host port; by default Aspire picks one. The endpoint is not external. |
-| Health | Healthy once `GET /health/ready` answers `200`: the browser is found and recent conversions mostly succeed. `WaitFor(reports)` waits for that. |
+| Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails (a missing library, say), the server answers `503` with the reason and retries in the background, so the resource stays unhealthy and `WaitFor(reports)` keeps waiting until a launch succeeds. See [the server's health endpoints](engine/server.md#health). |
 | Telemetry | Logs, metrics, and traces go to the dashboard over OTLP, including the engine's `atli.reports.convert` spans below each `POST /convert`. |
 | Command | `Convert a test page` converts a one-page document and writes the PDF's size and the round trip's duration to the server's console log. It is enabled while the server is healthy. From a terminal: `aspire resource reports convert-test-page`. |
 
@@ -261,7 +261,10 @@ services:
 - **Health in production.** Aspire's health check only drives the local dashboard and `WaitFor`; in
   Docker Compose, `WaitFor` becomes `service_started`. The client copes with a server that is still
   starting: it retries connection failures and `503`s. On targets with probes (Azure Container Apps,
-  Kubernetes), Aspire's experimental `WithHttpProbe` adds them:
+  Kubernetes), Aspire's experimental `WithHttpProbe` adds them. Use `/health/ready` for readiness:
+  it fails while the browser cannot launch, and recovers on its own once a background retry
+  succeeds. Use `/health/live` for liveness: it runs no engine check, because a restart does not
+  repair a browser that cannot start.
 
   ```csharp
   #pragma warning disable ASPIREPROBES001 // Probes are experimental in Aspire 13.

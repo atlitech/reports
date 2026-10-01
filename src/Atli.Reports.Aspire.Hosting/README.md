@@ -35,8 +35,8 @@ In the app, `builder.AddReportsClient("reports")` from `Atli.Reports.Client` reg
 `AddReportsServer` runs `ghcr.io/atlitech/reports-server`, tagged with this package's version, and:
 
 - exposes the server's port 8080 as the `http` endpoint (pass `port` to fix the host port);
-- marks the resource healthy once `/health/ready` answers, so `WaitFor` waits for a server that can
-  convert;
+- marks the resource healthy once `/health/ready` answers `200`; the server answers `503` while its
+  browser fails to launch, so `WaitFor` waits for a server that can convert;
 - sends the server's logs, metrics, and traces to the dashboard over OTLP;
 - adds a `Convert a test page` dashboard command, which converts a one-page document and logs the
   PDF's size and the time it took.

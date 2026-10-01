@@ -14,7 +14,7 @@ public static class ReportsServerBuilderExtensions
   private const int ServerPort = 8080;
 
   /// <summary>
-  /// The server's readiness probe: the browser is found and recent conversions mostly succeed.
+  /// The server's readiness probe: its browser can launch and recent conversions mostly succeed.
   /// </summary>
   private const string ReadinessPath = "/health/ready";
 
@@ -41,9 +41,11 @@ public static class ReportsServerBuilderExtensions
   /// <remarks>
   /// <para>
   /// The server listens on port 8080 in the container, behind the <c>http</c> endpoint. The resource
-  /// turns healthy once <c>/health/ready</c> answers, so <c>WaitFor</c> waits for a server that can
-  /// convert. The server sends its logs, metrics, and traces to the dashboard over OTLP, and the
-  /// dashboard offers a <c>Convert a test page</c> command that checks the whole path end to end.
+  /// turns healthy once <c>/health/ready</c> answers <c>200</c>, and the server answers <c>503</c>
+  /// while its browser fails to launch (the image launches it at startup, and the server retries in
+  /// the background), so <c>WaitFor</c> waits for a server that can convert. The server sends its
+  /// logs, metrics, and traces to the dashboard over OTLP, and the dashboard offers a
+  /// <c>Convert a test page</c> command that checks the whole path end to end.
   /// </para>
   /// <para>
   /// Reference the server from an app with <c>WithReference</c>; the app reads the connection string
