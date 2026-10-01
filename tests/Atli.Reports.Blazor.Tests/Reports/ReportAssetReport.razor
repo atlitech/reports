@@ -1,0 +1,6 @@
+<img alt="stamp" src="@ReportAssets.GetValueOrDefault("stamp.png")" />
+
+@code {
+  [Parameter]
+  public Dictionary<string, string> ReportAssets { get; set; } = [];
+}
