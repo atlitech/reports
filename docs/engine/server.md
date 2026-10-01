@@ -71,8 +71,7 @@ Request size is Kestrel's: 30 MB by default, configurable with `Kestrel__Limits_
 ## Container image
 
 ```bash
-docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
-docker run -p 8080:8080 atli-reports-server
+docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
 ```
 
 - **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble`, `runtime-deps:10.0-noble`), so the
@@ -86,6 +85,52 @@ docker run -p 8080:8080 atli-reports-server
   zombies.
 - **The server runs as the non-root `app` user.** The browser runs without its sandbox, which only
   suits trusted HTML.
+
+### Published image
+
+Each release publishes `ghcr.io/atlitech/reports-server` for `linux/amd64` and `linux/arm64`. Both
+are built natively (not emulated) by the release workflow, which pins `CHROME_VERSION` to that day's
+stable `chrome-headless-shell` and smoke-tests each architecture before any tag moves.
+
+| Tag | Points at |
+| --- | --- |
+| `<version>`, for example `0.26.0` | That release. It never moves. |
+| `<major>.<minor>`, for example `0.26` | The most recently published release of that line. A version with a pre-release suffix, such as `0.26.0-preview.1`, does not move it. |
+| `latest` | The most recently published release that is not a pre-release, by version or by its GitHub release. |
+
+Pin a version (or a digest) in production; `latest` and `<major>.<minor>` move with releases.
+
+Each image carries OCI labels (`source`, `version`, `revision`, `licenses`), an SBOM, and a
+BuildKit provenance attestation that records the build arguments, Chrome's version among them:
+
+```bash
+docker buildx imagetools inspect ghcr.io/atlitech/reports-server:0.26.0 --format '{{ json .SBOM }}'
+docker buildx imagetools inspect ghcr.io/atlitech/reports-server:0.26.0 --format '{{ json .Provenance }}'
+```
+
+The multi-arch index also has a GitHub artifact attestation (SLSA build provenance, signed through
+Sigstore) that ties it to the release workflow in this repository:
+
+```bash
+gh attestation verify oci://ghcr.io/atlitech/reports-server:0.26.0 --repo atlitech/reports
+```
+
+The attested subject is the multi-arch index, so verify a tag or the index digest
+(`oci://ghcr.io/atlitech/reports-server@sha256:...`), not the per-platform digest that `docker pull`
+resolves on one machine.
+
+### Building the image
+
+```bash
+docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
+docker run -p 8080:8080 atli-reports-server
+```
+
+`.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
+image change: the server becomes ready, converts a document to a PDF, runs as a non-root user under
+`tini`, and shuts down cleanly.
+
+### Throughput
 
 Measured with 50 one-page documents against a container limited to 2 CPUs and 2 GB (Linux arm64):
 

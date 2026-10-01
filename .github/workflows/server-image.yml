@@ -1,0 +1,90 @@
+name: Server image
+
+# Builds the Atli.Reports.Server container image natively on amd64 and arm64 and smoke-tests each
+# build with .github/scripts/smoke-test-server-image.sh: the server becomes ready, converts a small
+# document to a PDF, runs as a non-root user under tini, and shuts down cleanly. Nothing is pushed;
+# release.yml publishes the image.
+#
+# This is not a required check: it only runs when something that goes into the image changes.
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "src/Atli.Reports.Engine/**"
+      - "src/Atli.Reports.Server/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - ".github/workflows/server-image.yml"
+      - ".github/scripts/smoke-test-server-image.sh"
+  push:
+    branches: [ "main" ]
+    paths:
+      - "src/Atli.Reports.Engine/**"
+      - "src/Atli.Reports.Server/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - ".github/workflows/server-image.yml"
+      - ".github/scripts/smoke-test-server-image.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-smoke-test:
+    name: Build and smoke test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Passing the current stable version explicitly makes a new Chrome release miss the cached
+      # browser layer, so it is tested here before a release ships it.
+      - name: Resolve the stable chrome-headless-shell version
+        id: chrome
+        run: |
+          version="$(curl -fsSL --retry 3 https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)"
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+            echo "::error::Chrome for Testing did not return a version number."
+            exit 1
+          fi
+          echo "Chrome for Testing stable: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: src/Atli.Reports.Server/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          build-args: CHROME_VERSION=${{ steps.chrome.outputs.version }}
+          tags: reports-server:smoke-test
+          load: true
+          # Only the release build is attested.
+          provenance: false
+          cache-from: type=gha,scope=server-image-${{ matrix.arch }}
+          cache-to: type=gha,scope=server-image-${{ matrix.arch }},mode=max
+
+      - name: Smoke test
+        run: .github/scripts/smoke-test-server-image.sh reports-server:smoke-test

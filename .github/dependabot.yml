@@ -8,3 +8,14 @@ updates:
     groups:
       github-actions:
         patterns: [ "*" ]
+
+  # Keeps the server image's base images (dotnet/sdk and dotnet/runtime-deps) current. They share
+  # Ubuntu 24.04 so the NativeAOT binary runs against the glibc it was linked with, so they move
+  # together in one pull request.
+  - package-ecosystem: docker
+    directory: /src/Atli.Reports.Server
+    schedule:
+      interval: weekly
+    groups:
+      server-base-images:
+        patterns: [ "*" ]
