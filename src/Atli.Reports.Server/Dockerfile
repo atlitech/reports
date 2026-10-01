@@ -25,6 +25,9 @@ RUN dotnet restore src/Atli.Reports.Server --use-current-runtime
 COPY src/Atli.Reports.Engine/ src/Atli.Reports.Engine/
 COPY src/Atli.Reports.Server/ src/Atli.Reports.Server/
 RUN dotnet publish src/Atli.Reports.Server -c Release --use-current-runtime --no-restore -o /app
+# The native binary's debug symbols (.dbg, about 40 MB), the engine's symbols and XML docs: none
+# is loaded at runtime. The binary, appsettings.json, and the static assets manifest stay.
+RUN rm -f /app/*.dbg /app/*.pdb /app/*.xml
 
 # Stage 2: download chrome-headless-shell, Chromium's dedicated headless build. Compared with the full
 # browser it starts faster, prints faster, and creates the per-conversion browser contexts the engine
