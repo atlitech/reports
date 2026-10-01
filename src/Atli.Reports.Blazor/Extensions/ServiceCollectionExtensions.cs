@@ -2,8 +2,6 @@ using Atli.Reports.Blazor.Models;
 using Atli.Reports.Blazor.Services;
 using Atli.Reports.Blazor.Services.BrowserServices;
 using Atli.Reports.Engine;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.AspNetCore.Routing.Constraints;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -59,10 +57,6 @@ public static class ServiceCollectionExtensions
 #pragma warning disable CS0618 // Keeps the obsolete IBrowserService resolvable for existing callers.
     services.TryAddSingleton<IBrowserService, EngineBrowserService>();
 #pragma warning restore CS0618
-
-    services.Configure<RouteOptions>(routeOptions =>
-      routeOptions.SetParameterPolicy<RegexInlineRouteConstraint>("regex")
-    );
 
     return services;
   }

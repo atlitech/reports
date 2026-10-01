@@ -201,6 +201,18 @@ negative timeout other than `Timeout.InfiniteTimeSpan` throws when the report is
   before, edits made after a report is registered are not picked up until the app restarts.
 - **HTML output never starts the browser**, so `ReportOutputFormat.Html` reports work on machines
   without one.
+- **`AddBlazorReports` no longer registers the `regex` route constraint.** BlazorReports registered
+  it because `WebApplication.CreateSlimBuilder` leaves it out; report endpoints never use it. On
+  `CreateSlimBuilder`, an app whose routes use `regex` constraints (Swashbuckle's `swagger.json`
+  route does) now answers every request with a 500 until it registers the constraint itself:
+
+  ```csharp
+  using Microsoft.AspNetCore.Routing.Constraints;
+
+  builder.Services.Configure<RouteOptions>(o =>
+    o.SetParameterPolicy<RegexInlineRouteConstraint>("regex")
+  );
+  ```
 
 ## Client and viewer
 
