@@ -10,6 +10,7 @@ The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOp
 `headerTemplate`, `footerTemplate`, `displayHeaderFooter`, `pageRanges`, `preferCSSPageSize`,
 `generateTaggedPdf`, `waitForSignal`, `waitTimeoutSeconds`).
 
+- `orientation` is `portrait` or `landscape` (case-insensitive); any other value is a `400`.
 - `paperSize` is `letter`, `legal`, `a4`, or `a3` (case-insensitive). For any other size, set
   `paperWidth` and `paperHeight` in inches instead; together they override `paperSize`. An unknown
   `paperSize` name, only one of the two dimensions, or a dimension that is not greater than zero
@@ -33,7 +34,7 @@ with an extra `kind` member holding the `ConversionErrorKind`:
 
 | Kind | Status | Notes |
 | --- | --- | --- |
-| `InvalidRequest` | 400 Bad Request | Blank HTML, unknown paper size, incomplete custom paper size, blank signal name, negative signal timeout |
+| `InvalidRequest` | 400 Bad Request | Blank HTML, unknown orientation or paper size, incomplete custom paper size, blank signal name, negative signal timeout |
 | `SignalTimeout` | 422 Unprocessable Content | The document never called its signal; retrying the same document will not help |
 | `Busy` | 503 Service Unavailable | `Retry-After: 1`; the queue is full or the wait for a turn timed out |
 | `BrowserUnavailable` | 503 Service Unavailable | `Retry-After: 5`; the browser is restarting, missing, or the server is shutting down |

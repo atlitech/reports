@@ -96,12 +96,19 @@ public static partial class ConvertEndpoints
 
     if (request.Orientation is not null)
     {
-      options.Orientation = request.Orientation.Equals(
-        "landscape",
-        StringComparison.OrdinalIgnoreCase
-      )
-        ? PageOrientation.Landscape
-        : PageOrientation.Portrait;
+      PageOrientation? orientation = request.Orientation.ToLowerInvariant() switch
+      {
+        "portrait" => PageOrientation.Portrait,
+        "landscape" => PageOrientation.Landscape,
+        _ => null,
+      };
+      if (orientation is null)
+      {
+        error = $"Unknown orientation '{request.Orientation}'. Use portrait or landscape.";
+        return false;
+      }
+
+      options.Orientation = orientation.Value;
     }
 
     if (request.PaperSize is not null)

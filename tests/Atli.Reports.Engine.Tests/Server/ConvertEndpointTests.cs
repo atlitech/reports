@@ -187,12 +187,13 @@ public class ConvertEndpointTests
 
     using var response = await server.PostAsync(
       """
-      {"html":"<p>x</p>","options":{"paperSize":"a4","paperWidth":5.5,"paperHeight":7.25,"generateTaggedPdf":false,"waitForSignal":"ready","waitTimeoutSeconds":-0.001}}
+      {"html":"<p>x</p>","options":{"orientation":"LANDSCAPE","paperSize":"a4","paperWidth":5.5,"paperHeight":7.25,"generateTaggedPdf":false,"waitForSignal":"ready","waitTimeoutSeconds":-0.001}}
       """
     );
 
     await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-    await Assert.That(received!.PaperSize).IsEqualTo(new PaperSize { Width = 5.5, Height = 7.25 });
+    await Assert.That(received!.Orientation).IsEqualTo(PageOrientation.Landscape);
+    await Assert.That(received.PaperSize).IsEqualTo(new PaperSize { Width = 5.5, Height = 7.25 });
     await Assert.That(received.GenerateTaggedPdf).IsFalse();
     await Assert.That(received.WaitTimeout).IsEqualTo(Timeout.InfiniteTimeSpan);
   }
@@ -209,21 +210,24 @@ public class ConvertEndpointTests
     );
 
     using var response = await server.PostAsync(
-      """{"html":"<p>x</p>","options":{"paperSize":"Legal"}}"""
+      """{"html":"<p>x</p>","options":{"orientation":"Portrait","paperSize":"Legal"}}"""
     );
 
     await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-    await Assert.That(received!.PaperSize).IsEqualTo(PaperSize.Legal);
+    await Assert.That(received!.Orientation).IsEqualTo(PageOrientation.Portrait);
+    await Assert.That(received.PaperSize).IsEqualTo(PaperSize.Legal);
     await Assert.That(received.GenerateTaggedPdf).IsNull();
   }
 
   [Test]
+  [Arguments("""{"orientation":"sideways"}""")]
+  [Arguments("""{"orientation":""}""")]
   [Arguments("""{"paperSize":"tabloid"}""")]
   [Arguments("""{"paperWidth":5}""")]
   [Arguments("""{"paperHeight":7}""")]
   [Arguments("""{"paperWidth":0,"paperHeight":7}""")]
   [Arguments("""{"paperWidth":5,"paperHeight":-1}""")]
-  public async Task Invalid_paper_sizes_are_bad_requests_and_never_reach_the_converter(
+  public async Task Invalid_orientations_and_paper_sizes_are_bad_requests_and_never_reach_the_converter(
     string options
   )
   {
