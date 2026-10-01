@@ -2,9 +2,21 @@
 # Installs chrome-headless-shell from Chrome for Testing, the browser the Atli Reports server image
 # ships and the README recommends, with the libraries and fonts it needs. Runs as root.
 #
+# The version is the one the server image pins (src/Atli.Reports.Server/Dockerfile, read through
+# .github/scripts/chrome-headless-shell.sh), so the dev container tests against the same browser.
+# Both files are looked up relative to this script, as in the repository. CHROME_VERSION overrides
+# it: a version such as 154.0.8037.92, or `stable` for Chrome for Testing's current stable release
+# (in the dev container, set it under build.args in devcontainer.json).
+#
 # The engine finds Chrome or Chromium by itself, but not chrome-headless-shell, so a `chromium`
 # link on the PATH lets the tests and the examples use it without any configuration.
 set -euo pipefail
+
+repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+version="${CHROME_VERSION:-}"
+if [ -z "$version" ]; then
+  version="$(bash "$repository/.github/scripts/chrome-headless-shell.sh" pinned)"
+fi
 
 apt-get update
 apt-get install -y --no-install-recommends \
@@ -43,7 +55,10 @@ case "$(dpkg --print-architecture)" in
     ;;
 esac
 
-version="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)"
+if [ "$version" = stable ]; then
+  version="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)"
+fi
+echo "Installing chrome-headless-shell $version ($platform)"
 curl -fsSLo /tmp/chrome-headless-shell.zip \
   "https://storage.googleapis.com/chrome-for-testing-public/${version}/${platform}/chrome-headless-shell-${platform}.zip"
 unzip -q /tmp/chrome-headless-shell.zip -d /opt

@@ -3,8 +3,10 @@
 {
   "name": "Atli Reports Development",
   "build": {
-    // Sets the run context to one level up instead of the .devcontainer folder.
-    "context": ".",
+    // The repository root, so the image installs the chrome-headless-shell version the server
+    // image pins; Atli.Reports.Dev.Dockerfile.dockerignore keeps the context to the files it needs.
+    // Add "args": { "CHROME_VERSION": "stable" } (or a version) to install another one.
+    "context": "..",
     // Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
     "dockerfile": "Atli.Reports.Dev.Dockerfile"
   },
