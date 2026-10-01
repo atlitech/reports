@@ -18,6 +18,11 @@ public static class ReportsServerBuilderExtensions
   /// </summary>
   private const string ReadinessPath = "/health/ready";
 
+  /// <summary>
+  /// The server's OpenAPI document, which describes <c>POST /convert</c>.
+  /// </summary>
+  private const string OpenApiDocumentPath = "/openapi/v1.json";
+
   private const string MaxConcurrentConversionsVariable =
     "ReportsEngine__Concurrency__MaxConcurrentConversions";
   private const string MaxQueueLengthVariable = "ReportsEngine__Concurrency__MaxQueueLength";
@@ -44,8 +49,9 @@ public static class ReportsServerBuilderExtensions
   /// turns healthy once <c>/health/ready</c> answers <c>200</c>, and the server answers <c>503</c>
   /// while its browser fails to launch (the image launches it at startup, and the server retries in
   /// the background), so <c>WaitFor</c> waits for a server that can convert. The server sends its
-  /// logs, metrics, and traces to the dashboard over OTLP, and the dashboard offers a
-  /// <c>Convert a test page</c> command that checks the whole path end to end.
+  /// logs, metrics, and traces to the dashboard over OTLP, the dashboard links the server's OpenAPI
+  /// document (<c>/openapi/v1.json</c>), and it offers a <c>Convert a test page</c> command that
+  /// checks the whole path end to end.
   /// </para>
   /// <para>
   /// Reference the server from an app with <c>WithReference</c>; the app reads the connection string
@@ -88,6 +94,10 @@ public static class ReportsServerBuilderExtensions
         name: ReportsServerResource.HttpEndpointName
       )
       .WithHttpHealthCheck(ReadinessPath, endpointName: ReportsServerResource.HttpEndpointName)
+      .WithUrlForEndpoint(
+        ReportsServerResource.HttpEndpointName,
+        _ => new() { Url = OpenApiDocumentPath, DisplayText = "OpenAPI document" }
+      )
       .WithOtlpExporter()
       .WithIconName("DocumentPdf")
       .WithConvertTestPageCommand();

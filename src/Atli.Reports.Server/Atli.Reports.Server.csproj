@@ -5,9 +5,14 @@
     <IsPackable>false</IsPackable>
     <!-- Ships as a container image, not a package; keeps `dotnet pack` of the solution quiet. -->
     <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+    <!-- The OpenAPI document takes its title from AssemblyTitle and its descriptions from the XML
+         comments, which the OpenAPI source generator compiles into the binary. -->
+    <AssemblyTitle>Atli Reports Server</AssemblyTitle>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />

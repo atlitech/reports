@@ -89,6 +89,27 @@ public class AddReportsServerTests
   }
 
   [Test]
+  public async Task Links_the_openapi_document_in_the_dashboard()
+  {
+    var server = AppModel.CreateBuilder().AddReportsServer("reports-server");
+
+    ResourceUrlsCallbackContext context = new(
+      new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run),
+      server.Resource,
+      cancellationToken: TestContext.Current!.Execution.CancellationToken
+    );
+    foreach (var annotation in server.Resource.Annotations.OfType<ResourceUrlsCallbackAnnotation>())
+    {
+      await annotation.Callback(context);
+    }
+
+    // Relative to the endpoint, so the dashboard links the address the server actually got.
+    var url = context.Urls.Single(link => link.DisplayText == "OpenAPI document");
+    await Assert.That(url.Url).IsEqualTo("/openapi/v1.json");
+    await Assert.That(url.Endpoint?.EndpointName).IsEqualTo("http");
+  }
+
+  [Test]
   public async Task Offers_a_test_page_command_while_the_server_is_healthy()
   {
     var server = AppModel.CreateBuilder().AddReportsServer("reports-server");

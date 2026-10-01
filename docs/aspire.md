@@ -49,6 +49,7 @@ builder.Build().Run();
 | Endpoint | `http`, to the server's port 8080 in the container. `port` fixes the host port; by default Aspire picks one. The endpoint is not external. |
 | Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails (a missing library, say), the server answers `503` with the reason and retries in the background, so the resource stays unhealthy and `WaitFor(reports)` keeps waiting until a launch succeeds. See [the server's health endpoints](engine/server.md#health). |
 | Telemetry | Logs, metrics, and traces go to the dashboard over OTLP, including the engine's `atli.reports.convert` spans below each `POST /convert`. |
+| OpenAPI | The dashboard links the server's OpenAPI document, `/openapi/v1.json`, which describes `POST /convert`. A server built from a clone that predates the document answers the link with `404`. |
 | Command | `Convert a test page` converts a one-page document and writes the PDF's size and the round trip's duration to the server's console log. It is enabled while the server is healthy. From a terminal: `aspire resource reports convert-test-page`. |
 
 `WithReference(reports)` gives the app these environment variables:

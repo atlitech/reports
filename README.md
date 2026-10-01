@@ -145,6 +145,7 @@ The options mirror `PdfOptions`: `orientation`, `paperSize` (`letter`, `a4`, `a3
 `margins`, `printBackground`, `scale`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`,
 `pageRanges`, `preferCSSPageSize`, `waitForSignal`, and `waitTimeoutSeconds`. Failures, including
 a body the server cannot read, are RFC 9457 problem details with a `kind` member.
+`GET /openapi/v1.json` returns the OpenAPI document that describes the endpoint.
 `GET /health/live` and `GET /health/ready` serve container probes. The image runs as a non-root
 user under `tini`, and its browser runs without the sandbox, so send it trusted HTML only. See
 [docs/engine/server.md](docs/engine/server.md) for status codes, configuration, and the image.
@@ -486,7 +487,7 @@ aspire stop
 
 | Resource | What it is |
 | --- | --- |
-| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker). The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
+| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker), and the dashboard links its OpenAPI document. The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
 | `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |

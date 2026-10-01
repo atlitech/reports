@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Smoke-tests an Atli Reports Server image. It starts a container, waits for /health/ready, converts a
-# small HTML document and checks that the response is a PDF, checks that tini is PID 1 and that no
-# process in the container runs as root, then stops the container and checks that the server shut
-# down cleanly. The container's logs are printed when any check fails.
+# small HTML document and checks that the response is a PDF, checks that the OpenAPI document is
+# served, checks that tini is PID 1 and that no process in the container runs as root, then stops the
+# container and checks that the server shut down cleanly. The container's logs are printed when any
+# check fails.
 #
 # Used by .github/workflows/server-image.yml (every image change) and release.yml (the pushed release
 # image). Run it locally against an image you built:
@@ -84,6 +85,26 @@ if [ "$(head -c 4 "$work/output.pdf")" != "%PDF" ]; then
   fail "POST /convert returned a body that does not start with %PDF."
 fi
 echo "POST /convert: 200, $(wc -c <"$work/output.pdf" | tr -d ' ') bytes of PDF"
+
+# The server builds its OpenAPI document at runtime, so only the NativeAOT binary itself shows that it
+# can: a type the document needs but the trimmed binary lacks fails the request, not the build.
+status="$(
+  curl --silent --show-error --max-time 10 \
+    --output "$work/openapi.json" \
+    --write-out '%{http_code}' \
+    "$base_url/openapi/v1.json"
+)"
+if [ "$status" != 200 ]; then
+  fail "GET /openapi/v1.json returned $status: $(head -c 2000 "$work/openapi.json")"
+fi
+openapi_field="$(grep -Eo '"openapi" *: *"[^"]+"' "$work/openapi.json" | head -n 1 || true)"
+if [ -z "$openapi_field" ]; then
+  fail "GET /openapi/v1.json returned a body without an openapi field: $(head -c 2000 "$work/openapi.json")"
+fi
+if ! grep -q '"/convert"' "$work/openapi.json"; then
+  fail "GET /openapi/v1.json does not describe /convert."
+fi
+echo "GET /openapi/v1.json: 200, $openapi_field"
 
 # One line per process: Name, Pid, PPid and the real, effective, saved and filesystem UIDs, read from
 # /proc inside the container (whose PID namespace makes the entrypoint PID 1). The exec runs as the

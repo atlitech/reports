@@ -1,6 +1,7 @@
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Endpoints;
 using Atli.Reports.Server.Health;
+using Atli.Reports.Server.OpenApi;
 using Atli.Reports.Server.Serialization;
 using Atli.Reports.Server.Telemetry;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -9,7 +10,8 @@ namespace Atli.Reports.Server;
 
 /// <summary>
 /// Builds the reports server: the <c>/convert</c> endpoint and the health endpoints over the reports
-/// engine, and the OTLP export of its telemetry when an endpoint is configured.
+/// engine, the OpenAPI document that describes <c>/convert</c>, and the OTLP export of its telemetry
+/// when an endpoint is configured.
 /// </summary>
 public static class ReportsServerApplication
 {
@@ -70,6 +72,8 @@ public static class ReportsServerApplication
 
     builder.AddServerTelemetry();
 
+    builder.Services.AddServerOpenApi();
+
     configure?.Invoke(builder);
 
     var app = builder.Build();
@@ -81,8 +85,11 @@ public static class ReportsServerApplication
 
     app.MapConvertEndpoints();
 
+    // The document is the server's public contract, so every environment serves it.
+    app.MapOpenApi();
+
     // Probes poll these every few seconds; like their traces, their request metrics would drown the
-    // conversions.
+    // conversions. They are operational, so the OpenAPI document leaves them out.
     app.MapHealthChecks(
         "/health/live",
         new HealthCheckOptions
@@ -91,7 +98,8 @@ public static class ReportsServerApplication
           ResponseWriter = HealthCheckResponseWriter.WriteResponse,
         }
       )
-      .DisableHttpMetrics();
+      .DisableHttpMetrics()
+      .ExcludeFromDescription();
 
     app.MapHealthChecks(
         "/health/ready",
@@ -101,7 +109,8 @@ public static class ReportsServerApplication
           ResponseWriter = HealthCheckResponseWriter.WriteResponse,
         }
       )
-      .DisableHttpMetrics();
+      .DisableHttpMetrics()
+      .ExcludeFromDescription();
 
     return app;
   }
