@@ -1,0 +1,51 @@
+@using System.Text.Encodings.Web
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <style>@((MarkupString)BaseStyles)</style>
+  @if (!string.IsNullOrEmpty(CompletedSignalName))
+  {
+    <script>@((MarkupString)CreateCompletedSignalScript(CompletedSignalName))</script>
+  }
+</head>
+<body>
+<DynamicComponent Type="@ChildComponentType" Parameters="@ChildComponentParameters" />
+</body>
+</html>
+
+
+@code {
+  /// <summary>
+  /// The base styles to be applied to the component.
+  /// </summary>
+  [Parameter]
+  public string BaseStyles { get; set; } = "";
+  /// <summary>
+  /// The type of the component to be rendered in the html body.
+  /// </summary>
+  [Parameter]
+  public Type ChildComponentType { get; set; } = null!;
+  /// <summary>
+  /// The parameters to be passed to the child component.
+  /// </summary>
+  [Parameter]
+  public IDictionary<string, object> ChildComponentParameters { get; set; } = null!;
+  /// <summary>
+  /// The name of the global function the PDF engine exposes to the page, which the report calls through
+  /// <c>blazorReport.completed()</c> once its JavaScript has finished. <see langword="null"/> (the default)
+  /// leaves <c>blazorReport</c> undefined.
+  /// </summary>
+  [Parameter]
+  public string? CompletedSignalName { get; set; }
+
+  /// <summary>
+  /// Defines <c>window.blazorReport.completed()</c>, which calls the engine's signal function when the
+  /// engine waits for it and does nothing otherwise (for example in HTML output).
+  /// </summary>
+  private static string CreateCompletedSignalScript(string signalName)
+  {
+    var name = JavaScriptEncoder.Default.Encode(signalName);
+    return "window.blazorReport={completed:function(){"
+      + $"var signal=window[\"{name}\"];if(typeof signal===\"function\"){{signal();}}}}}};";
+  }
+}

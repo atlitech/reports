@@ -7,12 +7,13 @@
   <Folder Name="/src/">
     <Project Path="src/Atli.Reports.Engine/Atli.Reports.Engine.csproj" />
     <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
-    <Project Path="src/BlazorReports.Client/BlazorReports.Client.csproj" />
-    <Project Path="src/BlazorReports.Components/BlazorReports.Components.csproj" />
-    <Project Path="src/BlazorReports.Viewer/BlazorReports.Viewer.csproj" />
-    <Project Path="src/BlazorReports/BlazorReports.csproj" />
+    <Project Path="src/Atli.Reports.Client/Atli.Reports.Client.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Components/Atli.Reports.Blazor.Components.csproj" />
+    <Project Path="src/Atli.Reports.Viewer/Atli.Reports.Viewer.csproj" />
+    <Project Path="src/Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Engine.Tests/Atli.Reports.Engine.Tests.csproj" />
   </Folder>
 </Solution>

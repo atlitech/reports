@@ -1,0 +1,215 @@
+@using Atli.Reports.Blazor.Models
+@using System.Text.Json
+@using Atli.Reports.Blazor.Services
+@using Atli.Reports.Blazor.Extensions
+
+@inject BlazorReportRegistry ReportRegistry
+@inject IReportService ReportService
+
+<script src="_content/BlazorMonaco/jsInterop.js" suppress-error="BL9992"></script>
+<script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/loader.js" suppress-error="BL9992"></script>
+<script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.js" suppress-error="BL9992"></script>
+
+<h1 class="text-2xl">Report Viewer</h1>
+<div class="grid grid-cols-2 gap-4">
+  <div class="col-span-2 flex flex-row">
+    <select @bind="SelectedReportName" @bind:after="OnReportSelected">
+      <option value="">Select a report...</option>
+      @foreach (var report in _reports)
+      {
+        <option value="@report.Name">@report.Name</option>
+      }
+    </select>
+    <button @onclick="GenerateReport"
+            disabled="@string.IsNullOrEmpty(SelectedReportName)"
+            class="ml-2 text-white font-bold py-2 px-4 rounded @(string.IsNullOrEmpty(SelectedReportName) ? "bg-blue-300 focus:outline-none" : "bg-blue-500 hover:bg-blue-700")">
+      Generate Report
+    </button>
+  </div>
+  @if (SelectedReport is not null)
+  {
+    <div style="height: 60rem;">
+      @if (_reportHasData)
+      {
+        <StandaloneCodeEditor @ref="Editor" Id="blazor-reports-viewer-data-editor" ConstructionOptions="EditorConstructionOptions" CssClass="h-96 set-height"/>
+      }
+      <div class="flex flex-col">
+        <h2 class="text-xl font-bold mb-2">Report settings</h2>
+        <span class="font-bold">
+          Report name: <span class="font-normal">@SelectedReport.Name</span>
+        </span>
+        @if (SelectedReport?.Data is not null)
+        {
+          <span class="font-bold">
+            Report data type: <span class="font-normal">@SelectedReport.Data.Name</span>
+          </span>
+        }
+        else
+        {
+          <span class="font-bold">
+            Report data type: <span class="font-normal">No data configured for this report.</span>
+          </span>
+        }
+      </div>
+    </div>
+  }
+  <div class="h-96">
+    @if (string.IsNullOrEmpty(SelectedReportName))
+    {
+      <p>Select a report to view.</p>
+    }
+    @if (!string.IsNullOrEmpty(_pdfData))
+    {
+      <object data="@_pdfData" type="application/pdf" width="500" height="800">
+        An alternative text describing the PDF.
+      </object>
+    }
+  </div>
+</div>
+
+@code {
+  private StandaloneCodeEditor? Editor { get; set; }
+
+  private IReadOnlyList<BlazorReport> _reports = new List<BlazorReport>();
+
+  private string? SelectedReportName { get; set; }
+  private BlazorReport? SelectedReport { get; set; }
+  private string _pdfData = string.Empty;
+  private bool _reportHasData;
+
+  protected override void OnInitialized()
+  {
+    _reports = ReportRegistry.Reports.Values.ToList();
+  }
+
+  private async Task OnReportSelected()
+  {
+    _reportHasData = false;
+    _pdfData = string.Empty;
+    SelectedReport = null;
+
+    if (Editor is not null)
+      await Editor.SetValue(string.Empty);
+
+    if (string.IsNullOrEmpty(SelectedReportName))
+      return;
+    var report = ReportRegistry.Reports.GetValueOrDefault(SelectedReportName.ToLower());
+    SelectedReport = report;
+
+    if (report == null)
+      throw new InvalidOperationException("Invalid report selected.");
+    _reportHasData = report.Data is not null;
+
+    if (Editor is not null)
+    {
+      var reportTestData = GetReportTestData(report);
+      await Editor.SetValue(reportTestData);
+    }
+  }
+
+  private string GetReportTestData(BlazorReport report)
+  {
+    if (report.Data is null)
+    {
+      return string.Empty;
+    }
+
+    var fieldsToReturn = new Dictionary<string, object>();
+
+    var properties = report.Data.GetProperties();
+    foreach (var property in properties)
+    {
+      fieldsToReturn.Add(property.Name, GetTestData(property.PropertyType));
+    }
+    var jsonOptions = new JsonSerializerOptions
+    {
+      WriteIndented = true
+    };
+
+    return JsonSerializer.Serialize(fieldsToReturn, jsonOptions);
+  }
+
+  private static object GetTestData(Type propertyType)
+  {
+    var nullableType = Nullable.GetUnderlyingType(propertyType);
+    var typeName = nullableType is not null ? nullableType.Name : propertyType.Name;
+
+    return typeName switch
+    {
+      "String" => "Text",
+      "DateOnly" => DateOnly.FromDateTime(DateTime.UtcNow).ToString("O"),
+      "DateTime" => DateTime.UtcNow.ToString("O"),
+      "DateTimeOffset" => DateTimeOffset.UtcNow.ToString("O"),
+      "Boolean" => true,
+      "Char" => 'a',
+      "Int16" => 1,
+      "Int32" => 1,
+      "Int64" => 1L,
+      "Decimal" => 1.0M,
+      "Double" => 1.0D,
+      "Single" => 1.0F,
+      "Byte" => 1,
+      "SByte" => 1,
+      "UInt16" => 1,
+      "UInt32" => 1,
+      "UInt64" => 1,
+      "Guid" => Guid.NewGuid(),
+      "TimeOnly" => TimeOnly.FromDateTime(DateTime.UtcNow).ToString("O"),
+      "Uri" => "https://www.google.com",
+      _ => typeName
+      };
+  }
+
+  private async Task GenerateReport()
+  {
+    if (string.IsNullOrWhiteSpace(SelectedReportName))
+      return;
+    var report = ReportRegistry.Reports.GetValueOrDefault(SelectedReportName.ToLower());
+    if (report == null)
+      throw new InvalidOperationException("Invalid report selected.");
+    try
+    {
+      object? data = null;
+      if (report.Data is not null && Editor is not null)
+      {
+        var dataFromEditor = await Editor.GetValue();
+        if (dataFromEditor is not null)
+          data = JsonSerializer.Deserialize(dataFromEditor, report.Data);
+      }
+
+      using var memoryStream = new MemoryStream();
+      var result = await ReportService.GenerateReport(memoryStream, report, data);
+      if (result.TryPickT1(out var error, out _))
+      {
+        Console.WriteLine($"Report {report.Name} failed: {error.Kind}: {error.Message}");
+        return;
+      }
+
+      var base64 = Convert.ToBase64String(memoryStream.GetBuffer(), 0, (int) memoryStream.Length);
+      _pdfData = $"data:{report.GetContentType()};base64,{base64}";
+    }
+    catch (Exception e)
+    {
+      Console.WriteLine(e);
+      throw;
+    }
+  }
+
+  private StandaloneEditorConstructionOptions EditorConstructionOptions(StandaloneCodeEditor editor)
+  {
+    var editorData = string.Empty;
+    if (!string.IsNullOrEmpty(SelectedReportName))
+    {
+      var report = ReportRegistry.Reports.GetValueOrDefault(SelectedReportName.ToLower());
+      if (report is not null)
+        editorData = GetReportTestData(report);
+    }
+
+    return new StandaloneEditorConstructionOptions
+    {
+      AutomaticLayout = true,
+      Language = "json",
+      Value = editorData
+    };
+  }
+}

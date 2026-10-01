@@ -1,0 +1,8 @@
+@* Finishes its JavaScript after a delay, the way a chart or a data fetch would. *@
+<p id="status">Loading</p>
+<script>
+  setTimeout(function () {
+    document.getElementById("status").textContent = "Ready";
+    blazorReport.completed();
+  }, 300);
+</script>

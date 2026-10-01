@@ -1,0 +1,49 @@
+@*
+  A report that finishes rendering in JavaScript. The script stands in for asynchronous work such as
+  fetching data or drawing a chart with a charting library. It calls blazorReport.completed() when it is
+  done; because the report is mapped with JavaScriptSettings.WaitForCompletedSignal = true, the PDF is
+  printed only after that call.
+*@
+<h1>@Data.Title</h1>
+
+<ul id="regions" hidden>
+  @foreach (var (region, sales) in Sales)
+  {
+    <li data-sales="@sales">@region</li>
+  }
+</ul>
+
+<div id="chart">Drawing the chart…</div>
+
+<script>
+  setTimeout(function () {
+    var chart = document.getElementById("chart");
+    chart.textContent = "";
+    document.querySelectorAll("#regions li").forEach(function (item) {
+      var bar = document.createElement("div");
+      bar.textContent = item.textContent + ": " + item.dataset.sales;
+      bar.style.width = item.dataset.sales * 4 + "px";
+      bar.style.margin = "4px 0";
+      bar.style.padding = "4px";
+      bar.style.color = "white";
+      bar.style.background = "steelblue";
+      chart.appendChild(bar);
+    });
+
+    // Tells Atli.Reports.Blazor that the report is ready to print.
+    blazorReport.completed();
+  }, @Data.DelayMilliseconds);
+</script>
+
+@code {
+  private static readonly (string Region, int Sales)[] Sales =
+  [
+    ("North", 120),
+    ("South", 80),
+    ("East", 150),
+    ("West", 95),
+  ];
+
+  [Parameter]
+  public required AsyncJavaScriptReportData Data { get; set; }
+}

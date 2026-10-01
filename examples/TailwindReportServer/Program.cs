@@ -1,4 +1,4 @@
-using BlazorReports.Extensions;
+using Atli.Reports.Blazor.Extensions;
 using ExampleTemplates.ReportWithTailwind;
 
 var builder = WebApplication.CreateBuilder(args);
