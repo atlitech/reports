@@ -38,8 +38,9 @@ jobs:
       - name: Build the end-to-end tests
         run: dotnet build tests/Atli.Reports.AppHost.Tests/Atli.Reports.AppHost.Tests.csproj
 
+      # Tests what the Build step built, without building the solution again.
       - name: Run tests
-        run: dotnet test
+        run: dotnet test --no-build
 
       # Packs exactly what release.yml would publish, so packaging and package
       # validation failures surface on the pull request instead of on release day.
