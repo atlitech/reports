@@ -242,8 +242,9 @@ Per-conversion settings live on `PdfOptions`. The defaults print a portrait US L
 `FooterTemplate`, `DisplayHeaderFooter`, `PageRanges`, `PreferCssPageSize`, `GenerateTaggedPdf`,
 `WaitForSignal`, and `WaitTimeout`.
 
-**Health checks and metrics.** `AddHealthChecks().AddReportsEngineBrowserCheck()` reports whether
-the browser executable exists. `.AddReportsEngineConversionCheck()` reports unhealthy when most
+**Health checks and metrics.** `AddHealthChecks().AddReportsEngineBrowserCheck()` reports
+unhealthy while the browser cannot start; the engine keeps retrying the launch in the background
+and the check turns healthy once it succeeds. `.AddReportsEngineConversionCheck()` reports unhealthy when most
 recent conversions failed. The engine publishes metrics on the `Atli.Reports.Engine` meter:
 conversion duration and outcome, active conversions, queue length and wait, and browser
 launches, crashes, and recycles. See
