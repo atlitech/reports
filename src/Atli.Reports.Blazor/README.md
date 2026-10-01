@@ -98,6 +98,21 @@ With the section bound, Linux containers usually need `ReportsEngine:Browser:NoS
 `true` (trusted HTML only). For throughput, point `ReportsEngine:Browser:ExecutablePath` at
 `chrome-headless-shell`.
 
+## Convert on a reports server
+
+To keep the browser out of the app, add
+[Atli.Reports.Client](https://www.nuget.org/packages/Atli.Reports.Client) next to
+`AddBlazorReports`, in either order:
+
+```csharp
+builder.Services.AddBlazorReports();
+builder.AddReportsClient("reports"); // ConnectionStrings:reports = "Endpoint=http://reports:8080"
+```
+
+Components still render in the app; the HTML is converted by an
+[Atli Reports server](https://github.com/atlitech/reports/blob/main/docs/engine/server.md), and
+the app never starts a browser.
+
 ## Learn more
 
 - [Atli Reports README](https://github.com/atlitech/reports#readme): base styles, Tailwind CSS,

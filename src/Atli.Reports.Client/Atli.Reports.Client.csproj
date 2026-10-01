@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Binds ReportsClientSettings from IConfiguration without reflection, so AOT hosts stay warning-free. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <Title>Atli Reports Client</Title>
+    <Description>A typed client for the Atli Reports server. Implements IHtmlToPdfConverter over HTTP, so an app switches between the in-process engine and a remote server by registration only. NativeAOT compatible.</Description>
+    <PackageTags>pdf;html;html-to-pdf;reports;client;httpclient;aspire;aot</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="OneOf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atli.Reports.Client.Tests" />
+  </ItemGroup>
+</Project>

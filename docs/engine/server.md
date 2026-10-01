@@ -20,6 +20,10 @@ The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOp
   (`Timeout.InfiniteTimeSpan`) waits until the request is canceled, and other negative values are a
   `400`.
 
+.NET apps can use [`Atli.Reports.Client`](../../src/Atli.Reports.Client/README.md) instead of
+calling the endpoint directly. It sends this request and maps the answers back to
+`ConversionError`s, implementing `IHtmlToPdfConverter` over the server.
+
 **Success** is `200 OK` with `Content-Type: application/pdf` and
 `Content-Disposition: attachment; filename=output.pdf`. The PDF streams into the response as the
 browser produces it (chunked transfer encoding), without being buffered in the server first.

@@ -32,6 +32,11 @@ public static class ServiceCollectionExtensions
   /// Values set on <see cref="BlazorReportsOptions.BrowserOptions"/> that differ from their defaults are
   /// copied onto <see cref="ReportsEngineOptions.Browser"/>.
   /// </para>
+  /// <para>
+  /// To convert on an Atli Reports server instead, also call <c>AddReportsClient</c> from
+  /// Atli.Reports.Client, before or after this method. Components then render in the app, their HTML
+  /// is converted by the server, and the app never starts a browser.
+  /// </para>
   /// </remarks>
   public static IServiceCollection AddBlazorReports(
     this IServiceCollection services,
