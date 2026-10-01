@@ -107,9 +107,16 @@ public class DevToolsConnectionTests
     await Assert.That(async () => await unanswered).Throws<DevToolsTimeoutException>();
     await Assert.That(pair.Connection.PendingCount).IsEqualTo(0);
 
-    // The late reply is dropped quietly, and the next command still works.
+    // The late reply is dropped quietly, and the next command still works. The next command gets
+    // its own generous timeout: the connection's 200 ms default exists to make the first command
+    // time out, and a busy CI runner can take longer than that to answer.
     await pair.Peer.SendAsync(Reply(slow.RootElement.GetProperty("id").GetInt32(), """{}"""));
-    var next = pair.Connection.SendAsync(new("Test.next"), null, TestToken);
+    var next = pair.Connection.SendAsync(
+      new("Test.next"),
+      null,
+      TestToken,
+      TimeSpan.FromSeconds(10)
+    );
     using var command = await pair.Peer.ReceiveAsync();
     await pair.Peer.SendAsync(
       Reply(command.RootElement.GetProperty("id").GetInt32(), """{"ok":true}""")
