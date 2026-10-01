@@ -21,8 +21,8 @@ formerly **BlazorReports**.
 | [`Atli.Reports.Server`](src/Atli.Reports.Server) | A NativeAOT HTTP service over the engine: `POST /convert` with HTML and options, get a PDF back. Ships as a container image with `chrome-headless-shell`. | Build the image from this repository; no published image yet |
 | [`Atli.Reports.Aspire.Hosting`](src/Atli.Reports.Aspire.Hosting) | Runs the server in an [Aspire](https://aspire.dev) AppHost: `builder.AddReportsServer("reports")`, with its health check, telemetry, typed settings, and the connection string the client reads. See [docs/aspire.md](docs/aspire.md). | NuGet package, from 0.26.0 |
 
-The packages target .NET 10, except `Atli.Reports.Aspire.Hosting`, which targets .NET 8 so that any
-Aspire 13 AppHost can use it. Every component needs a Chromium-based browser; see
+The packages target .NET 10, so an AppHost that uses `Atli.Reports.Aspire.Hosting` targets .NET 10
+too. Every component needs a Chromium-based browser; see
 [Browser requirements](#browser-requirements).
 
 ## Quick start: a Blazor report endpoint

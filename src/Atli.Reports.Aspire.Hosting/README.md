@@ -6,8 +6,8 @@ container that converts HTML to PDF over HTTP. One call in the AppHost runs the 
 health check, its telemetry in the dashboard, and the connection string
 [Atli.Reports.Client](https://www.nuget.org/packages/Atli.Reports.Client) reads.
 
-Part of [Atli Reports](https://github.com/atlitech/reports). Needs Aspire 13.0 or later; the AppHost
-may target .NET 8 or later.
+Part of [Atli Reports](https://github.com/atlitech/reports). Needs Aspire 13.0 or later and an
+AppHost that targets .NET 10.
 
 ## Install
 

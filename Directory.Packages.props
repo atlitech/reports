@@ -33,7 +33,8 @@
     <PackageVersion Include="Aspire.Hosting" Version="13.0.0" />
     <!--
       Aspire.Hosting before 13.6 brings MessagePack 2.5.192 (through StreamJsonRpc), which has known
-      vulnerabilities; its tests pin the patched release Aspire 13.6 itself depends on.
+      vulnerabilities; the integration references the patched release Aspire 13.6 itself depends on,
+      so AppHosts on older Aspire 13 releases get it too.
     -->
     <PackageVersion Include="MessagePack" Version="2.5.302" />
   </ItemGroup>

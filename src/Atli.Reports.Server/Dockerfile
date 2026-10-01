@@ -10,18 +10,24 @@
 #                   154.0.8037.92. Defaults to the current stable release, so a rebuild picks up
 #                   browser security fixes; pin it for reproducible images.
 
-# Stage 1: build (NativeAOT). The build and runtime stages share Ubuntu 24.04, so the binary runs
-# against the glibc it was linked with.
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    clang \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Stage 1: build (NativeAOT). The -aot SDK image carries the native toolchain NativeAOT links with
+# (clang, zlib). The build and runtime stages share Ubuntu 24.04, so the binary runs against the
+# glibc it was linked with.
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
 WORKDIR /src
+# Restore from the project files alone, so a source change reuses the restored packages (the
+# NativeAOT compiler among them). The compiler and runtime packs are per architecture, so restore
+# and publish both target the build's own runtime: the stage runs on the image's architecture.
 COPY global.json Directory.Build.props Directory.Packages.props ./
+COPY src/Atli.Reports.Engine/Atli.Reports.Engine.csproj src/Atli.Reports.Engine/
+COPY src/Atli.Reports.Server/Atli.Reports.Server.csproj src/Atli.Reports.Server/
+RUN dotnet restore src/Atli.Reports.Server --use-current-runtime
 COPY src/Atli.Reports.Engine/ src/Atli.Reports.Engine/
 COPY src/Atli.Reports.Server/ src/Atli.Reports.Server/
-RUN dotnet publish src/Atli.Reports.Server -c Release -o /app
+RUN dotnet publish src/Atli.Reports.Server -c Release --use-current-runtime --no-restore -o /app
+# The native binary's debug symbols (.dbg, about 40 MB), the engine's symbols and XML docs: none
+# is loaded at runtime. The binary, appsettings.json, and the static assets manifest stay.
+RUN rm -f /app/*.dbg /app/*.pdb /app/*.xml
 
 # Stage 2: download chrome-headless-shell, Chromium's dedicated headless build. Compared with the full
 # browser it starts faster, prints faster, and creates the per-conversion browser contexts the engine
@@ -97,12 +103,13 @@ RUN set -eu; \
       fi; \
     done; \
     exit "$status"
+# The base image sets ASPNETCORE_HTTP_PORTS=8080, the port the server listens on.
 ENV ReportsEngine__Browser__ExecutablePath=/opt/chrome-headless-shell/chrome-headless-shell
-ENV ASPNETCORE_HTTP_PORTS=8080
 WORKDIR /app
 COPY --from=build /app .
-# The non-root user the .NET images provide. The browser runs without its sandbox
+# The non-root user the .NET images provide, app (UID 1654), by number so that Kubernetes'
+# runAsNonRoot can verify it. The browser runs without its sandbox
 # (ReportsEngine:Browser:NoSandbox in appsettings.json), which only suits trusted HTML.
-USER app
+USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--", "./Atli.Reports.Server"]
