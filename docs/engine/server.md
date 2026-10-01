@@ -187,13 +187,13 @@ docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
 
 - **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble-aot`, which carries the NativeAOT
   toolchain, and `runtime-deps:10.0-noble`), so the NativeAOT binary runs against the glibc it was
-  linked with.
+  linked with. Both are pinned by the digest of their multi-arch index, and Dependabot proposes
+  new digests weekly.
 - **The browser is `chrome-headless-shell`** from Chrome for Testing (`linux64` or `linux-arm64`),
   which renders and isolates conversions several times faster than the full browser (see
-  [architecture.md](architecture.md#isolation)). The `CHROME_VERSION` build argument pins a version;
-  the default takes the current stable release, so a rebuild picks up browser security fixes. The
-  image build fails if the browser links a shared library the image does not install (the `linux64`
-  and `linux-arm64` builds link different sets).
+  [architecture.md](architecture.md#isolation)). Its version is pinned; see
+  [The Chrome version](#the-chrome-version). The image build fails if the browser links a shared
+  library the image does not install (the `linux64` and `linux-arm64` builds link different sets).
 - **`tini` is PID 1.** It forwards `SIGTERM` to the server, whose shutdown drains conversions and
   closes the browser cleanly, and it reaps the browser's exited child processes so none linger as
   zombies.
@@ -201,22 +201,45 @@ docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
   `runAsNonRoot` can verify it). The browser runs without its sandbox, which only suits trusted
   HTML.
 
+### The Chrome version
+
+The `CHROME_VERSION` build argument's default in
+[`src/Atli.Reports.Server/Dockerfile`](../../src/Atli.Reports.Server/Dockerfile), such as
+`ARG CHROME_VERSION=154.0.8037.92`, is the one place the version is set: local builds, pull request
+checks, and releases all use it, so an image built from a given commit always has the same browser.
+
+- **Updates come as pull requests.** A daily workflow
+  ([`chrome-headless-shell-bump.yml`](../../.github/workflows/chrome-headless-shell-bump.yml))
+  compares the pin with Chrome for Testing's stable channel. When stable is newer and both
+  `linux64` and `linux-arm64` downloads exist, it proposes the new pin from the
+  `automation/chrome-headless-shell` branch. It never proposes an older version.
+- **Merging a new pin refreshes the published image.**
+  [`server-image-refresh.yml`](../../.github/workflows/server-image-refresh.yml) rebuilds the most
+  recently published release from its own commit with the new browser, smoke-tests both
+  architectures, and moves that release's tags to it (see [Published image](#published-image)).
+  Older releases are not rebuilt; it can also be run by hand for a given release.
+
 ### Published image
 
 Each release publishes `ghcr.io/atlitech/reports-server` for `linux/amd64` and `linux/arm64`. Both
-are built natively (not emulated) by the release workflow, which pins `CHROME_VERSION` to that day's
-stable `chrome-headless-shell` and smoke-tests each architecture before any tag moves.
+are built natively (not emulated) with the Chrome version the release's Dockerfile pins, and each
+architecture is smoke-tested and checked for that Chrome version before any tag moves.
 
 | Tag | Points at |
 | --- | --- |
-| `<version>`, for example `0.26.0` | That release. It never moves. |
+| `<version>-chrome<chrome>`, for example `0.26.0-chrome154.0.8037.92` | That release with that Chrome version. It never moves. |
+| `<version>`, for example `0.26.0` | That release, with the newest Chrome it was built with. It moves when a Chrome refresh rebuilds the release. |
 | `<major>.<minor>`, for example `0.26` | The most recently published release of that line. A version with a pre-release suffix, such as `0.26.0-preview.1`, does not move it. |
 | `latest` | The most recently published release that is not a pre-release, by version or by its GitHub release. |
 
-Pin a version (or a digest) in production; `latest` and `<major>.<minor>` move with releases.
+A refresh moves `<version>`, adds `<version>-chrome<new chrome>`, and moves `<major>.<minor>` and
+`latest` only if they still point at that release's image. It never moves a tag to an older Chrome.
+Pin `<version>-chrome<chrome>` (or a digest) when the image must not change at all; pin `<version>`
+to get browser security fixes for that release on the next pull.
 
-Each image carries OCI labels (`source`, `version`, `revision`, `licenses`), an SBOM, and a
-BuildKit provenance attestation that records the build arguments, Chrome's version among them:
+Each image carries OCI labels (`source`, `version`, `revision`, `licenses`, and
+`io.github.atlitech.reports.chrome-version`), an SBOM, and a BuildKit provenance attestation that
+records the build arguments, Chrome's version among them:
 
 ```bash
 docker buildx imagetools inspect ghcr.io/atlitech/reports-server:0.26.0 --format '{{ json .SBOM }}'
@@ -224,7 +247,9 @@ docker buildx imagetools inspect ghcr.io/atlitech/reports-server:0.26.0 --format
 ```
 
 The multi-arch index also has a GitHub artifact attestation (SLSA build provenance, signed through
-Sigstore) that ties it to the release workflow in this repository:
+Sigstore) from this repository's image workflow,
+[`server-image-publish.yml`](../../.github/workflows/server-image-publish.yml), as called by the
+release workflow or, for a refreshed image, by the refresh workflow on `main`:
 
 ```bash
 gh attestation verify oci://ghcr.io/atlitech/reports-server:0.26.0 --repo atlitech/reports
@@ -239,6 +264,17 @@ resolves on one machine.
 ```bash
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
 docker run -p 8080:8080 atli-reports-server
+```
+
+That builds the pinned Chrome version. To try another one, pass it as a build argument: a version
+number, or `stable` for Chrome for Testing's current stable release. `stable` is looked up when the
+browser layer is built, so `--no-cache-filter browser` makes Docker look it up again instead of
+reusing an earlier download:
+
+```bash
+docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server \
+  --build-arg CHROME_VERSION=stable --no-cache-filter browser .
+docker run --rm --entrypoint /opt/chrome-headless-shell/chrome-headless-shell atli-reports-server --version
 ```
 
 `.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
