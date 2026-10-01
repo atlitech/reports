@@ -14,6 +14,12 @@ Requirements: Docker with Compose v2 (Docker Desktop, OrbStack, or Docker Engine
 from `global.json`. Nothing else is installed on the host. Works on macOS (bash 3.2) and Linux,
 arm64 and x86-64. `--micro` also needs Chrome or Edge installed on the host.
 
+**Latest results:** [`results/2026-10-01-3829bfd.md`](results/2026-10-01-3829bfd.md), engine
+3829bfd against Gotenberg 8.37.0 in full mode, with the micro-benchmarks in
+[`results/2026-10-01-3829bfd-micro.md`](results/2026-10-01-3829bfd-micro.md).
+[`results/2026-10-01-287f9bc.md`](results/2026-10-01-287f9bc.md) is the provisional baseline of the
+engine before it kept one long-lived browser.
+
 ## What runs
 
 | Suite | Project | Measures |
@@ -32,7 +38,7 @@ graphics, and a tagged PDF**.
 | `invoice` | 8 KB | 1 | Embedded CSS, inline SVG logo, line-item table |
 | `long-table` | 446 KB | 49 | A 2,400-row ledger with a repeating header; pagination and a large PDF (7 MB tagged) |
 | `chart` | 12 KB | 1 | Charts drawn by JavaScript after an async "data load"; the page signals when it is ready |
-| `assets` | 1.6 MB | 2 | 11 PNG images inlined as base64 data URIs, the way BlazorReports inlines report assets |
+| `assets` | 1.6 MB | 2 | 11 PNG images inlined as base64 data URIs, the way Atli.Reports.Blazor inlines report assets |
 
 The readiness contract of `chart` is the same for both targets: the page calls
 `window.reportReady()` (Atli: `waitForSignal: "reportReady"`) and sets `window.reportRendered = true`
@@ -72,7 +78,8 @@ connection-level failure a worker pauses 250 ms, so a crashed target is not hamm
 
 **Duration.** Quick mode is 16 cells and takes about 6 minutes; full mode is 32 cells and takes
 about 25 minutes. A cell that saturates its target takes longer, because its failing requests wait
-out the client deadline, so today's engine — which fails at concurrency 16 — is the slow case.
+out the client deadline (in the 2026-10-01 run: Gotenberg on `long-table` at concurrency 16, and
+Atli on `long-table` at concurrency 64).
 
 **Escalation stops at the breaking point.** When a level produces no valid PDF for a target and
 fixture, the higher levels are recorded as *skipped* instead of each waiting out the deadline
@@ -106,8 +113,8 @@ print the same document.
 
 | | Atli.Reports.Server | Gotenberg |
 |---|---|---|
-| Image | Built from [`src/Atli.Reports.Server/Dockerfile`](../src/Atli.Reports.Server/Dockerfile) (NativeAOT + Debian Chromium) as `atli-reports-server:bench` | `gotenberg/gotenberg:8.37.0-chromium`, pinned by multi-arch digest (Chromium only, no LibreOffice) |
-| Server settings | `appsettings.json` defaults: `Headless`, `NoSandbox`, `DisableDevShmUsage`, 30 s `CommandTimeout`; no `ReportsEngine__*` overrides | Defaults: `--chromium-max-concurrency=6`, `--chromium-max-queue-size=0` (unbounded), `--chromium-restart-after=100`, `--chromium-auto-start=false`, `--api-timeout=30s` |
+| Image | Built from [`src/Atli.Reports.Server/Dockerfile`](../src/Atli.Reports.Server/Dockerfile) as `atli-reports-server:bench`: the NativeAOT server on Ubuntu 24.04 with `chrome-headless-shell` from Chrome for Testing (the current stable release when the image is built, unless the `CHROME_VERSION` build argument pins one) | `gotenberg/gotenberg:8.37.0-chromium`, pinned by multi-arch digest (Chromium only, no LibreOffice) |
+| Server settings | The image's defaults: [`appsettings.json`](../src/Atli.Reports.Server/appsettings.json) sets `WarmUpOnStartup`, `Headless`, `NoSandbox`, `DisableDevShmUsage`, a 30 s `CommandTimeout`, a 60 s `ConversionTimeout`, and a queue of 100 with a 30 s `QueueTimeout`; the Dockerfile sets `Browser:ExecutablePath`. `MaxConcurrentConversions` keeps its default, the processor count clamped to 2–8 (2 under `cpus: 2`). No `ReportsEngine__*` overrides | Defaults: `--chromium-max-concurrency=6`, `--chromium-max-queue-size=0` (unbounded), `--chromium-restart-after=100`, `--chromium-auto-start=false`, `--api-timeout=30s` |
 | Logging | Default (`Information`) | Default (`info`, one access line per request) |
 | Per request | `paperSize: a4`, margins 0.4, `printBackground: true`; `waitForSignal` for `chart` | `paperWidth=8.27`, `paperHeight=11.69`, margins 0.4, `printBackground=true`, `generateTaggedPdf=true`; `waitForExpression` for `chart` |
 
@@ -170,8 +177,9 @@ machine.
 - On macOS, Docker runs in a Linux VM; the containers' CPU quota applies inside that VM, and
   networking crosses the VM boundary. Absolute numbers differ from a Linux server; the comparison is
   what matters, since both targets take the same path.
-- The two images ship different Chromium builds (Debian's, in each case); the report records both
-  versions.
+- The two images ship different browser builds: Atli's ships `chrome-headless-shell` from Chrome for
+  Testing, Gotenberg's ships Debian's Chromium. The report records both image IDs and, where it
+  can read it, the browser version.
 - `docker stats` samples about once a second; the cgroup `memory.peak` is exact but includes page
   cache.
 - The micro-benchmarks' *Allocated* column counts the benchmark process's managed allocations only,

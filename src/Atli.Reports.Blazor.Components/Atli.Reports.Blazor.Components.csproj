@@ -5,7 +5,13 @@
     <IsPackable>true</IsPackable>
     <Title>Atli Reports Blazor Components</Title>
     <Description>Blazor components for Atli.Reports.Blazor report templates. Formerly BlazorReports.Components.</Description>
+    <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <SupportedPlatform Include="browser" />

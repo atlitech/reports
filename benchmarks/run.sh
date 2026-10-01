@@ -248,7 +248,7 @@ if [ "$suite" != load ]; then
     echo "- **Mode:** $mode · BenchmarkDotNet, in-process toolchain, one conversion per invocation"
     echo "- **Engine commit:** \`$(git -C "$repo_root" log -1 --format='%h %s' -- src/Atli.Reports.Engine 2>/dev/null || echo unknown)\`"
     echo "- **Host load average:** $load_before before, $(host_load) after"
-    echo "- **Browser:** the Chrome/Edge installed on the host (not the container's Chromium); *Allocated* counts the benchmark process's managed allocations only"
+    echo "- **Browser:** the Chrome/Edge installed on the host (not the server image's chrome-headless-shell); *Allocated* counts the benchmark process's managed allocations only"
     echo
     cat "$report"
   } >"$out/$name-micro.md"

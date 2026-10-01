@@ -40,8 +40,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       # Engine knobs bind from ReportsEngine__* (see src/Atli.Reports.Server/appsettings.json, which
-      # already sets Headless, NoSandbox, DisableDevShmUsage, and a 30 s CommandTimeout). None are
-      # changed for the benchmark. Examples:
+      # already sets WarmUpOnStartup, Headless, NoSandbox, DisableDevShmUsage, a 30 s CommandTimeout,
+      # a 60 s ConversionTimeout, and a queue of 100 with a 30 s QueueTimeout; the Dockerfile sets
+      # the chrome-headless-shell ExecutablePath). None are changed for the benchmark. Examples:
       # ReportsEngine__Browser__CommandTimeout: "00:00:30"
       # ReportsEngine__Browser__ExtraArguments__0: "--disable-pdf-tagging"
 

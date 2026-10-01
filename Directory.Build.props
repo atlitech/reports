@@ -17,10 +17,8 @@
     <Version>0.25.1</Version>
     <PackageVersion>$(Version)</PackageVersion>
     <Authors>Elvis Nieves Miranda</Authors>
-    <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
     <RepositoryUrl>https://github.com/atlitech/reports</RepositoryUrl>
-    <!--    <PackageProjectUrl>https://BlazorReports.dev</PackageProjectUrl>-->
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/atlitech/reports</PackageProjectUrl>
     <PackageIcon>blazor_reports_logo-128.png</PackageIcon>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <EnablePackageValidation>true</EnablePackageValidation>
@@ -28,8 +26,8 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
+  <!-- Each packable project packs the README.md in its own directory; see its PackageReadmeFile. -->
   <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="" />
     <None Include="../../assets/blazor_reports_logo-128.png" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>
