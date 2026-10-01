@@ -21,6 +21,13 @@ public class ReportsEngineRegistrationTests
           ["ReportsEngine:Browser:ExtraArguments:0"] = "--lang=es",
           ["ReportsEngine:Browser:StartupTimeout"] = "00:01:00",
           ["ReportsEngine:Browser:CommandTimeout"] = "00:00:05",
+          ["ReportsEngine:Browser:WarmUpOnStartup"] = "true",
+          ["ReportsEngine:Browser:MaxConversionsPerProcess"] = "250",
+          ["ReportsEngine:Browser:MaxProcessLifetime"] = "00:20:00",
+          ["ReportsEngine:Browser:ShutdownTimeout"] = "00:00:03",
+          ["ReportsEngine:Concurrency:MaxConcurrentConversions"] = "6",
+          ["ReportsEngine:Concurrency:MaxQueueLength"] = "12",
+          ["ReportsEngine:Concurrency:QueueTimeout"] = "00:00:09",
         }
       )
       .Build();
@@ -38,6 +45,46 @@ public class ReportsEngineRegistrationTests
     await Assert.That(browser.ExtraArguments).IsEquivalentTo(["--lang=es"]);
     await Assert.That(browser.StartupTimeout).IsEqualTo(TimeSpan.FromMinutes(1));
     await Assert.That(browser.CommandTimeout).IsEqualTo(TimeSpan.FromSeconds(5));
+    await Assert.That(browser.WarmUpOnStartup).IsTrue();
+    await Assert.That(browser.MaxConversionsPerProcess).IsEqualTo(250);
+    await Assert.That(browser.MaxProcessLifetime).IsEqualTo(TimeSpan.FromMinutes(20));
+    await Assert.That(browser.ShutdownTimeout).IsEqualTo(TimeSpan.FromSeconds(3));
+    var options = provider.GetRequiredService<IOptions<ReportsEngineOptions>>().Value;
+    await Assert.That(options.Concurrency.MaxConcurrentConversions).IsEqualTo(6);
+    await Assert.That(options.Concurrency.MaxQueueLength).IsEqualTo(12);
+    await Assert.That(options.Concurrency.QueueTimeout).IsEqualTo(TimeSpan.FromSeconds(9));
+  }
+
+  [Test]
+  public async Task Defaults_are_valid_and_bounded()
+  {
+    ReportsEngineOptions options = new();
+
+    await Assert.That(options.Concurrency.MaxConcurrentConversions).IsBetween(2, 8);
+    await Assert.That(options.Concurrency.MaxQueueLength).IsEqualTo(100);
+    await Assert.That(options.Concurrency.QueueTimeout).IsEqualTo(TimeSpan.FromSeconds(30));
+    await Assert.That(options.Browser.MaxConversionsPerProcess).IsEqualTo(1000);
+    await Assert.That(options.Browser.MaxProcessLifetime).IsEqualTo(TimeSpan.FromHours(1));
+    await Assert.That(options.Browser.WarmUpOnStartup).IsFalse();
+  }
+
+  [Test]
+  public async Task Invalid_options_are_rejected_when_the_engine_is_resolved()
+  {
+    ServiceCollection services = new();
+    services.AddReportsEngine(options =>
+    {
+      options.Concurrency.MaxConcurrentConversions = 0;
+      options.Concurrency.MaxQueueLength = -1;
+      options.Browser.CommandTimeout = TimeSpan.Zero;
+    });
+    await using var provider = services.BuildServiceProvider();
+
+    var exception = await Assert
+      .That(() => provider.GetRequiredService<IHtmlToPdfConverter>())
+      .Throws<OptionsValidationException>();
+
+    await Assert.That(exception!.Failures.Count()).IsEqualTo(3);
   }
 
   [Test]

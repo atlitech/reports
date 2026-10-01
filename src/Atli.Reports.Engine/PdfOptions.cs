@@ -64,14 +64,16 @@ public sealed class PdfOptions
 
   /// <summary>
   /// The name of a global JavaScript function the engine exposes to the page, which the page calls to
-  /// signal that rendering is complete. <see langword="null"/> (the default) prints as soon as the HTML
-  /// has been set.
+  /// signal that rendering is complete. <see langword="null"/> (the default) prints once the document
+  /// has fired its <c>load</c> event and its fonts are ready.
   /// </summary>
   /// <remarks>
   /// When set to, for example, <c>"pdfReady"</c>, the page calls <c>window.pdfReady()</c> once its
   /// asynchronous work (data fetching, charts, fonts) is done, and the engine prints the PDF at that
   /// moment. If the page does not call it within <see cref="WaitTimeout"/>, the conversion fails with
-  /// <see cref="ConversionErrorKind.SignalTimeout"/>.
+  /// <see cref="ConversionErrorKind.SignalTimeout"/>. The function exists before any of the page's own
+  /// scripts run, and in documents the page navigates to; the HTML itself is not modified, so a
+  /// document that starts with <c>&lt;!DOCTYPE html&gt;</c> renders in standards mode.
   /// </remarks>
   public string? WaitForSignal { get; set; }
 

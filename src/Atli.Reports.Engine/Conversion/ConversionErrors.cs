@@ -1,51 +1,22 @@
 using Atli.Reports.Engine.Chromium;
+using Atli.Reports.Engine.Chromium.Protocol;
 
 namespace Atli.Reports.Engine.Conversion;
 
 /// <summary>
-/// Maps internal browser errors and exceptions onto the public <see cref="ConversionError"/>.
+/// Maps internal failures onto the public <see cref="ConversionError"/>.
 /// </summary>
 internal static class ConversionErrors
 {
   /// <summary>
-  /// Maps an error returned by the browser layer. Cancellation of <paramref name="cancellationToken"/>
-  /// wins over everything else, because the browser layer reports a canceled command as a failure.
+  /// Maps an exception thrown during <paramref name="stage"/> of a conversion. Cancellation of
+  /// <paramref name="cancellationToken"/> wins over everything else, because the browser layer
+  /// reports a canceled command as a failure.
   /// </summary>
-  public static ConversionError FromBrowserError(
-    string message,
-    BrowserError error,
-    ConversionErrorKind fallback,
-    CancellationToken cancellationToken
-  )
-  {
-    var detail = $"{message}: {error.Message}";
-
-    if (cancellationToken.IsCancellationRequested)
-    {
-      return Canceled(error.Exception);
-    }
-
-    return error switch
-    {
-      PoolExhaustedError => new ConversionError(ConversionErrorKind.Busy, detail, error.Exception),
-      TimeoutError => new ConversionError(ConversionErrorKind.Timeout, detail, error.Exception),
-      _ when error.Exception is TimeoutException => new ConversionError(
-        ConversionErrorKind.Timeout,
-        detail,
-        error.Exception
-      ),
-      _ => new ConversionError(fallback, detail, error.Exception),
-    };
-  }
-
-  /// <summary>
-  /// Maps an exception thrown while converting. Cancellation of <paramref name="cancellationToken"/>
-  /// wins, then a DevTools command timeout, then <paramref name="fallback"/>.
-  /// </summary>
+  /// <remarks>Messages never contain the HTML being converted.</remarks>
   public static ConversionError FromException(
-    string message,
+    string stage,
     Exception exception,
-    ConversionErrorKind fallback,
     CancellationToken cancellationToken
   )
   {
@@ -54,27 +25,45 @@ internal static class ConversionErrors
       return Canceled(exception);
     }
 
-    var kind = exception is TimeoutException ? ConversionErrorKind.Timeout : fallback;
-    return new ConversionError(kind, message, exception);
+    return exception switch
+    {
+      ConversionBusyException => new ConversionError(
+        ConversionErrorKind.Busy,
+        exception.Message,
+        exception
+      ),
+      BrowserUnavailableException => new ConversionError(
+        ConversionErrorKind.BrowserUnavailable,
+        $"{stage}: {exception.Message}",
+        exception
+      ),
+      TimeoutException => new ConversionError(
+        ConversionErrorKind.Timeout,
+        $"{stage}: {exception.Message}",
+        exception
+      ),
+      DevToolsProtocolException or TargetCrashedException => new ConversionError(
+        ConversionErrorKind.RenderFailed,
+        $"{stage}: {exception.Message}",
+        exception
+      ),
+      _ => new ConversionError(ConversionErrorKind.RenderFailed, stage, exception),
+    };
   }
 
   /// <summary>
-  /// Maps an exception thrown while launching the browser. Anything other than cancellation means the
-  /// browser is unavailable, including a browser that does not report its DevTools port in time.
+  /// Whether <paramref name="exception"/> is a failure the engine anticipates (a busy engine, a
+  /// browser that went away, a timeout, a browser that rejected a command, a crashed page, or
+  /// cancellation) rather than a defect.
   /// </summary>
-  public static ConversionError FromLaunchException(
-    Exception exception,
-    CancellationToken cancellationToken
-  )
-  {
-    return cancellationToken.IsCancellationRequested
-      ? Canceled(exception)
-      : new ConversionError(
-        ConversionErrorKind.BrowserUnavailable,
-        $"Failed to create browser: {exception.Message}",
-        exception
-      );
-  }
+  public static bool IsExpected(Exception exception) =>
+    exception
+      is ConversionBusyException
+        or BrowserUnavailableException
+        or TimeoutException
+        or DevToolsProtocolException
+        or TargetCrashedException
+        or OperationCanceledException;
 
   public static ConversionError Canceled(Exception? exception = null) =>
     new(ConversionErrorKind.Canceled, "The conversion was canceled.", exception);

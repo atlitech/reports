@@ -10,7 +10,11 @@ namespace Atli.Reports.Engine;
 /// <para>
 /// Register an implementation with
 /// <see cref="ReportsEngineServiceCollectionExtensions.AddReportsEngine(Microsoft.Extensions.DependencyInjection.IServiceCollection, Action{ReportsEngineOptions}?)"/>.
-/// The registered converter is a thread-safe singleton.
+/// The registered converter is a thread-safe singleton. Conversions share one long-lived browser
+/// process, each in a browser context of its own, so nothing one document stores (cookies, storage,
+/// cache, service workers) is visible to another. At most
+/// <see cref="ReportsEngineConcurrencyOptions.MaxConcurrentConversions"/> run at once; the rest wait
+/// in a bounded queue.
 /// </para>
 /// <para>
 /// Conversion failures are returned as a <see cref="ConversionError"/> instead of being thrown;
@@ -49,8 +53,10 @@ public interface IHtmlToPdfConverter
   /// <param name="cancellationToken">Cancels the conversion.</param>
   /// <returns>
   /// <see cref="Success"/> once the whole PDF has been written; or a <see cref="ConversionError"/>
-  /// describing why the conversion failed. When an error is returned, <paramref name="destination"/>
-  /// may already contain part of a PDF.
+  /// describing why the conversion failed. Nothing is written unless the browser printed the document;
+  /// the PDF is then streamed to <paramref name="destination"/> chunk by chunk as the browser hands it
+  /// over, so a failure after that point (the browser dying mid-transfer, say) can leave part of a PDF
+  /// in <paramref name="destination"/>.
   /// </returns>
   /// <exception cref="ArgumentNullException"><paramref name="html"/> or <paramref name="destination"/> is <see langword="null"/>.</exception>
   /// <exception cref="ArgumentException"><paramref name="destination"/> is not writable.</exception>

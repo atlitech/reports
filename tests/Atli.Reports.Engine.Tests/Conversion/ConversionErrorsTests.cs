@@ -1,4 +1,5 @@
 using Atli.Reports.Engine.Chromium;
+using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Conversion;
 
 namespace Atli.Reports.Engine.Tests.Conversion;
@@ -6,113 +7,101 @@ namespace Atli.Reports.Engine.Tests.Conversion;
 public class ConversionErrorsTests
 {
   [Test]
-  public async Task FromBrowserError_maps_an_exhausted_pool_to_Busy()
+  public async Task A_busy_engine_is_Busy()
   {
-    var error = ConversionErrors.FromBrowserError(
-      "Failed to create page",
-      new PoolExhaustedError("Page", 10),
-      ConversionErrorKind.BrowserUnavailable,
+    var error = ConversionErrors.FromException(
+      "Failed to open a browser page",
+      new ConversionBusyException("The engine is busy."),
       CancellationToken.None
     );
 
     await Assert.That(error.Kind).IsEqualTo(ConversionErrorKind.Busy);
-    await Assert
-      .That(error.Message)
-      .IsEqualTo("Failed to create page: Page pool exhausted (max: 10)");
+    await Assert.That(error.Message).IsEqualTo("The engine is busy.");
   }
 
   [Test]
-  public async Task FromBrowserError_maps_a_timeout_to_Timeout()
+  public async Task A_missing_or_dead_browser_is_BrowserUnavailable()
   {
-    var timeoutError = ConversionErrors.FromBrowserError(
-      "Failed to create page",
-      new TimeoutError("Target.createTarget", TimeSpan.FromSeconds(30)),
-      ConversionErrorKind.BrowserUnavailable,
+    var missing = ConversionErrors.FromException(
+      "Failed to open a browser page",
+      new BrowserUnavailableException("No Chrome executable was found."),
       CancellationToken.None
     );
-    var wrappedTimeout = ConversionErrors.FromBrowserError(
-      "Failed to create page",
-      new ChromiumError("Failed to create browser page", new TimeoutException()),
-      ConversionErrorKind.BrowserUnavailable,
+    var disconnected = ConversionErrors.FromException(
+      "PDF generation failed",
+      new BrowserConnectionClosedException("The DevTools connection to the browser was lost."),
       CancellationToken.None
     );
 
-    await Assert.That(timeoutError.Kind).IsEqualTo(ConversionErrorKind.Timeout);
-    await Assert.That(wrappedTimeout.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+    await Assert.That(missing.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
+    await Assert
+      .That(missing.Message)
+      .IsEqualTo("Failed to open a browser page: No Chrome executable was found.");
+    await Assert.That(disconnected.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
   }
 
   [Test]
-  public async Task FromBrowserError_uses_the_fallback_for_other_errors()
+  public async Task Timeouts_are_Timeout()
+  {
+    var error = ConversionErrors.FromException(
+      "PDF generation failed",
+      new DevToolsTimeoutException("Page.printToPDF", TimeSpan.FromSeconds(30)),
+      CancellationToken.None
+    );
+
+    await Assert.That(error.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+  }
+
+  [Test]
+  public async Task Protocol_errors_and_crashed_pages_are_RenderFailed()
+  {
+    var rejected = ConversionErrors.FromException(
+      "PDF generation failed",
+      new DevToolsProtocolException("Page.printToPDF", -32000, "Page range syntax error"),
+      CancellationToken.None
+    );
+    var crashed = ConversionErrors.FromException(
+      "Failed waiting for the page",
+      new TargetCrashedException(),
+      CancellationToken.None
+    );
+
+    await Assert.That(rejected.Kind).IsEqualTo(ConversionErrorKind.RenderFailed);
+    await Assert
+      .That(rejected.Message)
+      .IsEqualTo("PDF generation failed: Page.printToPDF failed: Page range syntax error (-32000)");
+    await Assert.That(crashed.Kind).IsEqualTo(ConversionErrorKind.RenderFailed);
+  }
+
+  [Test]
+  public async Task Anything_else_is_RenderFailed_with_the_stage_as_message()
   {
     InvalidOperationException cause = new("boom");
 
-    var error = ConversionErrors.FromBrowserError(
+    var error = ConversionErrors.FromException(
       "Failed to set HTML content",
-      new RenderError("Failed to set HTML content", cause),
-      ConversionErrorKind.RenderFailed,
+      cause,
       CancellationToken.None
     );
 
     await Assert.That(error.Kind).IsEqualTo(ConversionErrorKind.RenderFailed);
+    await Assert.That(error.Message).IsEqualTo("Failed to set HTML content");
     await Assert.That(error.Exception).IsSameReferenceAs(cause);
   }
 
   [Test]
-  public async Task FromBrowserError_reports_Canceled_when_the_caller_canceled()
+  public async Task Cancellation_by_the_caller_wins()
   {
     using CancellationTokenSource cancellation = new();
     await cancellation.CancelAsync();
 
-    // The browser layer reports a canceled command as a failure; the caller's token decides.
-    var error = ConversionErrors.FromBrowserError(
-      "Failed to set HTML content",
-      new RenderError("Failed to set HTML content", new TimeoutException()),
-      ConversionErrorKind.RenderFailed,
+    // The browser layer reports a canceled wait as whatever failed; the caller's token decides.
+    var error = ConversionErrors.FromException(
+      "PDF generation failed",
+      new BrowserConnectionClosedException(),
       cancellation.Token
     );
 
     await Assert.That(error.Kind).IsEqualTo(ConversionErrorKind.Canceled);
-  }
-
-  [Test]
-  public async Task FromException_maps_timeouts_cancellation_and_everything_else()
-  {
-    using CancellationTokenSource cancellation = new();
-    await cancellation.CancelAsync();
-
-    var timeout = ConversionErrors.FromException(
-      "PDF generation failed",
-      new TimeoutException(),
-      ConversionErrorKind.RenderFailed,
-      CancellationToken.None
-    );
-    var canceled = ConversionErrors.FromException(
-      "PDF generation failed",
-      new OperationCanceledException(cancellation.Token),
-      ConversionErrorKind.RenderFailed,
-      cancellation.Token
-    );
-    var other = ConversionErrors.FromException(
-      "PDF generation failed",
-      new InvalidOperationException(),
-      ConversionErrorKind.RenderFailed,
-      CancellationToken.None
-    );
-
-    await Assert.That(timeout.Kind).IsEqualTo(ConversionErrorKind.Timeout);
-    await Assert.That(canceled.Kind).IsEqualTo(ConversionErrorKind.Canceled);
-    await Assert.That(other.Kind).IsEqualTo(ConversionErrorKind.RenderFailed);
-    await Assert.That(other.Message).IsEqualTo("PDF generation failed");
-  }
-
-  [Test]
-  public async Task FromLaunchException_maps_a_startup_timeout_to_BrowserUnavailable()
-  {
-    var error = ConversionErrors.FromLaunchException(
-      new TimeoutException("DevToolsActivePort did not appear"),
-      CancellationToken.None
-    );
-
-    await Assert.That(error.Kind).IsEqualTo(ConversionErrorKind.BrowserUnavailable);
   }
 }

@@ -1,98 +1,167 @@
-using System.Text;
+using Atli.Reports.Engine.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using TUnit.Core.Interfaces;
 
 namespace Atli.Reports.Engine.Tests.Integration;
 
 /// <summary>
-/// Converts real HTML in the Chrome (or Chromium) installed on the machine.
+/// One engine, and so one browser, shared by every test that only needs a working converter.
+/// </summary>
+public sealed class SharedChromeEngine : IAsyncInitializer, IAsyncDisposable
+{
+  private ServiceProvider? _provider;
+
+  public IHtmlToPdfConverter Converter => _provider!.GetRequiredService<IHtmlToPdfConverter>();
+
+  public Task InitializeAsync()
+  {
+    _provider = TestEngine.Create();
+    return Task.CompletedTask;
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    if (_provider is not null)
+    {
+      await _provider.DisposeAsync();
+    }
+  }
+}
+
+/// <summary>
+/// Converts real HTML in the Chrome (or Chromium) installed on the machine, through one shared engine.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The browser runs without its sandbox: Ubuntu 24.04 runners block the user namespaces the sandbox
-/// needs, and the HTML here is trusted.
-/// </para>
-/// <para>
-/// The tests run one at a time because each conversion still launches its own browser; parallel cold
-/// starts on a two-core CI runner are slow enough to blur the outcomes under test. Every test builds its
-/// own service provider, so the health tracker is never shared between tests.
-/// </para>
+/// Browser tests run one at a time (<c>[NotInParallel("chrome")]</c>): several of them start their own
+/// browsers, and parallel browser start-ups on a two-core CI runner are slow enough to blur the
+/// outcomes under test.
 /// </remarks>
 [NotInParallel("chrome")]
-public class ChromeConversionTests
+[ClassDataSource<SharedChromeEngine>(Shared = SharedType.PerTestSession)]
+public class ChromeConversionTests(SharedChromeEngine engine)
 {
-  private static readonly TimeSpan GenerousTimeout = TimeSpan.FromSeconds(20);
+  private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
 
   [Test]
   public async Task Converts_html_to_a_pdf()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
-
-    var result = await converter.ConvertAsync(
-      "<!DOCTYPE html><html><body><h1>Hello, PDF</h1></body></html>",
-      cancellationToken: TestContext.Current!.Execution.CancellationToken
+    var pdf = await engine.Converter.ConvertToBytesAsync(
+      "<!DOCTYPE html><html><body><h1>Hello, PDF</h1></body></html>"
     );
 
-    await Assert.That(result.IsT0).IsTrue().Because(Describe(result.Value));
-    await using var pdf = result.AsT0;
-    await Assert.That(await ReadHeaderAsync(pdf)).IsEqualTo("%PDF-");
+    await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
+    await Assert.That(PdfInspector.HasEofMarker(pdf)).IsTrue();
   }
 
   [Test]
   public async Task Writes_the_pdf_to_a_destination_stream()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     using MemoryStream destination = new();
 
-    var result = await converter.ConvertAsync(
+    var result = await engine.Converter.ConvertAsync(
       "<p>Streamed</p>",
       destination,
       new PdfOptions { PaperSize = PaperSize.A4, Orientation = PageOrientation.Landscape },
-      TestContext.Current!.Execution.CancellationToken
+      TestToken
     );
 
-    await Assert.That(result.IsT0).IsTrue().Because(Describe(result.Value));
-    destination.Position = 0;
-    await Assert.That(await ReadHeaderAsync(destination)).IsEqualTo("%PDF-");
+    await Assert.That(result.IsT0).IsTrue().Because(TestEngine.Describe(result.Value));
+    await Assert.That(PdfInspector.HasPdfHeader(destination.ToArray())).IsTrue();
+    await Assert.That(PdfInspector.HasEofMarker(destination.ToArray())).IsTrue();
   }
 
   [Test]
   public async Task Waits_for_the_page_to_signal_before_printing()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
-
-    var result = await converter.ConvertAsync(
+    var pdf = await engine.Converter.ConvertToBytesAsync(
       """
-      <p id="status">Loading…</p>
+      <!DOCTYPE html>
+      <html><head><title>Loading</title></head><body>
       <script>
         setTimeout(function () {
-          document.getElementById("status").textContent = "Ready";
+          document.title = "Ready";
           window.pdfReady();
         }, 100);
       </script>
+      </body></html>
       """,
-      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = GenerousTimeout },
-      TestContext.Current!.Execution.CancellationToken
+      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TestEngine.GenerousTimeout }
     );
 
-    await Assert.That(result.IsT0).IsTrue().Because(Describe(result.Value));
-    await using var pdf = result.AsT0;
-    await Assert.That(await ReadHeaderAsync(pdf)).IsEqualTo("%PDF-");
+    await Assert.That(PdfInspector.ReadTitle(pdf)).IsEqualTo("Ready");
+  }
+
+  [Test]
+  public async Task A_signal_keeps_the_document_in_standards_mode()
+  {
+    // The page signals only in standards mode. The signal used to be injected as a <script> before
+    // the doctype, which switched every document that waited for a signal to quirks mode.
+    var pdf = await engine.Converter.ConvertToBytesAsync(
+      "<!DOCTYPE html><html><body><script>if (document.compatMode === 'CSS1Compat') window.done();</script></body></html>",
+      new PdfOptions { WaitForSignal = "done", WaitTimeout = TestEngine.GenerousTimeout }
+    );
+
+    await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
+  }
+
+  [Test]
+  public async Task Documents_without_a_signal_render_in_standards_mode()
+  {
+    var pdf = await engine.Converter.ConvertToBytesAsync(
+      "<!DOCTYPE html><html><head><title>x</title></head><body><script>document.title = document.compatMode;</script></body></html>"
+    );
+
+    await Assert.That(PdfInspector.ReadTitle(pdf)).IsEqualTo("CSS1Compat");
+  }
+
+  [Test]
+  public async Task Without_a_signal_the_engine_waits_for_the_load_event()
+  {
+    await using TestHttpServer server = new();
+    server.Map(
+      "/slow.svg",
+      """<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>""",
+      "image/svg+xml",
+      delay: TimeSpan.FromMilliseconds(700)
+    );
+
+    var pdf = await engine.Converter.ConvertToBytesAsync(
+      $$"""
+      <!DOCTYPE html><html><head><title>loading</title></head><body>
+      <img src="{{server.BaseUrl}}/slow.svg">
+      <script>window.addEventListener('load', function () { document.title = 'loaded'; });</script>
+      </body></html>
+      """
+    );
+
+    await Assert.That(PdfInspector.ReadTitle(pdf)).IsEqualTo("loaded");
+  }
+
+  [Test]
+  public async Task The_signal_survives_navigation_to_another_document()
+  {
+    await using TestHttpServer server = new();
+    server.Map(
+      "/next",
+      "<!DOCTYPE html><html><head><title>next</title></head><body><script>window.pdfReady();</script></body></html>"
+    );
+
+    var pdf = await engine.Converter.ConvertToBytesAsync(
+      $"<script>location.href = '{server.BaseUrl}/next';</script>",
+      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TestEngine.GenerousTimeout }
+    );
+
+    await Assert.That(PdfInspector.ReadTitle(pdf)).IsEqualTo("next");
   }
 
   [Test]
   public async Task Times_out_when_the_page_never_signals()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
-
-    var result = await converter.ConvertAsync(
+    var result = await engine.Converter.ConvertAsync(
       "<p>Never ready</p>",
       new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TimeSpan.FromMilliseconds(500) },
-      TestContext.Current!.Execution.CancellationToken
+      TestToken
     );
 
     await Assert.That(result.IsT1).IsTrue();
@@ -100,15 +169,15 @@ public class ChromeConversionTests
   }
 
   [Test]
-  public async Task Print_options_the_browser_rejects_are_RenderFailed()
+  public async Task Print_options_the_browser_rejects_are_RenderFailed_and_write_nothing()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
+    using MemoryStream destination = new();
 
-    var result = await converter.ConvertAsync(
+    var result = await engine.Converter.ConvertAsync(
       "<p>One page</p>",
+      destination,
       new PdfOptions { PageRanges = "not-a-range" },
-      TestContext.Current!.Execution.CancellationToken
+      TestToken
     );
 
     await Assert.That(result.IsT1).IsTrue();
@@ -116,21 +185,18 @@ public class ChromeConversionTests
     await Assert
       .That(result.AsT1.Message)
       .StartsWith("PDF generation failed: Page.printToPDF failed:");
+    await Assert.That(destination.Length).IsEqualTo(0);
   }
 
   [Test]
   public async Task Canceling_while_waiting_for_the_signal_reports_Canceled()
   {
-    await using var provider = CreateProvider();
-    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
-    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
-      TestContext.Current!.Execution.CancellationToken
-    );
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestToken);
     cancellation.CancelAfter(TimeSpan.FromSeconds(1));
 
-    var result = await converter.ConvertAsync(
+    var result = await engine.Converter.ConvertAsync(
       "<p>Never ready</p>",
-      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = GenerousTimeout },
+      new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TestEngine.GenerousTimeout },
       cancellation.Token
     );
 
@@ -139,17 +205,144 @@ public class ChromeConversionTests
   }
 
   [Test]
+  public async Task Converts_html_larger_than_a_megabyte()
+  {
+    var html = TestDocuments.LargeImageDocument();
+    await Assert.That(html.Length).IsGreaterThan(1024 * 1024);
+    using MemoryStream destination = new();
+
+    var result = await engine.Converter.ConvertAsync(html, destination, null, TestToken);
+
+    await Assert.That(result.IsT0).IsTrue().Because(TestEngine.Describe(result.Value));
+    var pdf = destination.ToArray();
+    await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
+    await Assert.That(PdfInspector.HasEofMarker(pdf)).IsTrue();
+    // The bitmap is noise and does not compress, so the PDF itself spans many WebSocket frames.
+    await Assert.That(pdf.Length).IsGreaterThan(500 * 1024);
+  }
+}
+
+/// <summary>
+/// Converter behavior that needs an engine configured for the test, so each test owns its engine.
+/// </summary>
+[NotInParallel("chrome")]
+public class ChromeEngineConfigurationTests
+{
+  private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
+
+  [Test]
+  public async Task Streams_a_pdf_of_more_than_a_hundred_pages_chunk_by_chunk()
+  {
+    await using var provider = TestEngine.Create(options =>
+      options.Browser.PdfReadChunkSize = 16 * 1024
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
+    RecordingStream destination = new();
+
+    var result = await converter.ConvertAsync(
+      TestDocuments.ManyPagesDocument(150),
+      destination,
+      null,
+      TestToken
+    );
+
+    await Assert.That(result.IsT0).IsTrue().Because(TestEngine.Describe(result.Value));
+    var pdf = destination.ToArray();
+    await Assert.That(PdfInspector.HasPdfHeader(pdf)).IsTrue();
+    await Assert.That(PdfInspector.HasEofMarker(pdf)).IsTrue();
+    await Assert.That(PdfInspector.CountPages(pdf)).IsEqualTo(150);
+    await Assert.That(destination.Writes).IsGreaterThan(1);
+  }
+
+  [Test]
+  public async Task Twenty_parallel_conversions_share_four_slots()
+  {
+    await using var provider = TestEngine.Create(options =>
+    {
+      options.Concurrency.MaxConcurrentConversions = 4;
+      options.Concurrency.QueueTimeout = TimeSpan.FromMinutes(2);
+    });
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
+
+    var results = await Task.WhenAll(
+      Enumerable
+        .Range(1, 20)
+        .Select(index =>
+          converter
+            .ConvertAsync($"<h1>Document {index}</h1>", cancellationToken: TestToken)
+            .AsTask()
+        )
+    );
+
+    foreach (var result in results)
+    {
+      await Assert.That(result.IsT0).IsTrue().Because(TestEngine.Describe(result.Value));
+      await result.AsT0.DisposeAsync();
+    }
+
+    var limiter = provider.GetRequiredService<Atli.Reports.Engine.Conversion.ConversionLimiter>();
+    await Assert.That(limiter.PeakActive).IsLessThanOrEqualTo(4);
+    await Assert.That(limiter.Active).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task A_full_queue_is_Busy_and_queued_conversions_still_run()
+  {
+    await using var provider = TestEngine.Create(options =>
+    {
+      options.Concurrency.MaxConcurrentConversions = 1;
+      options.Concurrency.MaxQueueLength = 1;
+    });
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
+    var limiter = provider.GetRequiredService<Atli.Reports.Engine.Conversion.ConversionLimiter>();
+    using var cancelBlocker = CancellationTokenSource.CreateLinkedTokenSource(TestToken);
+
+    var blocker = converter
+      .ConvertAsync(
+        "<p>Never ready</p>",
+        new PdfOptions { WaitForSignal = "never", WaitTimeout = TestEngine.GenerousTimeout },
+        cancelBlocker.Token
+      )
+      .AsTask();
+    await Assert
+      .That(
+        await TestEngine.EventuallyAsync(
+          () => Task.FromResult(limiter.Active == 1),
+          TestEngine.GenerousTimeout
+        )
+      )
+      .IsTrue();
+    var queued = converter.ConvertAsync("<p>Queued</p>", cancellationToken: TestToken).AsTask();
+    await Assert
+      .That(
+        await TestEngine.EventuallyAsync(
+          () => Task.FromResult(limiter.Queued == 1),
+          TestEngine.GenerousTimeout
+        )
+      )
+      .IsTrue();
+
+    var rejected = await converter.ConvertAsync("<p>Rejected</p>", cancellationToken: TestToken);
+    await cancelBlocker.CancelAsync();
+
+    await Assert.That(rejected.AsT1.Kind).IsEqualTo(ConversionErrorKind.Busy);
+    await Assert.That((await blocker).AsT1.Kind).IsEqualTo(ConversionErrorKind.Canceled);
+    var queuedResult = await queued;
+    await Assert.That(queuedResult.IsT0).IsTrue().Because(TestEngine.Describe(queuedResult.Value));
+    await queuedResult.AsT0.DisposeAsync();
+  }
+
+  [Test]
   public async Task Health_checks_report_the_browser_and_recent_conversions()
   {
     ServiceCollection services = new();
-    services.AddReportsEngine(ConfigureForTests);
+    services.AddReportsEngine(TestEngine.ConfigureForTests);
     services.AddHealthChecks().AddReportsEngineBrowserCheck().AddReportsEngineConversionCheck();
     await using var provider = services.BuildServiceProvider();
-    var cancellationToken = TestContext.Current!.Execution.CancellationToken;
 
     var converted = await provider
       .GetRequiredService<IHtmlToPdfConverter>()
-      .ConvertAsync("<p>Healthy</p>", cancellationToken: cancellationToken);
+      .ConvertAsync("<p>Healthy</p>", cancellationToken: TestToken);
     if (converted.TryPickT0(out var pdf, out _))
     {
       await pdf.DisposeAsync();
@@ -157,7 +350,7 @@ public class ChromeConversionTests
 
     var report = await provider
       .GetRequiredService<HealthCheckService>()
-      .CheckHealthAsync(cancellationToken);
+      .CheckHealthAsync(TestToken);
 
     await Assert
       .That(report.Entries[ReportsEngineHealthChecksBuilderExtensions.BrowserCheckName].Status)
@@ -169,29 +362,20 @@ public class ChromeConversionTests
       .IsEqualTo("1/1 succeeded (100 %)");
   }
 
-  private static ServiceProvider CreateProvider()
+  /// <summary>
+  /// A write-only stream that keeps what it receives and counts the writes.
+  /// </summary>
+  private sealed class RecordingStream : MemoryStream
   {
-    ServiceCollection services = new();
-    services.AddReportsEngine(ConfigureForTests);
-    return services.BuildServiceProvider();
-  }
+    public int Writes { get; private set; }
 
-  private static void ConfigureForTests(ReportsEngineOptions options)
-  {
-    options.Browser.NoSandbox = true;
-    options.Browser.DisableDevShmUsage = true;
-    options.Browser.CommandTimeout = GenerousTimeout;
+    public override ValueTask WriteAsync(
+      ReadOnlyMemory<byte> buffer,
+      CancellationToken cancellationToken = default
+    )
+    {
+      Writes++;
+      return base.WriteAsync(buffer, cancellationToken);
+    }
   }
-
-  private static async Task<string> ReadHeaderAsync(Stream pdf)
-  {
-    var header = new byte[5];
-    await pdf.ReadExactlyAsync(header);
-    return Encoding.ASCII.GetString(header);
-  }
-
-  private static string Describe(object value) =>
-    value is ConversionError error
-      ? $"{error.Kind}: {error.Message} {error.Exception}"
-      : "succeeded";
 }

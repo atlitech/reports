@@ -55,8 +55,9 @@ public static class ReportsEngineHealthChecksBuilderExtensions
   /// <param name="tags">Tags used to filter the check, for example <c>["ready"]</c>.</param>
   /// <returns><paramref name="builder"/>, for chaining.</returns>
   /// <remarks>
-  /// Conversions rejected as <see cref="ConversionErrorKind.InvalidRequest"/> or
-  /// <see cref="ConversionErrorKind.Canceled"/> by the caller do not count as failures.
+  /// Conversions rejected as <see cref="ConversionErrorKind.InvalidRequest"/>, canceled by the caller
+  /// (<see cref="ConversionErrorKind.Canceled"/>), or shed under load
+  /// (<see cref="ConversionErrorKind.Busy"/>) do not count as failures.
   /// </remarks>
   public static IHealthChecksBuilder AddReportsEngineConversionCheck(
     this IHealthChecksBuilder builder,

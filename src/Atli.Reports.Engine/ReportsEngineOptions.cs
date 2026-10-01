@@ -21,4 +21,9 @@ public sealed class ReportsEngineOptions
   /// How the engine finds, launches, and talks to the browser.
   /// </summary>
   public ReportsEngineBrowserOptions Browser { get; } = new();
+
+  /// <summary>
+  /// How many conversions run at once and how many may wait for a turn.
+  /// </summary>
+  public ReportsEngineConcurrencyOptions Concurrency { get; } = new();
 }

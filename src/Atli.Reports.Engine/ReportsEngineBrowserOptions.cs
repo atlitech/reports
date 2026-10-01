@@ -59,6 +59,66 @@ public sealed class ReportsEngineBrowserOptions
   /// </summary>
   /// <remarks>
   /// A command that does not complete in time fails the conversion with <see cref="ConversionErrorKind.Timeout"/>.
+  /// The same limit bounds how long the engine waits for a document's <c>load</c> event when
+  /// <see cref="PdfOptions.WaitForSignal"/> is not set, and how long printing a long document may take.
   /// </remarks>
   public TimeSpan CommandTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+  /// <summary>
+  /// Whether to launch the browser when the host starts instead of on the first conversion.
+  /// Defaults to <see langword="false"/>.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// The engine runs one long-lived browser process for all conversions. By default it starts on
+  /// first use, so the first conversion pays the browser's start-up time. Warming up moves that cost
+  /// to host start-up. A browser that fails to start is logged and retried on the next conversion;
+  /// it does not stop the host.
+  /// </para>
+  /// <para>
+  /// Warm-up runs from a hosted service, so it needs a host (for example a
+  /// <c>WebApplication</c> or a generic host).
+  /// </para>
+  /// </remarks>
+  public bool WarmUpOnStartup { get; set; }
+
+  /// <summary>
+  /// How many conversions one browser process serves before the engine replaces it with a fresh one.
+  /// Defaults to 1000. <c>0</c> never replaces the process for this reason.
+  /// </summary>
+  /// <remarks>
+  /// Replacing the process bounds the memory a long-running browser accumulates. The replacement
+  /// starts at once; conversions already running finish on the old process, which closes when the
+  /// last of them is done.
+  /// </remarks>
+  public int MaxConversionsPerProcess { get; set; } = 1000;
+
+  /// <summary>
+  /// How long one browser process is used before the engine replaces it with a fresh one. Defaults to
+  /// one hour. <see cref="Timeout.InfiniteTimeSpan"/> never replaces the process for this reason.
+  /// </summary>
+  /// <remarks>
+  /// The age is checked when a conversion starts. Replacement drains gracefully, as for
+  /// <see cref="MaxConversionsPerProcess"/>.
+  /// </remarks>
+  public TimeSpan MaxProcessLifetime { get; set; } = TimeSpan.FromHours(1);
+
+  /// <summary>
+  /// How long shutting down the engine waits for running conversions to finish before it closes the
+  /// browser. Defaults to 10 seconds.
+  /// </summary>
+  /// <remarks>
+  /// When the host stops (or the service provider is disposed), the engine stops accepting
+  /// conversions, waits up to this long for the running ones, then kills the browser's process tree
+  /// and deletes its temporary profile. Conversions still running at that point fail with
+  /// <see cref="ConversionErrorKind.BrowserUnavailable"/>. A host's own shutdown timeout also bounds
+  /// the wait.
+  /// </remarks>
+  public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+  /// <summary>
+  /// How many PDF bytes to request from the browser per read. Not bound from configuration; tests
+  /// lower it to exercise multi-chunk streaming.
+  /// </summary>
+  internal int PdfReadChunkSize { get; set; } = Pdf.ChromiumPdfGenerator.DefaultReadChunkSize;
 }
