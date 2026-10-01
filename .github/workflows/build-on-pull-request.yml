@@ -28,7 +28,7 @@ jobs:
         run: dotnet tool restore
 
       - name: Validate formatting
-        run: dotnet csharpier --check .
+        run: dotnet csharpier check .
 
       - name: Build
         run: dotnet build
