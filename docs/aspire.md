@@ -189,15 +189,21 @@ builder.AddReportsClient(
 
 The integration runs the server released with it: `Atli.Reports.Aspire.Hosting` 0.26.0 runs
 `ghcr.io/atlitech/reports-server:0.26.0`, so updating the package updates the server. A release
-publishes the image before the packages, so a published package's tag always exists. The tag never
-moves; see [the server's published image](engine/server.md#published-image) for the tags and how to
-verify the image's provenance.
+publishes the image before the packages, so a published package's tag always exists. The tag keeps
+that release's server, and moves only when a Chrome refresh rebuilds the release with a newer
+`chrome-headless-shell`, which a container runtime picks up the next time it pulls the tag. To keep
+the browser fixed as well, use the `<version>-chrome<chrome>` tag or a digest; see
+[the server's published image](engine/server.md#published-image) for the tags and how to verify the
+image's provenance.
 
 The standard container methods override it:
 
 ```csharp
 // Another release of the server.
 builder.AddReportsServer("reports").WithImageTag("0.26.1");
+
+// That release with exactly this Chrome version; the tag never moves.
+builder.AddReportsServer("reports").WithImageTag("0.26.1-chrome154.0.8037.92");
 
 // An exact image, by digest (without the "sha256:" prefix).
 builder.AddReportsServer("reports").WithImageSHA256("<digest>");
@@ -216,7 +222,7 @@ path is relative to the context:
 builder
   .AddReportsServer("reports")
   .WithDockerfile("../reports", "src/Atli.Reports.Server/Dockerfile")
-  .WithBuildArg("CHROME_VERSION", "154.0.8037.92"); // optional; defaults to the current stable
+  .WithBuildArg("CHROME_VERSION", "154.0.8037.92"); // optional; defaults to the version the Dockerfile pins
 ```
 
 The built image replaces the released one, both when the AppHost runs and when it deploys (the

@@ -1,0 +1,5 @@
+# The build context is the repository root; send only what the dev container build needs.
+*
+!.devcontainer/tools/
+!.github/scripts/chrome-headless-shell.sh
+!src/Atli.Reports.Server/Dockerfile

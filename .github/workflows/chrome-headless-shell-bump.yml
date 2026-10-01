@@ -1,0 +1,185 @@
+name: chrome-headless-shell update
+
+# Daily, proposes the newest stable chrome-headless-shell for the server image. When Chrome for
+# Testing's stable channel is newer than the version src/Atli.Reports.Server/Dockerfile pins (never
+# older), and both downloads the image needs (linux64 and linux-arm64) exist, it commits the new pin
+# on top of main to the automation/chrome-headless-shell branch, replacing what the branch had, and
+# opens a pull request for it, or updates the one that is open. Merging it runs
+# server-image-refresh.yml, which rebuilds the newest release's image with the new browser.
+#
+# The branch and the pull request are written with a GitHub App's token, not the workflow's
+# GITHUB_TOKEN, so the pull request's checks run as for any other. One-time setup:
+#   1. In the atlitech organization's settings, under Developer settings > GitHub Apps, create an
+#      App with the webhook turned off, the repository permissions Contents: Read and write and
+#      Pull requests: Read and write, and installation limited to this account.
+#   2. Note its Client ID, generate a private key, and install it on atlitech/reports only.
+#   3. In atlitech/reports, under Settings > Secrets and variables > Actions, set the variable
+#      AUTOMATION_APP_CLIENT_ID to the Client ID and the secret AUTOMATION_APP_PRIVATE_KEY to the
+#      private key (the whole .pem file).
+# Until both are set, a run that finds a newer version only reports it with a warning.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# The workflow's GITHUB_TOKEN only reads; the App's token writes.
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-headless-shell-bump
+  cancel-in-progress: false
+
+env:
+  BRANCH: automation/chrome-headless-shell
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Compare with Chrome for Testing
+        id: check
+        run: |
+          pinned="$(.github/scripts/chrome-headless-shell.sh pinned)"
+          stable="$(.github/scripts/chrome-headless-shell.sh stable)"
+          echo "Pinned: $pinned. Chrome for Testing stable: $stable."
+          echo "from=$pinned" >> "$GITHUB_OUTPUT"
+          echo "to=$stable" >> "$GITHUB_OUTPUT"
+          case "$(.github/scripts/chrome-headless-shell.sh compare "$stable" "$pinned")" in
+            newer) ;;
+            same)
+              echo "::notice::The server image already pins the stable chrome-headless-shell, $pinned."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            *)
+              echo "::notice::Chrome for Testing's stable $stable is older than the pinned $pinned, and the pin never moves back."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          status=0
+          .github/scripts/chrome-headless-shell.sh downloadable "$stable" || status=$?
+          case "$status" in
+            0) echo "update=true" >> "$GITHUB_OUTPUT" ;;
+            1)
+              echo "::notice::chrome-headless-shell $stable is not downloadable for both linux64 and linux-arm64 yet; the next run checks again."
+              echo "update=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Check the automation App's settings
+        id: app
+        if: steps.check.outputs.update == 'true'
+        env:
+          CLIENT_ID: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          HAS_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY != '' }}
+          FROM: ${{ steps.check.outputs.from }}
+          TO: ${{ steps.check.outputs.to }}
+        run: |
+          if [ -n "$CLIENT_ID" ] && [ "$HAS_PRIVATE_KEY" = true ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::chrome-headless-shell $TO is available (the server image pins $FROM), but no pull request was opened: set the AUTOMATION_APP_CLIENT_ID variable and the AUTOMATION_APP_PRIVATE_KEY secret for the automation GitHub App, as the comment at the top of .github/workflows/chrome-headless-shell-bump.yml describes."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Without owner or repositories, the token covers this repository only.
+      - name: Create the automation App's token
+        id: token
+        if: steps.app.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Commit the new pin
+        if: steps.app.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          FROM: ${{ steps.check.outputs.from }}
+          TO: ${{ steps.check.outputs.to }}
+        run: |
+          .github/scripts/chrome-headless-shell.sh pin "$TO"
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git commit --quiet --all \
+            --message "build(server): chrome-headless-shell $FROM → $TO" \
+            --message "Chrome for Testing's stable channel is at $TO, and its linux64 and linux-arm64 chrome-headless-shell downloads exist. Merging this rebuilds the newest release's server image with it (.github/workflows/server-image-refresh.yml)."
+          git show --stat HEAD
+
+      # Force-pushed, so the branch always holds one commit on top of the current main. It is left
+      # alone when it already has exactly that content, so an open pull request is not re-run daily.
+      - name: Push the branch
+        id: push
+        if: steps.app.outputs.configured == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          credentials="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$credentials"
+          auth="AUTHORIZATION: basic $credentials"
+          if git -c "http.extraheader=$auth" fetch --quiet --depth=1 origin "refs/heads/$BRANCH" 2>/dev/null &&
+            [ "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$(git rev-parse 'HEAD^{tree}')" ]; then
+            echo "$BRANCH already has this change on top of main."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            git -c "http.extraheader=$auth" push --force origin "HEAD:refs/heads/$BRANCH"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Also when the push was skipped, in case the pull request was closed or never opened. A pull
+      # request for the same version that was closed without merging is not opened again; the next
+      # version gets a new one.
+      - name: Open or update the pull request
+        if: steps.app.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          FROM: ${{ steps.check.outputs.from }}
+          TO: ${{ steps.check.outputs.to }}
+        run: |
+          title="build(server): chrome-headless-shell $FROM → $TO"
+          body="$(
+            cat <<BODY
+          Chrome for Testing's stable channel is at chrome-headless-shell \`$TO\`. This pins it in \`src/Atli.Reports.Server/Dockerfile\`, replacing \`$FROM\`.
+
+          - **Downloads:** the \`linux64\` and \`linux-arm64\` builds the image uses exist ([Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/), [versions with downloads](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)).
+          - **Release notes:** [Chrome Releases posts that mention $TO](https://chromereleases.googleblog.com/search?q=$TO).
+          - **Checks:** *Server image* builds the image with the new browser on amd64 and arm64 and smoke-tests it.
+          - **After merging:** \`.github/workflows/server-image-refresh.yml\` rebuilds the newest release's image with chrome-headless-shell $TO and moves its tags.
+
+          Opened by \`.github/workflows/chrome-headless-shell-bump.yml\`, which keeps this pull request up to date while it is open.
+          BODY
+          )"
+          open="$(
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open \
+              --json number --jq '.[0].number // empty'
+          )"
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            echo "Updated pull request #$open."
+            exit 0
+          fi
+          declined="$(
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state closed \
+              --json number,title,state |
+              jq -r --arg title "$title" '[.[] | select(.state == "CLOSED" and .title == $title)][0].number // empty'
+          )"
+          if [ -n "$declined" ]; then
+            echo "::notice::Pull request #$declined proposed chrome-headless-shell $TO and was closed without merging, so it is not opened again."
+            exit 0
+          fi
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body "$body"

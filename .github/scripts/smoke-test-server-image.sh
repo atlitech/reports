@@ -5,8 +5,9 @@
 # container and checks that the server shut down cleanly. The container's logs are printed when any
 # check fails.
 #
-# Used by .github/workflows/server-image.yml (every image change) and release.yml (the pushed release
-# image). Run it locally against an image you built:
+# Used by .github/workflows/server-image.yml (every image change) and server-image-publish.yml (each
+# architecture's pushed image, before any tag points at it, for a release or a Chrome refresh). Run
+# it locally against an image you built:
 #
 #   docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
 #   .github/scripts/smoke-test-server-image.sh atli-reports-server

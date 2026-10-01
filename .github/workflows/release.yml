@@ -5,16 +5,20 @@ name: Release
 # never ships packages that point at a missing image.
 #
 # Jobs: pack (packs and verifies the packages, which proves the release tag is the version in
-# Directory.Build.props) -> image-metadata (image tags, Chrome version) -> image-build (one native
-# build per architecture, smoke-tested and pushed by digest) -> image (multi-arch manifest, tags,
-# provenance attestation) -> publish (nuget.org).
+# Directory.Build.props) -> image-metadata (image tags, and the Chrome version the release's
+# Dockerfile pins) -> image (server-image-publish.yml: one native build per architecture, pushed by
+# digest and smoke-tested, then the multi-arch index, its tags and the provenance attestation) ->
+# publish (nuget.org).
+#
+# server-image-refresh.yml later rebuilds the newest release when main pins a newer
+# chrome-headless-shell, moving the tags this workflow set (except <version>-chrome<chrome>).
 #
 # NuGet authentication is Trusted Publishing (OIDC), so no API key is stored in this repository. The
 # nuget.org policy of the `atli` organization trusts this workflow file name (release.yml) in
 # atlitech/reports running in the `release` environment, and that environment only accepts tags
 # matching `[0-9]*`. Renaming this file or the environment breaks publishing until the policy on
 # nuget.org is updated to match. The image is pushed with the workflow's GITHUB_TOKEN, from jobs in
-# the same environment.
+# the same environment (server-image-publish.yml runs its jobs in the environment it is given).
 
 on:
   release:
@@ -26,12 +30,6 @@ permissions:
 concurrency:
   group: release
   cancel-in-progress: false
-
-env:
-  IMAGE: ghcr.io/atlitech/reports-server
-  IMAGE_TITLE: Atli Reports Server
-  IMAGE_DESCRIPTION: HTML to PDF over HTTP. A NativeAOT server over chrome-headless-shell.
-  IMAGE_LICENSES: Apache-2.0
 
 jobs:
   pack:
@@ -98,197 +96,49 @@ jobs:
       tags: ${{ steps.tags.outputs.tags }}
       chrome-version: ${{ steps.chrome.outputs.version }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       # <version> always; <major>.<minor> unless the version has a pre-release suffix such as
       # -preview.1; latest only when the version has no suffix and the GitHub release is not marked
-      # as a pre-release.
+      # as a pre-release. server-image-publish.yml adds <version>-chrome<chrome-version>.
       - name: Compute image tags
         id: tags
         env:
           TAG: ${{ github.event.release.tag_name }}
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
-          if [[ ! "$TAG" =~ $semver ]]; then
-            echo "::error::Release tag $TAG is not a version such as 0.26.0 or 0.26.0-preview.1."
-            exit 1
-          fi
-          tags="$TAG"
-          if [ -z "${BASH_REMATCH[4]}" ]; then
-            tags="$tags ${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-            if [ "$PRERELEASE" != true ]; then
-              tags="$tags latest"
-            fi
-          fi
+          tags="$(.github/scripts/server-image.sh release-tags "$TAG" "$PRERELEASE")"
           echo "Image tags: $tags"
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
-      # Resolved once, so both architectures ship the same browser; the provenance attestation
-      # records it as the CHROME_VERSION build argument.
-      - name: Resolve the stable chrome-headless-shell version
+      # The version the release's Dockerfile pins, so the release ships the browser its pull requests
+      # tested. It is also passed as the CHROME_VERSION build argument, which the provenance records.
+      - name: Read the pinned chrome-headless-shell version
         id: chrome
         run: |
-          version="$(curl -fsSL --retry 3 https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)"
-          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
-            echo "::error::Chrome for Testing did not return a version number."
-            exit 1
-          fi
-          echo "Chrome for Testing stable: $version"
+          version="$(.github/scripts/chrome-headless-shell.sh pinned)"
+          echo "chrome-headless-shell: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  image-build:
-    name: image-build (${{ matrix.arch }})
+  image:
     needs: image-metadata
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    environment: release
     permissions:
       contents: read
-      packages: write
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Log in to ghcr.io
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Pushed untagged; the image job tags the multi-arch manifest once both architectures pass.
-      # No build cache: a release picks up the current base images and Ubuntu security updates, and
-      # never reuses layers another workflow wrote.
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: src/Atli.Reports.Server/Dockerfile
-          platforms: linux/${{ matrix.arch }}
-          build-args: CHROME_VERSION=${{ needs.image-metadata.outputs.chrome-version }}
-          labels: |
-            org.opencontainers.image.title=${{ env.IMAGE_TITLE }}
-            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.version=${{ needs.image-metadata.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=${{ env.IMAGE_LICENSES }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          no-cache: true
-          sbom: true
-          provenance: mode=max
-
-      # Tests exactly what was pushed.
-      - name: Smoke test the pushed image
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          docker pull "$IMAGE@$DIGEST"
-          .github/scripts/smoke-test-server-image.sh "$IMAGE@$DIGEST"
-
-      - name: Record the digest
-        env:
-          ARCH: ${{ matrix.arch }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/digests"
-          echo "$DIGEST" > "$RUNNER_TEMP/digests/$ARCH"
-
-      - name: Upload the digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: image-digest-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/${{ matrix.arch }}
-          if-no-files-found: error
-          retention-days: 1
-
-  image:
-    needs: [ image-metadata, image-build ]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: release
-    permissions:
       packages: write
       id-token: write
       attestations: write
       artifact-metadata: write
-    steps:
-      - name: Download the digests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: image-digest-*
-          path: ${{ runner.temp }}/digests
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Log in to ghcr.io
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # The index annotations are what ghcr.io shows for a multi-arch image.
-      - name: Create and push the multi-arch manifest
-        id: manifest
-        env:
-          VERSION: ${{ needs.image-metadata.outputs.version }}
-          TAGS: ${{ needs.image-metadata.outputs.tags }}
-          SOURCE: ${{ github.server_url }}/${{ github.repository }}
-          REVISION: ${{ github.sha }}
-        run: |
-          sources=()
-          for arch in amd64 arm64; do
-            digest="$(cat "$RUNNER_TEMP/digests/$arch")"
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::No valid $arch image digest was recorded."
-              exit 1
-            fi
-            sources+=("$IMAGE@$digest")
-          done
-          tag_arguments=()
-          for tag in $TAGS; do
-            tag_arguments+=(--tag "$IMAGE:$tag")
-          done
-          docker buildx imagetools create "${tag_arguments[@]}" \
-            --annotation "index:org.opencontainers.image.title=$IMAGE_TITLE" \
-            --annotation "index:org.opencontainers.image.description=$IMAGE_DESCRIPTION" \
-            --annotation "index:org.opencontainers.image.source=$SOURCE" \
-            --annotation "index:org.opencontainers.image.url=$SOURCE" \
-            --annotation "index:org.opencontainers.image.version=$VERSION" \
-            --annotation "index:org.opencontainers.image.revision=$REVISION" \
-            --annotation "index:org.opencontainers.image.licenses=$IMAGE_LICENSES" \
-            "${sources[@]}"
-          docker buildx imagetools inspect "$IMAGE:$VERSION"
-          digest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Could not read the digest of $IMAGE:$VERSION."
-            exit 1
-          fi
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.manifest.outputs.digest }}
-          push-to-registry: true
+    uses: ./.github/workflows/server-image-publish.yml
+    with:
+      ref: ${{ github.sha }}
+      version: ${{ needs.image-metadata.outputs.version }}
+      chrome-version: ${{ needs.image-metadata.outputs.chrome-version }}
+      tags: ${{ needs.image-metadata.outputs.tags }}
+      environment: release
 
   publish:
     needs: [ pack, image ]

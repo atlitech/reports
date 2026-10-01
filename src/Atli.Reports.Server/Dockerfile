@@ -6,14 +6,20 @@
 #   docker compose up --build
 #
 # Build arguments:
-#   CHROME_VERSION  The chrome-headless-shell version from Chrome for Testing, for example
-#                   154.0.8037.92. Defaults to the current stable release, so a rebuild picks up
-#                   browser security fixes; pin it for reproducible images.
+#   CHROME_VERSION  The chrome-headless-shell version from Chrome for Testing. Defaults to the version
+#                   pinned in the browser stage below, which a scheduled workflow
+#                   (.github/workflows/chrome-headless-shell-bump.yml) proposes updating when Chrome
+#                   for Testing ships a newer stable release. `stable` takes the current stable
+#                   release instead; add --no-cache-filter browser so Docker downloads it again
+#                   rather than reusing an earlier download.
+#
+# The base images are pinned by the digest of their multi-arch index; Dependabot updates the tag and
+# digest together (.github/dependabot.yml).
 
 # Stage 1: build (NativeAOT). The -aot SDK image carries the native toolchain NativeAOT links with
 # (clang, zlib). The build and runtime stages share Ubuntu 24.04, so the binary runs against the
 # glibc it was linked with.
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot@sha256:96f3b7d45f53eb05990f05b89ce61c4e23d07a5098521c2f20b018630e34f298 AS build
 WORKDIR /src
 # Restore from the project files alone, so a source change reuses the restored packages (the
 # NativeAOT compiler among them). The compiler and runtime packs are per architecture, so restore
@@ -32,9 +38,12 @@ RUN rm -f /app/*.dbg /app/*.pdb /app/*.xml
 # Stage 2: download chrome-headless-shell, Chromium's dedicated headless build. Compared with the full
 # browser it starts faster, prints faster, and creates the per-conversion browser contexts the engine
 # isolates documents with several times faster.
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble AS browser
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:099f6f87ed745377dd27bd722f0d1a352bca71b4fddaabfd75e7c064bcaa82da AS browser
 ARG TARGETARCH
-ARG CHROME_VERSION=stable
+# The pinned chrome-headless-shell version: the single source of truth for the image's browser.
+# .github/scripts/chrome-headless-shell.sh reads and rewrites this line, so keep it a plain
+# ARG CHROME_VERSION=<version>.
+ARG CHROME_VERSION=154.0.8037.92
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -57,7 +66,7 @@ RUN set -eux; \
     rm /tmp/chrome-headless-shell.zip
 
 # Stage 3: runtime. No .NET runtime is needed: the server is a native binary.
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:099f6f87ed745377dd27bd722f0d1a352bca71b4fddaabfd75e7c064bcaa82da
 # tini runs as PID 1: it forwards SIGTERM to the server (whose shutdown closes the browser cleanly)
 # and reaps the browser's exited child processes, so none linger as zombies.
 # The lib* packages are the browser's shared libraries that the base image lacks: the NEEDED entries
