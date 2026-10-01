@@ -10,7 +10,8 @@ namespace Atli.Reports.Client.Tests.Support;
 
 /// <summary>
 /// A reports client whose <see cref="HttpClient"/> talks to a stub handler instead of a network: the
-/// whole client pipeline (resilience handler included) runs, and the stub answers.
+/// whole client pipeline (resilience handler included) runs, and the stub answers. The pipeline's
+/// retry delays and timeouts run on <see cref="Clock"/>, which only moves when a test advances it.
 /// </summary>
 internal sealed class StubServer : IAsyncDisposable
 {
@@ -18,13 +19,16 @@ internal sealed class StubServer : IAsyncDisposable
 
   private readonly ServiceProvider _provider;
 
-  private StubServer(ServiceProvider provider, StubHandler handler)
+  private StubServer(ServiceProvider provider, StubHandler handler, TestClock clock)
   {
     _provider = provider;
     Handler = handler;
+    Clock = clock;
   }
 
   public StubHandler Handler { get; }
+
+  public TestClock Clock { get; }
 
   public IHtmlToPdfConverter Converter => _provider.GetRequiredService<IHtmlToPdfConverter>();
 
@@ -51,12 +55,15 @@ internal sealed class StubServer : IAsyncDisposable
     ReportsClientSettings settings = new() { Endpoint = Endpoint };
     configure?.Invoke(settings);
 
+    TestClock clock = new();
     ServiceCollection services = new();
     services.AddLogging();
+    // Polly's dependency injection builds every pipeline on the container's TimeProvider.
+    services.AddSingleton<TimeProvider>(clock);
     servicesBefore?.Invoke(services);
     services.AddReportsClient(settings).ConfigurePrimaryHttpMessageHandler(() => handler);
     servicesAfter?.Invoke(services);
-    return new StubServer(services.BuildServiceProvider(), handler);
+    return new StubServer(services.BuildServiceProvider(), handler, clock);
   }
 
   /// <summary>
@@ -100,7 +107,20 @@ internal sealed class StubServer : IAsyncDisposable
     return response;
   }
 
-  public ValueTask DisposeAsync() => _provider.DisposeAsync();
+  public async ValueTask DisposeAsync()
+  {
+    // Disposing a pipeline, Polly waits for the executions it is still running, on the pipeline's
+    // clock, for up to 30 seconds. A conversion a failed test left running would hold the disposal
+    // until the test timed out, hiding its error; moving the clock on lets Polly give up.
+    var disposal = _provider.DisposeAsync().AsTask();
+    while (!disposal.IsCompleted)
+    {
+      Clock.Advance(TimeSpan.FromSeconds(1));
+      await Task.Yield();
+    }
+
+    await disposal;
+  }
 }
 
 /// <summary>

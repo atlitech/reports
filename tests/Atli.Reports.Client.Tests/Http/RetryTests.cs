@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using Atli.Reports.Client.Tests.Support;
 using Atli.Reports.Engine;
@@ -14,32 +14,13 @@ public class RetryTests
   private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
 
   [Test]
-  public async Task A_busy_server_is_retried_after_its_retry_after_delay()
-  {
-    var attempts = 0;
-    await using var server = StubServer.Start(
-      (_, _) =>
-        Task.FromResult(
-          Interlocked.Increment(ref attempts) == 1
-            ? StubServer.Problem(HttpStatusCode.ServiceUnavailable, "Busy", retryAfter: "1")
-            : StubServer.Pdf("%PDF-1.7 %%EOF"u8.ToArray())
-        )
-    );
-    using MemoryStream destination = new();
-
-    var stopwatch = Stopwatch.StartNew();
-    var result = await server.Converter.ConvertAsync("<p>x</p>", destination, null, TestToken);
-
-    await Assert.That(result.IsT0).IsTrue();
-    await Assert.That(attempts).IsEqualTo(2);
-    // Retry-After: 1 means one second; the first back-off without it would be about one second
-    // too, so the bound only shows the delay was not skipped.
-    await Assert.That(stopwatch.Elapsed).IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(900));
-    await Assert.That(destination.ToArray()).IsEquivalentTo("%PDF-1.7 %%EOF"u8.ToArray());
-  }
-
-  [Test]
-  public async Task The_retry_after_delay_is_honored_beyond_the_default_back_off()
+  [Arguments("Busy", 1)]
+  // Beyond the exponential back-off, which first waits under 1.4 seconds.
+  [Arguments("BrowserUnavailable", 3)]
+  public async Task A_busy_server_is_retried_after_exactly_its_retry_after_delay(
+    string kind,
+    int seconds
+  )
   {
     var attempts = 0;
     await using var server = StubServer.Start(
@@ -48,20 +29,27 @@ public class RetryTests
           Interlocked.Increment(ref attempts) == 1
             ? StubServer.Problem(
               HttpStatusCode.ServiceUnavailable,
-              "BrowserUnavailable",
-              retryAfter: "3"
+              kind,
+              retryAfter: seconds.ToString(CultureInfo.InvariantCulture)
             )
             : StubServer.Pdf("%PDF-1.7 %%EOF"u8.ToArray())
         )
     );
+    using MemoryStream destination = new();
+    var retryAfter = TimeSpan.FromSeconds(seconds);
 
-    var stopwatch = Stopwatch.StartNew();
-    var result = await server.Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken);
+    var conversion = server
+      .Converter.ConvertAsync("<p>x</p>", destination, null, TestToken)
+      .AsTask();
+    await server.Clock.WaitForTimerAsync(retryAfter, TestToken);
+    server.Clock.Advance(retryAfter - TestClock.Tick);
+    await Assert.That(server.Handler.Requests.Count).IsEqualTo(1);
+    server.Clock.Advance(TestClock.Tick);
+    var result = await conversion;
 
     await Assert.That(result.IsT0).IsTrue();
     await Assert.That(attempts).IsEqualTo(2);
-    // The exponential back-off alone would wait about one second (with jitter, under two).
-    await Assert.That(stopwatch.Elapsed).IsGreaterThanOrEqualTo(TimeSpan.FromSeconds(2.9));
+    await Assert.That(destination.ToArray()).IsEquivalentTo("%PDF-1.7 %%EOF"u8.ToArray());
   }
 
   [Test]
@@ -81,7 +69,7 @@ public class RetryTests
   }
 
   [Test]
-  public async Task A_transport_failure_is_retried()
+  public async Task A_transport_failure_is_retried_after_a_back_off()
   {
     var attempts = 0;
     await using var server = StubServer.Start(
@@ -91,10 +79,52 @@ public class RetryTests
           : Task.FromResult(StubServer.Pdf("%PDF-1.7 %%EOF"u8.ToArray()))
     );
 
-    var result = await server.Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken);
+    var conversion = server
+      .Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken)
+      .AsTask();
+    // The exponential back-off from one second, with jitter, first waits under 1.4 seconds.
+    var backOff = await server.Clock.WaitForTimerWithinAsync(TimeSpan.FromSeconds(1.4), TestToken);
+    server.Clock.Advance(backOff - TestClock.Tick);
+    await Assert.That(server.Handler.Requests.Count).IsEqualTo(1);
+    server.Clock.Advance(TestClock.Tick);
+    var result = await conversion;
 
     await Assert.That(result.IsT0).IsTrue();
     await Assert.That(attempts).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task The_total_timeout_cuts_the_retries_short()
+  {
+    await using var server = StubServer.Answering(
+      HttpStatusCode.ServiceUnavailable,
+      "Busy",
+      retryAfter: "10",
+      configure: settings =>
+      {
+        settings.TotalTimeout = TimeSpan.FromSeconds(25);
+        settings.MaxRetryAttempts = 5;
+      }
+    );
+    var retryAfter = TimeSpan.FromSeconds(10);
+
+    var conversion = server
+      .Converter.ConvertAsync("<p>x</p>", Stream.Null, null, TestToken)
+      .AsTask();
+    await server.Clock.WaitForTimerAsync(retryAfter, TestToken);
+    server.Clock.Advance(retryAfter);
+    await server.Clock.WaitForTimerAsync(retryAfter, TestToken);
+    server.Clock.Advance(retryAfter);
+    // The third attempt, at 20 seconds, would be retried at 30; the total timeout comes at 25.
+    await server.Clock.WaitForTimerAsync(retryAfter, TestToken);
+    await Assert.That(server.Handler.Requests.Count).IsEqualTo(3);
+    server.Clock.Advance(TimeSpan.FromSeconds(5) - TestClock.Tick);
+    await Assert.That(conversion.IsCompleted).IsFalse();
+    server.Clock.Advance(TestClock.Tick);
+    var result = await conversion;
+
+    await Assert.That(result.AsT1.Kind).IsEqualTo(ConversionErrorKind.Timeout);
+    await Assert.That(server.Handler.Requests.Count).IsEqualTo(3);
   }
 
   [Test]
