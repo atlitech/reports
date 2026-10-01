@@ -126,22 +126,7 @@ internal static class ChromiumPdfGenerator
       if (pending is not null)
       {
         // Leaving early (a failed write, cancellation): release the read still in flight.
-        _ = pending.ContinueWith(
-          static task =>
-          {
-            if (task.IsCompletedSuccessfully)
-            {
-              task.Result.Dispose();
-            }
-            else
-            {
-              _ = task.Exception;
-            }
-          },
-          CancellationToken.None,
-          TaskContinuationOptions.ExecuteSynchronously,
-          TaskScheduler.Default
-        );
+        DevToolsReply.DisposeWhenReady(pending);
       }
 
       DevToolsMessage close = new("IO.close");

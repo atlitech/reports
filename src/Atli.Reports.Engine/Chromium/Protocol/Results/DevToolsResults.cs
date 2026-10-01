@@ -42,11 +42,12 @@ internal sealed class PrintToPdfResult
 /// <summary>
 /// The result of <c>Runtime.evaluate</c>.
 /// </summary>
+/// <remarks>
+/// Only the exception is read: the engine evaluates scripts for their effect, so the
+/// <c>result</c> value is skipped rather than deserialized.
+/// </remarks>
 internal sealed class EvaluateResult
 {
-  [JsonPropertyName("result")]
-  public RemoteObject? Result { get; set; }
-
   [JsonPropertyName("exceptionDetails")]
   public ExceptionDetails? ExceptionDetails { get; set; }
 }

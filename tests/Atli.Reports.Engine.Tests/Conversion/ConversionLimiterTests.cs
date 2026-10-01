@@ -29,13 +29,14 @@ public class ConversionLimiterTests
     var limiter = Create(maxConcurrent: 1, maxQueue: 10);
     var held = await limiter.AcquireAsync(CancellationToken.None);
     List<int> order = [];
+    Lock orderLock = new();
 
     var waiters = Enumerable
       .Range(0, 5)
       .Select(async index =>
       {
         using var permit = await limiter.AcquireAsync(CancellationToken.None);
-        lock (order)
+        lock (orderLock)
         {
           order.Add(index);
         }

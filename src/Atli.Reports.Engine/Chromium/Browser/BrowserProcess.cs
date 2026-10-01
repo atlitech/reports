@@ -45,6 +45,7 @@ internal sealed class BrowserProcess : IAsyncDisposable
     TaskCreationOptions.RunContinuationsAsynchronously
   );
   private readonly Queue<string> _outputTail = new();
+  private readonly Lock _outputTailLock = new();
   private readonly Lock _gate = new();
   private Task _errorPump = Task.CompletedTask;
   private Task _outputPump = Task.CompletedTask;
@@ -106,11 +107,8 @@ internal sealed class BrowserProcess : IAsyncDisposable
       );
     }
 
-    var profileDirectory = Path.Combine(
-      Path.GetTempPath(),
-      ProfileDirectoryPrefix + Guid.NewGuid().ToString("N")
-    );
-    Directory.CreateDirectory(profileDirectory);
+    // Unique and created atomically; on Unix only the current user can open it (0700).
+    var profileDirectory = Directory.CreateTempSubdirectory(ProfileDirectoryPrefix).FullName;
 
     ProcessStartInfo startInfo = new(executable)
     {
@@ -269,7 +267,7 @@ internal sealed class BrowserProcess : IAsyncDisposable
           continue;
         }
 
-        lock (_outputTail)
+        lock (_outputTailLock)
         {
           if (_outputTail.Count == OutputTailLines)
           {
@@ -291,7 +289,7 @@ internal sealed class BrowserProcess : IAsyncDisposable
 
   private string DescribeOutput()
   {
-    lock (_outputTail)
+    lock (_outputTailLock)
     {
       return _outputTail.Count == 0
         ? string.Empty

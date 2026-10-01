@@ -41,7 +41,7 @@ internal sealed class IsolatedPage : IConversionPage
   private readonly int _pdfReadChunkSize;
   private readonly ILogger _logger;
   private TaskCompletionSource? _signal;
-  private int _disposed;
+  private bool _disposed;
 
   internal IsolatedPage(
     BrowserInstance browser,
@@ -190,7 +190,7 @@ internal sealed class IsolatedPage : IConversionPage
 
   public async ValueTask DisposeAsync()
   {
-    if (Interlocked.Exchange(ref _disposed, 1) == 1)
+    if (Interlocked.Exchange(ref _disposed, true))
     {
       return;
     }

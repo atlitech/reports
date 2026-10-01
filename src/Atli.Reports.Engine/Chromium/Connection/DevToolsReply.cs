@@ -59,6 +59,28 @@ internal sealed class DevToolsReply : IDisposable
     JsonSerializer.Deserialize(Result, typeInfo)
     ?? throw new JsonException($"The DevTools result could not be read as {typeof(T).Name}.");
 
+  /// <summary>
+  /// Disposes the reply of a command nobody waits for any more as soon as it arrives, so its buffer
+  /// returns to the pool. A failed command's exception is observed and dropped.
+  /// </summary>
+  public static void DisposeWhenReady(Task<DevToolsReply> reply) =>
+    _ = reply.ContinueWith(
+      static task =>
+      {
+        if (task.IsCompletedSuccessfully)
+        {
+          task.Result.Dispose();
+        }
+        else
+        {
+          _ = task.Exception;
+        }
+      },
+      CancellationToken.None,
+      TaskContinuationOptions.ExecuteSynchronously,
+      TaskScheduler.Default
+    );
+
   public void Dispose()
   {
     var buffer = Interlocked.Exchange(ref _buffer, null);
