@@ -53,3 +53,6 @@ base.css
 
 # Test results
 TestResults/
+
+# Build output (Directory.Build.props sets the artifacts output path)
+artifacts/
