@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Examples are never packed; keeps `dotnet pack` of the solution quiet. -->
+    <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Atli.Reports.Blazor\Atli.Reports.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Client\Atli.Reports.Client.csproj" />
+    <ProjectReference Include="..\ExampleTemplates\ExampleTemplates.csproj" />
+    <ProjectReference Include="..\Atli.Reports.ServiceDefaults\Atli.Reports.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>

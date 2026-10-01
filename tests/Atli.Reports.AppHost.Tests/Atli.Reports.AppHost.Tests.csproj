@@ -1,0 +1,24 @@
+<!--
+  End-to-end tests: they start examples/Atli.Reports.AppHost and convert documents through its
+  resources. They need Docker, Chrome or Chromium, and Bun, and the first run builds the reports server
+  image, so Atli.Reports.slnx leaves this project out of its build (Build Project="false") and the
+  solution's `dotnet test` does not run them. The README's "End-to-end tests" section shows how to run
+  them; CI runs them in .github/workflows/aspire-e2e.yml.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <!-- Test names read as sentences (Starts_no_browser_of_its_own); CA1707 only guards public API naming. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Testing" />
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\examples\Atli.Reports.AppHost\Atli.Reports.AppHost.csproj" />
+  </ItemGroup>
+</Project>

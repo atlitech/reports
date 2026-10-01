@@ -33,6 +33,11 @@ jobs:
       - name: Build
         run: dotnet build
 
+      # The solution leaves the end-to-end tests out of its build, so `dotnet test` below does not run
+      # them (they need Docker; aspire-e2e.yml runs them). Compiling them here keeps them building.
+      - name: Build the end-to-end tests
+        run: dotnet build tests/Atli.Reports.AppHost.Tests/Atli.Reports.AppHost.Tests.csproj
+
       - name: Run tests
         run: dotnet test
 

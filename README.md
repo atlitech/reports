@@ -463,6 +463,9 @@ and obsolete `IReportService` overloads. The
 - [Benchmarks](benchmarks/README.md)
 - [`examples/SimpleReportServer`](examples/SimpleReportServer): reports with and without data,
   HTML output, and a report that waits for its JavaScript
+- [`examples/RemoteReportServer`](examples/RemoteReportServer): an app with no browser of its own. It
+  renders Blazor reports and converts any HTML on the reports server through `Atli.Reports.Client`;
+  the reference consumer for [Aspire](docs/aspire.md)
 - [`examples/TailwindReportServer`](examples/TailwindReportServer): a report styled with Tailwind
   CSS 4
 - [`examples/ExampleTemplates`](examples/ExampleTemplates): shared report components, including a
@@ -484,6 +487,7 @@ aspire stop
 | Resource | What it is |
 | --- | --- |
 | `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker). The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
+| `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); the dashboard links its Swagger UI |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |
 | `tailwind-css` | Generates the Tailwind example's stylesheet (`bun install`, then the Tailwind CLI) and exits |
@@ -494,6 +498,23 @@ resource's URLs. The examples run the engine in-process with the Chrome or Chrom
 your machine. To use another browser, such as `chrome-headless-shell`, pass its path:
 `aspire start -- --ReportsEngine:Browser:ExecutablePath=/path/to/chrome-headless-shell`. Both
 settings can also live in the AppHost's `appsettings.json` or user secrets.
+
+### End-to-end tests
+
+[`tests/Atli.Reports.AppHost.Tests`](tests/Atli.Reports.AppHost.Tests) starts the same AppHost with
+`Aspire.Hosting.Testing`, waits for the resources to turn healthy, and checks that the server, the
+remote example, and the in-process examples each return a PDF, and that the remote example starts no
+browser. It needs what `aspire start` needs except the Aspire CLI: without one, building the AppHost
+fetches the CLI release that matches its SDK with `dnx`, for the orchestrator. The solution leaves the
+project out of its build, so a plain `dotnet test` skips it. From the repository root:
+
+```bash
+dotnet test --project tests/Atli.Reports.AppHost.Tests
+```
+
+The first run builds the server image and takes a few minutes. Each resource's console output goes
+to `artifacts/bin/Atli.Reports.AppHost.Tests/debug/TestResults/resource-logs`. CI runs the tests in
+[`aspire-e2e.yml`](.github/workflows/aspire-e2e.yml).
 
 ## History
 
@@ -512,6 +533,7 @@ Issues and pull requests are welcome at
 dotnet tool restore
 dotnet build
 dotnet test                  # integration tests need Chrome or Chromium installed
+dotnet test --project tests/Atli.Reports.AppHost.Tests   # end to end; also needs Docker and Bun
 dotnet csharpier check .     # the formatting gate CI runs; `dotnet csharpier format .` fixes it
 ```
 

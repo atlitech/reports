@@ -7,6 +7,7 @@
     <Project Path="examples/Atli.Reports.AppHost/Atli.Reports.AppHost.csproj" />
     <Project Path="examples/Atli.Reports.ServiceDefaults/Atli.Reports.ServiceDefaults.csproj" />
     <Project Path="examples/ExampleTemplates/ExampleTemplates.csproj" />
+    <Project Path="examples/RemoteReportServer/RemoteReportServer.csproj" />
     <Project Path="examples/SimpleReportServer/SimpleReportServer.csproj" />
     <Project Path="examples\TailwindReportServer\TailwindReportServer.csproj" Type="Classic C#" />
   </Folder>
@@ -19,6 +20,9 @@
     <Project Path="src/Atli.Reports.Client/Atli.Reports.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Atli.Reports.AppHost.Tests/Atli.Reports.AppHost.Tests.csproj">
+      <Build Project="false" />
+    </Project>
     <Project Path="tests/Atli.Reports.Aspire.Hosting.Tests/Atli.Reports.Aspire.Hosting.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Client.Tests/Atli.Reports.Client.Tests.csproj" />
