@@ -44,4 +44,10 @@ public class BlazorReport
   /// The page settings to use for the report.
   /// </summary>
   public BlazorReportsPageSettings? PageSettings { get; set; }
+
+  /// <summary>
+  /// The JavaScript settings to use for the report. <see langword="null"/> uses
+  /// <see cref="BlazorReportRegistry.DefaultJavaScriptSettings"/>.
+  /// </summary>
+  public BlazorReportsJavaScriptSettings? JavaScriptSettings { get; set; }
 }

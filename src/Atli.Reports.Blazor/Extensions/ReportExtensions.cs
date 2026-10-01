@@ -255,6 +255,7 @@ public static partial class ReportExtensions
       .ServiceProvider.GetRequiredService<IOptionsSnapshot<BlazorReportsOptions>>()
       .Value;
     options.PageSettings = globalOptions.PageSettings;
+    options.JavaScriptSettings = globalOptions.JavaScriptSettings.Clone();
     setupAction?.Invoke(options);
     return options;
   }

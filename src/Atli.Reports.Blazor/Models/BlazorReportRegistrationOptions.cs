@@ -29,4 +29,10 @@ public class BlazorReportRegistrationOptions
   /// Settings for generating a PDF
   /// </summary>
   public BlazorReportsPageSettings PageSettings { get; set; } = new();
+
+  /// <summary>
+  /// Settings for reports whose JavaScript must finish before the PDF is printed. Reports mapped with
+  /// <c>MapBlazorReport</c> start from <see cref="BlazorReportsOptions.JavaScriptSettings"/>.
+  /// </summary>
+  public BlazorReportsJavaScriptSettings JavaScriptSettings { get; set; } = new();
 }

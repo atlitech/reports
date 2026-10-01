@@ -67,9 +67,11 @@ public sealed class ReportService(
     ArgumentNullException.ThrowIfNull(destination);
     ArgumentNullException.ThrowIfNull(blazorReport);
 
+    var javaScriptSettings =
+      blazorReport.JavaScriptSettings ?? reportRegistry.DefaultJavaScriptSettings;
     var html = await RenderAsync(
       typeof(BlazorReportsTemplate),
-      GetTemplateParameters(blazorReport, data)
+      GetTemplateParameters(blazorReport, javaScriptSettings, data)
     );
 
     if (blazorReport.OutputFormat == ReportOutputFormat.Html)
@@ -94,7 +96,7 @@ public sealed class ReportService(
     return await converter.ConvertAsync(
       html,
       destination,
-      PdfOptionsMapper.Map(pageSettings),
+      PdfOptionsMapper.Map(pageSettings, javaScriptSettings),
       cancellationToken
     );
   }
@@ -184,7 +186,11 @@ public sealed class ReportService(
     return foundReport ? report : null;
   }
 
-  private Dictionary<string, object?> GetTemplateParameters(BlazorReport blazorReport, object? data)
+  private Dictionary<string, object?> GetTemplateParameters(
+    BlazorReport blazorReport,
+    BlazorReportsJavaScriptSettings javaScriptSettings,
+    object? data
+  )
   {
     var baseStyles = !string.IsNullOrEmpty(blazorReport.BaseStyles)
       ? blazorReport.BaseStyles
@@ -213,6 +219,11 @@ public sealed class ReportService(
     if (!string.IsNullOrEmpty(baseStyles))
     {
       templateParameters.Add("BaseStyles", baseStyles);
+    }
+
+    if (javaScriptSettings.WaitForCompletedSignal)
+    {
+      templateParameters.Add("CompletedSignalName", PdfOptionsMapper.CompletedSignalName);
     }
 
     templateParameters.Add("ChildComponentType", blazorReport.Component);

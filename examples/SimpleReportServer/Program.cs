@@ -30,4 +30,11 @@ reportsGroup.MapBlazorReport<ReportWithRepeatingHeaderPerPage>(opts =>
   opts.OutputFormat = ReportOutputFormat.Pdf;
 });
 
+// Waits for the report's JavaScript to call blazorReport.completed() before printing the PDF.
+reportsGroup.MapBlazorReport<AsyncJavaScriptReport, AsyncJavaScriptReportData>(opts =>
+{
+  opts.JavaScriptSettings.WaitForCompletedSignal = true;
+  opts.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromSeconds(10);
+});
+
 app.Run();

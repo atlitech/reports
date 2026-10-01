@@ -5,12 +5,22 @@ using Atli.Reports.Engine;
 namespace Atli.Reports.Blazor.Services;
 
 /// <summary>
-/// Maps report page settings onto the engine's <see cref="PdfOptions"/>.
+/// Maps report page and JavaScript settings onto the engine's <see cref="PdfOptions"/>.
 /// </summary>
 internal static class PdfOptionsMapper
 {
-  public static PdfOptions Map(BlazorReportsPageSettings pageSettings)
+  /// <summary>
+  /// The name of the function the engine exposes to reports that wait for their JavaScript. The template's
+  /// <c>blazorReport.completed()</c> calls it, so reports never use the name directly.
+  /// </summary>
+  public const string CompletedSignalName = "atliReportCompleted";
+
+  public static PdfOptions Map(
+    BlazorReportsPageSettings pageSettings,
+    BlazorReportsJavaScriptSettings? javaScriptSettings = null
+  )
   {
+    var waitForSignal = javaScriptSettings?.WaitForCompletedSignal == true;
     return new PdfOptions
     {
       Orientation =
@@ -30,6 +40,10 @@ internal static class PdfOptionsMapper
         Height = pageSettings.PaperHeight,
       },
       PrintBackground = !pageSettings.IgnoreBackground,
+      WaitForSignal = waitForSignal ? CompletedSignalName : null,
+      WaitTimeout = waitForSignal
+        ? javaScriptSettings!.CompletedSignalTimeout
+        : BlazorReportsJavaScriptSettings.DefaultCompletedSignalTimeout,
     };
   }
 }

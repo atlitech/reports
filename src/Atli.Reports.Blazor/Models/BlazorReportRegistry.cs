@@ -36,12 +36,19 @@ public class BlazorReportRegistry
     }
 
     DefaultPageSettings = options.Value.PageSettings;
+    options.Value.JavaScriptSettings.Validate(nameof(options));
+    DefaultJavaScriptSettings = options.Value.JavaScriptSettings;
   }
 
   /// <summary>
   /// The default page settings for the BlazorReports
   /// </summary>
   public BlazorReportsPageSettings DefaultPageSettings { get; set; }
+
+  /// <summary>
+  /// The JavaScript settings for reports registered without their own.
+  /// </summary>
+  public BlazorReportsJavaScriptSettings DefaultJavaScriptSettings { get; set; }
 
   /// <summary>
   /// The base styles for the BlazorReportRegistry.
@@ -67,6 +74,7 @@ public class BlazorReportRegistry
   /// <exception cref="InvalidOperationException"> Thrown when a report with the same name already exists. </exception>
   public BlazorReport AddReport<T>(BlazorReportRegistrationOptions? options = null)
   {
+    options?.JavaScriptSettings.Validate(nameof(options));
     var reportNameToUse = options?.ReportName ?? typeof(T).Name;
     var normalizedReportName = reportNameToUse.ToLowerInvariant().Trim();
 
@@ -85,6 +93,7 @@ public class BlazorReportRegistry
       Component = typeof(T),
       Data = null,
       PageSettings = options?.PageSettings,
+      JavaScriptSettings = options?.JavaScriptSettings,
     };
     if (!string.IsNullOrEmpty(options?.BaseStylesPath))
     {
@@ -119,6 +128,7 @@ public class BlazorReportRegistry
   /// <exception cref="InvalidOperationException"> Thrown when a report with the same name already exists. </exception>
   public BlazorReport AddReport<T, TD>(BlazorReportRegistrationOptions? options = null)
   {
+    options?.JavaScriptSettings.Validate(nameof(options));
     var reportNameToUse = options?.ReportName ?? typeof(T).Name;
     var normalizedReportName = reportNameToUse.ToLowerInvariant().Trim();
 
@@ -137,6 +147,7 @@ public class BlazorReportRegistry
       Component = typeof(T),
       Data = typeof(TD),
       PageSettings = options?.PageSettings,
+      JavaScriptSettings = options?.JavaScriptSettings,
     };
     if (!string.IsNullOrEmpty(options?.BaseStylesPath))
     {

@@ -1,9 +1,26 @@
-###
 @ReportServer_HostAddress = http://localhost:5054
 
-POST {{ReportServer_HostAddress}}/reports/myreport
+### A PDF report with data
+POST {{ReportServer_HostAddress}}/reports/helloreport
 Content-Type: application/json
 
 {
   "name": "My Report"
+}
+
+### The same report as HTML
+POST {{ReportServer_HostAddress}}/reports/helloreporthtml
+Content-Type: application/json
+
+{
+  "name": "My Report"
+}
+
+### A report whose JavaScript must finish before the PDF is printed
+POST {{ReportServer_HostAddress}}/reports/asyncjavascriptreport
+Content-Type: application/json
+
+{
+  "title": "Sales by region",
+  "delayMilliseconds": 500
 }
