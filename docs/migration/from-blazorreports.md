@@ -199,6 +199,10 @@ negative timeout other than `Timeout.InfiniteTimeSpan` throws when the report is
 - **Styles and assets are read once per registry.** Each `BaseStylesPath` file and `AssetsPath`
   folder is read and encoded once. Every report that uses the same path shares the result. As
   before, edits made after a report is registered are not picked up until the app restarts.
+- **Assets get ASP.NET Core's content types.** BlazorReports knew eight file extensions and encoded
+  every other asset as `application/octet-stream`. Assets now take their type from ASP.NET Core's
+  MIME table, so `.svg` images (`image/svg+xml`), fonts, and other common types are encoded with
+  their real content type. Unknown extensions still fall back to `application/octet-stream`.
 - **HTML output never starts the browser**, so `ReportOutputFormat.Html` reports work on machines
   without one.
 - **`AddBlazorReports` no longer registers the `regex` route constraint.** BlazorReports registered
