@@ -16,7 +16,7 @@
     <PackageVersion>$(Version)</PackageVersion>
     <Authors>Elvis Nieves Miranda</Authors>
     <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
-    <RepositoryUrl>https://github.com/BlazorReports/blazor-reports</RepositoryUrl>
+    <RepositoryUrl>https://github.com/atlitech/blazor-reports</RepositoryUrl>
     <!--    <PackageProjectUrl>https://BlazorReports.dev</PackageProjectUrl>-->
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>blazor_reports_logo-128.png</PackageIcon>
