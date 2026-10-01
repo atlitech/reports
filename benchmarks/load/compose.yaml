@@ -1,0 +1,59 @@
+# The two converters under test, with identical resource limits. The load driver
+# (benchmarks/Atli.Reports.Benchmarks.Load, started by benchmarks/run.sh) starts ONE service at a
+# time, recreated fresh for every measurement, and removes it afterwards:
+#
+#   docker compose -f benchmarks/load/compose.yaml up -d atli        # or: gotenberg
+#
+# Both services sit in their own profile, so a bare `docker compose up` starts nothing.
+#
+# Fairness rules (see benchmarks/README.md):
+#   - Same CPU quota, memory limit, and no swap for both, set once in x-limits.
+#   - Each side runs with its shipped defaults. Tuning knobs are listed below, commented out; a
+#     result is only comparable to another if both used the same knobs.
+
+name: atli-reports-bench
+
+x-limits: &limits
+  cpus: ${BENCH_CPUS:-2}
+  mem_limit: ${BENCH_MEMORY:-2g}
+  # Equal to mem_limit: no swap, so memory pressure shows up as OOM kills, not as slow paging.
+  memswap_limit: ${BENCH_MEMORY:-2g}
+  # A crash must stay visible in the results instead of being hidden by a restart.
+  restart: "no"
+
+services:
+  atli:
+    <<: *limits
+    profiles: [atli]
+    # benchmarks/run.sh builds this image from the repository's own Dockerfile.
+    image: ${ATLI_IMAGE:-atli-reports-server:bench}
+    build:
+      context: ../..
+      dockerfile: src/Atli.Reports.Server/Dockerfile
+    ports:
+      - "${ATLI_PORT:-18080}:8080"
+    # Optional, git-ignored: put ReportsEngine__* tuning here instead of editing this file. The
+    # results record every ReportsEngine__* variable the container ran with.
+    env_file:
+      - path: ./atli.env
+        required: false
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Engine knobs bind from ReportsEngine__* (see src/Atli.Reports.Server/appsettings.json, which
+      # already sets Headless, NoSandbox, DisableDevShmUsage, and a 30 s CommandTimeout). None are
+      # changed for the benchmark. Examples:
+      # ReportsEngine__Browser__CommandTimeout: "00:00:30"
+      # ReportsEngine__Browser__ExtraArguments__0: "--disable-pdf-tagging"
+
+  gotenberg:
+    <<: *limits
+    profiles: [gotenberg]
+    # Gotenberg 8, Chromium-only variant (no LibreOffice), pinned by tag and multi-arch index digest
+    # (linux/amd64 and linux/arm64).
+    image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c}
+    ports:
+      - "${GOTENBERG_PORT:-13000}:3000"
+    # Defaults in 8.37.0: --chromium-max-concurrency=6, --chromium-max-queue-size=0 (unbounded),
+    # --chromium-restart-after=100, --chromium-auto-start=false, --api-timeout=30s. None are changed;
+    # pass extra flags through GOTENBERG_ARGS, for example "--chromium-restart-after=0".
+    command: gotenberg ${GOTENBERG_ARGS:-}

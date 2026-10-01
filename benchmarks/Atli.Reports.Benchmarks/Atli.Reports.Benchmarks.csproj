@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    In-process micro-benchmarks of the Atli.Reports.Engine public API (latency and managed
+    allocations per fixture), using the Chrome or Edge installed on the machine. Run it through
+    benchmarks/run.sh (micro suite) or with dotnet run in the Release configuration.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\BenchmarkFixtures.cs" Link="Shared\BenchmarkFixtures.cs" />
+  </ItemGroup>
+</Project>

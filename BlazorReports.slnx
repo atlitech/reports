@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Atli.Reports.Benchmarks.Load/Atli.Reports.Benchmarks.Load.csproj" />
+    <Project Path="benchmarks/Atli.Reports.Benchmarks/Atli.Reports.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/examples/">
     <Project Path="examples/ExampleTemplates/ExampleTemplates.csproj" />
     <Project Path="examples/SimpleReportServer/SimpleReportServer.csproj" />

@@ -1,0 +1,1013 @@
+{
+  "name": "2026-10-01-287f9bc",
+  "settings": {
+    "mode": "quick",
+    "targets": [
+      "atli",
+      "gotenberg"
+    ],
+    "fixtures": [
+      "invoice",
+      "long-table",
+      "chart",
+      "assets"
+    ],
+    "concurrency": [
+      1,
+      16
+    ],
+    "warmupSeconds": 3,
+    "durationSeconds": 10,
+    "requestTimeoutSeconds": 30,
+    "keepGoing": false,
+    "cpus": "2",
+    "memory": "2g",
+    "images": {
+      "atli": "atli-reports-server:bench",
+      "gotenberg": "gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c"
+    },
+    "note": "PROVISIONAL baseline of today\u0027s engine (engine commit 14c01a7: a browser is launched for every conversion). Recorded on a shared Apple-silicon Mac while two other agents were building and running Chrome-heavy test suites, so the host was under concurrent load (load averages below and per cell); absolute numbers are noisy, CPU s/doc is the most robust column. Rerun on a quiet machine before publishing a comparison.",
+    "targetConfiguration": {
+      "atli": {
+        "environment": [
+          "ASPNETCORE_ENVIRONMENT=Production",
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "ReportsEngine__Browser__ExecutablePath=/usr/bin/chromium",
+          "ASPNETCORE_HTTP_PORTS=8080"
+        ],
+        "command": [
+          "./Atli.Reports.Server"
+        ],
+        "browserVersion": "Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)"
+      },
+      "gotenberg": {
+        "environment": [
+          "PATH=/opt/java/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "TZ=UTC",
+          "LANG=C.UTF-8",
+          "LC_ALL=C.UTF-8",
+          "PDFTK_BIN_PATH=/usr/bin/pdftk",
+          "QPDF_BIN_PATH=/usr/bin/qpdf",
+          "EXIFTOOL_BIN_PATH=/usr/bin/exiftool",
+          "PDFCPU_BIN_PATH=/usr/bin/pdfcpu",
+          "GOTENBERG_VERSIONS_DIR_PATH=/opt/gotenberg/versions",
+          "OTEL_TRACES_EXPORTER=none",
+          "OTEL_METRICS_EXPORTER=none",
+          "OTEL_LOGS_EXPORTER=none",
+          "CHROMIUM_BIN_PATH=/usr/bin/chromium",
+          "CHROMIUM_HYPHEN_DATA_DIR_PATH=/opt/gotenberg/chromium-hyphen-data",
+          "PDFENGINES_CONVERT_ENGINES="
+        ],
+        "command": [
+          "/usr/bin/tini",
+          "--",
+          "gotenberg"
+        ],
+        "browserVersion": "Chromium 152.0.7977.82 built on Debian GNU/Linux 13 (trixie)"
+      }
+    }
+  },
+  "environment": {
+    "startedAt": "2026-10-01T13:31:53.352688+00:00",
+    "finishedAt": "2026-10-01T13:37:13.166169+00:00",
+    "gitCommit": "287f9bc",
+    "gitBranch": "feat/benchmarks",
+    "gitDirty": false,
+    "engineCommit": "14c01a7 feat(engine): import the HTML-to-PDF engine as Atli.Reports.Engine and Atli.Reports.Server (#123)",
+    "hostOs": "macOS 26.6.2 (Arm64)",
+    "hostCpu": "Apple M1 Max",
+    "hostLogicalCores": 10,
+    "hostMemory": "64 GiB RAM",
+    "hostLoadStart": "4.84 7.33 12.57",
+    "hostLoadEnd": "7.38 6.98 10.74",
+    "dotnetRuntime": ".NET 10.0.12",
+    "dockerServer": "29.4.0 on OrbStack (aarch64, kernel 7.0.14-orbstack-00380-ga7e0a2dc9535, cgroup v2), 10 CPUs and 15.7 GiB available to containers",
+    "dockerCompose": "5.1.2",
+    "otherContainers": [
+      "dapr_placement",
+      "dapr_redis",
+      "dapr_scheduler",
+      "dapr_zipkin",
+      "mcp-bds-e2e-bridge-1",
+      "mcp-bds-e2e-minecraft-bedrock-1"
+    ],
+    "imageIds": {
+      "atli": "sha256:c948bc1a7a1515e9550874115e6b0c4cdb4ecea84ab1f0bf17bc8cf7e4e1145e",
+      "gotenberg": "sha256:f34720ba86bfd8a6e1942d3f900fdf82b22dc8c5cf31476b0997cc23be57738b"
+    }
+  },
+  "fixtures": [
+    {
+      "name": "invoice",
+      "description": "One-page invoice: embedded CSS, inline SVG logo, line-item table.",
+      "htmlBytes": 8408,
+      "waitsForSignal": false
+    },
+    {
+      "name": "long-table",
+      "description": "Ledger report: a 2,400-row table that paginates to ~50 A4 pages.",
+      "htmlBytes": 445949,
+      "waitsForSignal": false
+    },
+    {
+      "name": "chart",
+      "description": "Dashboard drawn by JavaScript after an async data load; signals when ready.",
+      "htmlBytes": 11912,
+      "waitsForSignal": true
+    },
+    {
+      "name": "assets",
+      "description": "Inspection report with 11 PNG images (~1.2 MB) inlined as base64 data URIs.",
+      "htmlBytes": 1564036,
+      "waitsForSignal": false
+    }
+  ],
+  "cells": [
+    {
+      "target": "atli",
+      "fixture": "invoice",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:31:53.745096+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.233,
+      "warmupConcurrency": 1,
+      "warmupRequests": 8,
+      "warmupFailures": 0,
+      "requests": 28,
+      "succeeded": 28,
+      "docsPerSecond": 2.736,
+      "drainSeconds": 0.23,
+      "latency": {
+        "count": 28,
+        "min": 316.4,
+        "mean": 365.4,
+        "p50": 376.9,
+        "p90": 394.1,
+        "p95": 397,
+        "p99": 411,
+        "max": 411
+      },
+      "latencyAll": {
+        "count": 28,
+        "min": 316.4,
+        "mean": 365.4,
+        "p50": 376.9,
+        "p90": 394.1,
+        "p95": 397,
+        "p99": 411,
+        "max": 411
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 28
+      },
+      "medianPdfBytes": 77457,
+      "cpuCoresAverage": 1.99,
+      "cpuSecondsPerDoc": 0.733,
+      "cpuPercentPeakSampled": 200.11,
+      "memoryPeakSampledBytes": 535402905,
+      "memoryPeakCgroupBytes": 615788544,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "0.95 2.99 3.62 10/623 41",
+      "dockerLoadEnd": "0.98 2.89 3.58 2/630 5719"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "invoice",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:32:08.540538+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.059,
+      "warmupConcurrency": 1,
+      "warmupRequests": 31,
+      "warmupFailures": 0,
+      "requests": 108,
+      "succeeded": 108,
+      "docsPerSecond": 10.736,
+      "drainSeconds": 0.06,
+      "latency": {
+        "count": 108,
+        "min": 71.6,
+        "mean": 93.1,
+        "p50": 89.1,
+        "p90": 100.4,
+        "p95": 106.3,
+        "p99": 119.9,
+        "max": 329.3
+      },
+      "latencyAll": {
+        "count": 108,
+        "min": 71.6,
+        "mean": 93.1,
+        "p50": 89.1,
+        "p90": 100.4,
+        "p95": 106.3,
+        "p99": 119.9,
+        "max": 329.3
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 108
+      },
+      "medianPdfBytes": 70223,
+      "cpuCoresAverage": 1.98,
+      "cpuSecondsPerDoc": 0.186,
+      "cpuPercentPeakSampled": 198.68,
+      "memoryPeakSampledBytes": 678428672,
+      "memoryPeakCgroupBytes": 700968960,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "0.98 2.89 3.58 4/617 41",
+      "dockerLoadEnd": "2.28 3.08 3.63 5/717 3071"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "invoice",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:32:22.937376+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.933,
+      "warmupConcurrency": 4,
+      "warmupRequests": 37,
+      "warmupFailures": 0,
+      "requests": 139,
+      "succeeded": 139,
+      "docsPerSecond": 12.714,
+      "drainSeconds": 0.93,
+      "latency": {
+        "count": 139,
+        "min": 410.2,
+        "mean": 1211,
+        "p50": 1279.5,
+        "p90": 1424.6,
+        "p95": 1703.9,
+        "p99": 1790.1,
+        "max": 1803.8
+      },
+      "latencyAll": {
+        "count": 139,
+        "min": 410.2,
+        "mean": 1211,
+        "p50": 1279.5,
+        "p90": 1424.6,
+        "p95": 1703.9,
+        "p99": 1790.1,
+        "max": 1803.8
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 139
+      },
+      "medianPdfBytes": 70223,
+      "cpuCoresAverage": 1.99,
+      "cpuSecondsPerDoc": 0.158,
+      "cpuPercentPeakSampled": 202.99,
+      "memoryPeakSampledBytes": 376543641,
+      "memoryPeakCgroupBytes": 452882432,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "2.28 3.08 3.63 9/617 24",
+      "dockerLoadEnd": "1.77 2.93 3.57 7/716 3371"
+    },
+    {
+      "target": "atli",
+      "fixture": "invoice",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:32:37.971176+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 16.24,
+      "warmupConcurrency": 4,
+      "warmupRequests": 8,
+      "warmupFailures": 0,
+      "requests": 27,
+      "succeeded": 27,
+      "docsPerSecond": 1.663,
+      "drainSeconds": 6.24,
+      "latency": {
+        "count": 27,
+        "min": 5413.2,
+        "mean": 8693.3,
+        "p50": 7893.9,
+        "p90": 13531.3,
+        "p95": 13531.3,
+        "p99": 13731.3,
+        "max": 13731.3
+      },
+      "latencyAll": {
+        "count": 27,
+        "min": 5413.2,
+        "mean": 8693.3,
+        "p50": 7893.9,
+        "p90": 13531.3,
+        "p95": 13531.3,
+        "p99": 13731.3,
+        "max": 13731.3
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 27
+      },
+      "medianPdfBytes": 77457,
+      "cpuCoresAverage": 2,
+      "cpuSecondsPerDoc": 1.21,
+      "cpuPercentPeakSampled": 202.5,
+      "memoryPeakSampledBytes": 2057289334,
+      "memoryPeakCgroupBytes": 2147483648,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.77 2.93 3.57 5/618 23",
+      "dockerLoadEnd": "1.58 2.80 3.51 10/636 5650"
+    },
+    {
+      "target": "atli",
+      "fixture": "long-table",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:32:59.190293+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 11.819,
+      "warmupConcurrency": 1,
+      "warmupRequests": 2,
+      "warmupFailures": 0,
+      "requests": 4,
+      "succeeded": 4,
+      "docsPerSecond": 0.338,
+      "drainSeconds": 1.82,
+      "latency": {
+        "count": 4,
+        "min": 2803.5,
+        "mean": 2954.4,
+        "p50": 2827,
+        "p90": 3102.2,
+        "p95": 3102.2,
+        "p99": 3102.2,
+        "max": 3102.2
+      },
+      "latencyAll": {
+        "count": 4,
+        "min": 2803.5,
+        "mean": 2954.4,
+        "p50": 2827,
+        "p90": 3102.2,
+        "p95": 3102.2,
+        "p99": 3102.2,
+        "max": 3102.2
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "49": 4
+      },
+      "medianPdfBytes": 7192509,
+      "cpuCoresAverage": 1.36,
+      "cpuSecondsPerDoc": 4.047,
+      "cpuPercentPeakSampled": 163.6,
+      "memoryPeakSampledBytes": 819671859,
+      "memoryPeakCgroupBytes": 911273984,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.58 2.80 3.51 7/629 23",
+      "dockerLoadEnd": "1.42 2.68 3.46 7/642 1089"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "long-table",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:33:17.646771+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 11.006,
+      "warmupConcurrency": 1,
+      "warmupRequests": 2,
+      "warmupFailures": 0,
+      "requests": 5,
+      "succeeded": 5,
+      "docsPerSecond": 0.454,
+      "drainSeconds": 1.01,
+      "latency": {
+        "count": 5,
+        "min": 2142,
+        "mean": 2200.8,
+        "p50": 2192.1,
+        "p90": 2254,
+        "p95": 2254,
+        "p99": 2254,
+        "max": 2254
+      },
+      "latencyAll": {
+        "count": 5,
+        "min": 2142,
+        "mean": 2200.8,
+        "p50": 2192.1,
+        "p90": 2254,
+        "p95": 2254,
+        "p99": 2254,
+        "max": 2254
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "49": 5
+      },
+      "medianPdfBytes": 7188992,
+      "cpuCoresAverage": 1.2,
+      "cpuSecondsPerDoc": 2.668,
+      "cpuPercentPeakSampled": 130.68,
+      "memoryPeakSampledBytes": 990484889,
+      "memoryPeakCgroupBytes": 1103478784,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.42 2.68 3.46 6/625 24",
+      "dockerLoadEnd": "1.32 2.60 3.42 9/718 335"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "long-table",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:33:34.375711+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 22.974,
+      "warmupConcurrency": 4,
+      "warmupRequests": 4,
+      "warmupFailures": 2,
+      "requests": 25,
+      "succeeded": 2,
+      "docsPerSecond": 0.087,
+      "drainSeconds": 12.97,
+      "latency": {
+        "count": 2,
+        "min": 13081,
+        "mean": 13257.6,
+        "p50": 13081,
+        "p90": 13434.2,
+        "p95": 13434.2,
+        "p99": 13434.2,
+        "max": 13434.2
+      },
+      "latencyAll": {
+        "count": 25,
+        "min": 2950.7,
+        "mean": 10948.4,
+        "p50": 12857,
+        "p90": 14694,
+        "p95": 15021.4,
+        "p99": 16231.2,
+        "max": 16231.2
+      },
+      "errors": {
+        "http_400": 17,
+        "http_503": 6
+      },
+      "errorDetails": {
+        "http_400": "Chromium failed to print the PDF; this usually happens when the page is too large",
+        "http_503": "Chromium crashed while processing the request. Retry, or reduce the workload if the problem persists."
+      },
+      "pageCounts": {
+        "49": 2
+      },
+      "medianPdfBytes": 7188992,
+      "cpuCoresAverage": 1.98,
+      "cpuSecondsPerDoc": 22.865,
+      "cpuPercentPeakSampled": 199.94,
+      "memoryPeakSampledBytes": 2144262422,
+      "memoryPeakCgroupBytes": 2147483648,
+      "oomKills": 25,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": true,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.32 2.60 3.42 1/619 23",
+      "dockerLoadEnd": "4.07 3.14 3.57 10/724 668"
+    },
+    {
+      "target": "atli",
+      "fixture": "long-table",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:34:03.242651+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 30.012,
+      "warmupConcurrency": 4,
+      "warmupRequests": 4,
+      "warmupFailures": 2,
+      "requests": 16,
+      "succeeded": 0,
+      "docsPerSecond": 0,
+      "drainSeconds": 20.01,
+      "latencyAll": {
+        "count": 16,
+        "min": 28803.7,
+        "mean": 29743.6,
+        "p50": 30004,
+        "p90": 30011.7,
+        "p95": 30012.2,
+        "p99": 30012.2,
+        "max": 30012.2
+      },
+      "errors": {
+        "client_timeout": 12,
+        "http_500": 4
+      },
+      "errorDetails": {
+        "client_timeout": "no response within 30 s",
+        "http_500": "{\u0022type\u0022:\u0022https://tools.ietf.org/html/rfc9110#section-15.6.1\u0022,\u0022title\u0022:\u0022An error occurred while processing your request.\u0022,\u0022status\u0022:500,\u0022detail\u0022:\u0022PDF generation failed: Page.printToPDF failed: Printing failed (-32000)\u0022}"
+      },
+      "pageCounts": {},
+      "cpuCoresAverage": 2.01,
+      "cpuPercentPeakSampled": 210.93,
+      "memoryPeakSampledBytes": 2144262422,
+      "memoryPeakCgroupBytes": 2147483648,
+      "oomKills": 13,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": true,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "4.07 3.14 3.57 10/628 23",
+      "dockerLoadEnd": "2.61 2.86 3.46 4/641 3127"
+    },
+    {
+      "target": "atli",
+      "fixture": "chart",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:34:42.930049+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.132,
+      "warmupConcurrency": 1,
+      "warmupRequests": 7,
+      "warmupFailures": 0,
+      "requests": 23,
+      "succeeded": 23,
+      "docsPerSecond": 2.27,
+      "drainSeconds": 0.13,
+      "latency": {
+        "count": 23,
+        "min": 338.1,
+        "mean": 440.5,
+        "p50": 432.6,
+        "p90": 487.7,
+        "p95": 496.2,
+        "p99": 570.4,
+        "max": 570.4
+      },
+      "latencyAll": {
+        "count": 23,
+        "min": 338.1,
+        "mean": 440.5,
+        "p50": 432.6,
+        "p90": 487.7,
+        "p95": 496.2,
+        "p99": 570.4,
+        "max": 570.4
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 23
+      },
+      "medianPdfBytes": 67843,
+      "cpuCoresAverage": 1.99,
+      "cpuSecondsPerDoc": 0.884,
+      "cpuPercentPeakSampled": 199.67,
+      "memoryPeakSampledBytes": 240019046,
+      "memoryPeakCgroupBytes": 306688000,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "2.61 2.86 3.46 7/626 23",
+      "dockerLoadEnd": "4.97 3.36 3.61 5/638 4750"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "chart",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:34:57.12357+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.124,
+      "warmupConcurrency": 1,
+      "warmupRequests": 14,
+      "warmupFailures": 0,
+      "requests": 52,
+      "succeeded": 52,
+      "docsPerSecond": 5.137,
+      "drainSeconds": 0.12,
+      "latency": {
+        "count": 52,
+        "min": 182,
+        "mean": 194.7,
+        "p50": 192.7,
+        "p90": 197.8,
+        "p95": 212.1,
+        "p99": 244,
+        "max": 244
+      },
+      "latencyAll": {
+        "count": 52,
+        "min": 182,
+        "mean": 194.7,
+        "p50": 192.7,
+        "p90": 197.8,
+        "p95": 212.1,
+        "p99": 244,
+        "max": 244
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 52
+      },
+      "medianPdfBytes": 63107,
+      "cpuCoresAverage": 1.08,
+      "cpuSecondsPerDoc": 0.211,
+      "cpuPercentPeakSampled": 111.52,
+      "memoryPeakSampledBytes": 665216614,
+      "memoryPeakCgroupBytes": 695050240,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "4.73 3.33 3.61 1/626 23",
+      "dockerLoadEnd": "4.16 3.26 3.58 7/725 1485"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "chart",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:35:11.230508+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 11.635,
+      "warmupConcurrency": 4,
+      "warmupRequests": 30,
+      "warmupFailures": 0,
+      "requests": 109,
+      "succeeded": 109,
+      "docsPerSecond": 9.368,
+      "drainSeconds": 1.64,
+      "latency": {
+        "count": 109,
+        "min": 401.3,
+        "mean": 1593.4,
+        "p50": 1179.1,
+        "p90": 2543.7,
+        "p95": 4566.7,
+        "p99": 7167.1,
+        "max": 7263.5
+      },
+      "latencyAll": {
+        "count": 109,
+        "min": 401.3,
+        "mean": 1593.4,
+        "p50": 1179.1,
+        "p90": 2543.7,
+        "p95": 4566.7,
+        "p99": 7167.1,
+        "max": 7263.5
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "1": 109
+      },
+      "medianPdfBytes": 63107,
+      "cpuCoresAverage": 1.86,
+      "cpuSecondsPerDoc": 0.2,
+      "cpuPercentPeakSampled": 199.19,
+      "memoryPeakSampledBytes": 381052518,
+      "memoryPeakCgroupBytes": 387760128,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "4.16 3.26 3.58 10/625 23",
+      "dockerLoadEnd": "3.88 3.24 3.57 2/727 3057"
+    },
+    {
+      "target": "atli",
+      "fixture": "chart",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:35:27.168579+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 30.002,
+      "warmupConcurrency": 4,
+      "warmupRequests": 8,
+      "warmupFailures": 0,
+      "requests": 16,
+      "succeeded": 2,
+      "docsPerSecond": 0.067,
+      "drainSeconds": 20,
+      "latency": {
+        "count": 2,
+        "min": 10428.2,
+        "mean": 10470.1,
+        "p50": 10428.2,
+        "p90": 10512,
+        "p95": 10512,
+        "p99": 10512,
+        "max": 10512
+      },
+      "latencyAll": {
+        "count": 16,
+        "min": 10428.2,
+        "mean": 27559.8,
+        "p50": 30001.2,
+        "p90": 30001.4,
+        "p95": 30001.6,
+        "p99": 30001.6,
+        "max": 30001.6
+      },
+      "errors": {
+        "client_timeout": 14
+      },
+      "errorDetails": {
+        "client_timeout": "no response within 30 s"
+      },
+      "pageCounts": {
+        "1": 2
+      },
+      "medianPdfBytes": 67843,
+      "cpuCoresAverage": 0.82,
+      "cpuSecondsPerDoc": 12.343,
+      "cpuPercentPeakSampled": 204.22,
+      "memoryPeakSampledBytes": 2147483648,
+      "memoryPeakCgroupBytes": 2147483648,
+      "oomKills": 36,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": true,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "3.65 3.20 3.55 4/632 23",
+      "dockerLoadEnd": "2.03 2.85 3.42 9/2070 3900"
+    },
+    {
+      "target": "atli",
+      "fixture": "assets",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:36:03.190852+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.513,
+      "warmupConcurrency": 1,
+      "warmupRequests": 6,
+      "warmupFailures": 0,
+      "requests": 19,
+      "succeeded": 19,
+      "docsPerSecond": 1.807,
+      "drainSeconds": 0.51,
+      "latency": {
+        "count": 19,
+        "min": 508.9,
+        "mean": 553.2,
+        "p50": 566.9,
+        "p90": 596.3,
+        "p95": 596.4,
+        "p99": 596.4,
+        "max": 596.4
+      },
+      "latencyAll": {
+        "count": 19,
+        "min": 508.9,
+        "mean": 553.2,
+        "p50": 566.9,
+        "p90": 596.3,
+        "p95": 596.4,
+        "p99": 596.4,
+        "max": 596.4
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "2": 19
+      },
+      "medianPdfBytes": 642624,
+      "cpuCoresAverage": 1.99,
+      "cpuSecondsPerDoc": 1.108,
+      "cpuPercentPeakSampled": 198.37,
+      "memoryPeakSampledBytes": 345820364,
+      "memoryPeakCgroupBytes": 362684416,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "2.03 2.85 3.42 9/632 23",
+      "dockerLoadEnd": "1.65 2.72 3.37 6/642 3964"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "assets",
+      "concurrency": 1,
+      "startedAt": "2026-10-01T13:36:18.233659+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 10.063,
+      "warmupConcurrency": 1,
+      "warmupRequests": 17,
+      "warmupFailures": 0,
+      "requests": 59,
+      "succeeded": 59,
+      "docsPerSecond": 5.863,
+      "drainSeconds": 0.06,
+      "latency": {
+        "count": 59,
+        "min": 149.3,
+        "mean": 170.5,
+        "p50": 167.2,
+        "p90": 184.7,
+        "p95": 186.4,
+        "p99": 264,
+        "max": 264
+      },
+      "latencyAll": {
+        "count": 59,
+        "min": 149.3,
+        "mean": 170.5,
+        "p50": 167.2,
+        "p90": 184.7,
+        "p95": 186.4,
+        "p99": 264,
+        "max": 264
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "2": 59
+      },
+      "medianPdfBytes": 638400,
+      "cpuCoresAverage": 1.81,
+      "cpuSecondsPerDoc": 0.31,
+      "cpuPercentPeakSampled": 182.62,
+      "memoryPeakSampledBytes": 374131916,
+      "memoryPeakCgroupBytes": 463675392,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.65 2.72 3.37 1/627 23",
+      "dockerLoadEnd": "1.63 2.67 3.34 4/722 1685"
+    },
+    {
+      "target": "gotenberg",
+      "fixture": "assets",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:36:32.403995+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 11.892,
+      "warmupConcurrency": 4,
+      "warmupRequests": 22,
+      "warmupFailures": 0,
+      "requests": 86,
+      "succeeded": 86,
+      "docsPerSecond": 7.232,
+      "drainSeconds": 1.89,
+      "latency": {
+        "count": 86,
+        "min": 760.8,
+        "mean": 2059.5,
+        "p50": 2168.8,
+        "p90": 2385.2,
+        "p95": 2450.4,
+        "p99": 2694.7,
+        "max": 2694.7
+      },
+      "latencyAll": {
+        "count": 86,
+        "min": 760.8,
+        "mean": 2059.5,
+        "p50": 2168.8,
+        "p90": 2385.2,
+        "p95": 2450.4,
+        "p99": 2694.7,
+        "max": 2694.7
+      },
+      "errors": {},
+      "errorDetails": {},
+      "pageCounts": {
+        "2": 86
+      },
+      "medianPdfBytes": 638400,
+      "cpuCoresAverage": 1.99,
+      "cpuSecondsPerDoc": 0.277,
+      "cpuPercentPeakSampled": 199.18,
+      "memoryPeakSampledBytes": 614360678,
+      "memoryPeakCgroupBytes": 739110912,
+      "oomKills": 0,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": false,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.63 2.67 3.34 9/621 23",
+      "dockerLoadEnd": "1.56 2.61 3.31 10/722 2197"
+    },
+    {
+      "target": "atli",
+      "fixture": "assets",
+      "concurrency": 16,
+      "startedAt": "2026-10-01T13:36:48.548556+00:00",
+      "issueSeconds": 10,
+      "measuredSeconds": 20.03,
+      "warmupConcurrency": 4,
+      "warmupRequests": 4,
+      "warmupFailures": 0,
+      "requests": 19,
+      "succeeded": 10,
+      "docsPerSecond": 0.499,
+      "drainSeconds": 10.03,
+      "latency": {
+        "count": 10,
+        "min": 10703.3,
+        "mean": 16448.3,
+        "p50": 18339.3,
+        "p90": 19029.4,
+        "p95": 19432.4,
+        "p99": 19432.4,
+        "max": 19432.4
+      },
+      "latencyAll": {
+        "count": 19,
+        "min": 8237.4,
+        "mean": 14572.9,
+        "p50": 14428.9,
+        "p90": 19029.4,
+        "p95": 19432.4,
+        "p99": 19432.4,
+        "max": 19432.4
+      },
+      "errors": {
+        "http_500": 9
+      },
+      "errorDetails": {
+        "http_500": "{\u0022type\u0022:\u0022https://tools.ietf.org/html/rfc9110#section-15.6.1\u0022,\u0022title\u0022:\u0022An error occurred while processing your request.\u0022,\u0022status\u0022:500,\u0022detail\u0022:\u0022PDF generation failed: Page.printToPDF failed: Printing failed (-32000)\u0022}"
+      },
+      "pageCounts": {
+        "2": 10
+      },
+      "medianPdfBytes": 642624,
+      "cpuCoresAverage": 2,
+      "cpuSecondsPerDoc": 4.014,
+      "cpuPercentPeakSampled": 219.87,
+      "memoryPeakSampledBytes": 2147483648,
+      "memoryPeakCgroupBytes": 2147483648,
+      "oomKills": 24,
+      "containerAfter": {
+        "running": true,
+        "oomKilled": true,
+        "exitCode": 0,
+        "restartCount": 0
+      },
+      "dockerLoadStart": "1.56 2.61 3.31 6/628 23",
+      "dockerLoadEnd": "5.85 3.54 3.60 4/641 3792"
+    }
+  ]
+}
