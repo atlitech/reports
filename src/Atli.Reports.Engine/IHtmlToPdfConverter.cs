@@ -31,8 +31,11 @@ public interface IHtmlToPdfConverter
   /// <param name="options">Page and rendering options. <see langword="null"/> uses the defaults of <see cref="PdfOptions"/>.</param>
   /// <param name="cancellationToken">Cancels the conversion.</param>
   /// <returns>
-  /// A readable, seekable stream positioned at the start of the PDF, which the caller owns and must dispose;
-  /// or a <see cref="ConversionError"/> describing why the conversion failed.
+  /// A readable stream positioned at the start of the PDF, which the caller owns and must dispose;
+  /// or a <see cref="ConversionError"/> describing why the conversion failed. The in-process engine
+  /// returns a seekable in-memory copy. A converter that renders remotely (Atli.Reports.Client)
+  /// returns a forward-only stream over the server's response instead, so check
+  /// <see cref="Stream.CanSeek"/> before seeking or reading <see cref="Stream.Length"/>.
   /// </returns>
   /// <exception cref="ArgumentNullException"><paramref name="html"/> is <see langword="null"/>.</exception>
   ValueTask<OneOf<Stream, ConversionError>> ConvertAsync(

@@ -10,6 +10,18 @@ public sealed class PdfOptionsRequest
 {
   public string? Orientation { get; set; }
   public string? PaperSize { get; set; }
+
+  /// <summary>
+  /// A custom paper width, in inches. Set together with <see cref="PaperHeight"/>; the pair overrides
+  /// <see cref="PaperSize"/>.
+  /// </summary>
+  public double? PaperWidth { get; set; }
+
+  /// <summary>
+  /// A custom paper height, in inches. Set together with <see cref="PaperWidth"/>; the pair overrides
+  /// <see cref="PaperSize"/>.
+  /// </summary>
+  public double? PaperHeight { get; set; }
   public MarginsRequest? Margins { get; set; }
   public bool? PrintBackground { get; set; }
   public double? Scale { get; set; }
@@ -18,6 +30,11 @@ public sealed class PdfOptionsRequest
   public bool? DisplayHeaderFooter { get; set; }
   public string? PageRanges { get; set; }
   public bool? PreferCSSPageSize { get; set; }
+
+  /// <summary>
+  /// Whether the browser writes a tagged (accessible) PDF. Omitted leaves the choice to the browser.
+  /// </summary>
+  public bool? GenerateTaggedPdf { get; set; }
 
   /// <summary>
   /// Name of a JS binding to wait for before generating the PDF (e.g., "pdfReady").

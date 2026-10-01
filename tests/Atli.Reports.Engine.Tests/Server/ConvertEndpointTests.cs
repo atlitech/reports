@@ -175,6 +175,76 @@ public class ConvertEndpointTests
   }
 
   [Test]
+  public async Task Custom_paper_sizes_tagging_and_an_infinite_signal_wait_reach_the_converter()
+  {
+    PdfOptions? received = null;
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter(
+        (_, _) => Task.FromResult<ConversionError?>(null),
+        options => received = options
+      )
+    );
+
+    using var response = await server.PostAsync(
+      """
+      {"html":"<p>x</p>","options":{"orientation":"LANDSCAPE","paperSize":"a4","paperWidth":5.5,"paperHeight":7.25,"generateTaggedPdf":false,"waitForSignal":"ready","waitTimeoutSeconds":-0.001}}
+      """
+    );
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(received!.Orientation).IsEqualTo(PageOrientation.Landscape);
+    await Assert.That(received.PaperSize).IsEqualTo(new PaperSize { Width = 5.5, Height = 7.25 });
+    await Assert.That(received.GenerateTaggedPdf).IsFalse();
+    await Assert.That(received.WaitTimeout).IsEqualTo(Timeout.InfiniteTimeSpan);
+  }
+
+  [Test]
+  public async Task Omitted_tagging_leaves_the_choice_to_the_browser()
+  {
+    PdfOptions? received = null;
+    await using var server = await RunningServer.StartAsync(
+      new FakeConverter(
+        (_, _) => Task.FromResult<ConversionError?>(null),
+        options => received = options
+      )
+    );
+
+    using var response = await server.PostAsync(
+      """{"html":"<p>x</p>","options":{"orientation":"Portrait","paperSize":"Legal"}}"""
+    );
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(received!.Orientation).IsEqualTo(PageOrientation.Portrait);
+    await Assert.That(received.PaperSize).IsEqualTo(PaperSize.Legal);
+    await Assert.That(received.GenerateTaggedPdf).IsNull();
+  }
+
+  [Test]
+  [Arguments("""{"orientation":"sideways"}""")]
+  [Arguments("""{"orientation":""}""")]
+  [Arguments("""{"paperSize":"tabloid"}""")]
+  [Arguments("""{"paperWidth":5}""")]
+  [Arguments("""{"paperHeight":7}""")]
+  [Arguments("""{"paperWidth":0,"paperHeight":7}""")]
+  [Arguments("""{"paperWidth":5,"paperHeight":-1}""")]
+  public async Task Invalid_orientations_and_paper_sizes_are_bad_requests_and_never_reach_the_converter(
+    string options
+  )
+  {
+    FakeConverter converter = new((_, _) => throw new InvalidOperationException("unreachable"));
+    await using var server = await RunningServer.StartAsync(converter);
+
+    using var response = await server.PostAsync($$"""{"html":"<p>x</p>","options":{{options}}}""");
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestToken));
+    await Assert
+      .That(problem.RootElement.GetProperty("kind").GetString())
+      .IsEqualTo(nameof(ConversionErrorKind.InvalidRequest));
+    await Assert.That(converter.Calls).IsEqualTo(0);
+  }
+
+  [Test]
   public async Task Engine_limits_are_configurable_like_any_setting()
   {
     // Environment variables (ReportsEngine__Concurrency__MaxConcurrentConversions) and the command

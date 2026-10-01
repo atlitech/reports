@@ -108,3 +108,5 @@ conversions a second. In Linux containers, set `Browser:NoSandbox` (trusted HTML
   lifecycle, isolation, concurrency, streaming, and metrics
 - [Atli.Reports.Server](https://github.com/atlitech/reports/blob/main/docs/engine/server.md): the
   engine as an HTTP service in a container
+- [Atli.Reports.Client](https://www.nuget.org/packages/Atli.Reports.Client): the same
+  `IHtmlToPdfConverter`, converting on that server

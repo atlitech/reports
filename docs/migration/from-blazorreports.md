@@ -204,6 +204,16 @@ negative timeout other than `Timeout.InfiniteTimeSpan` throws when the report is
 
 ## Client and viewer
 
-`BlazorReports.Client` and `BlazorReports.Viewer` were never published and have been removed. To
-convert over HTTP, call the reports server's `POST /convert` endpoint
-([docs/engine/server.md](../engine/server.md)).
+`BlazorReports.Client` and `BlazorReports.Viewer` were never published and have been removed.
+To convert over HTTP, use [`Atli.Reports.Client`](../../src/Atli.Reports.Client/README.md). It
+implements `IHtmlToPdfConverter` against the reports server's `POST /convert` endpoint
+([docs/engine/server.md](../engine/server.md)), so switching from the in-process engine to a
+server only changes the registration:
+
+```csharp
+builder.Services.AddBlazorReports();
+builder.AddReportsClient("reports"); // ConnectionStrings:reports = "Endpoint=http://reports:8080"
+```
+
+Reports still render in the app. The server converts them to PDF, and the app never starts a
+browser. No viewer replaces `BlazorReports.Viewer`.
