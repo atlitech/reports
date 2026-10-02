@@ -1,0 +1,122 @@
+# Seccomp profile for Chromium's sandbox
+
+The server image runs Chromium with its own sandbox: renderers run in user, PID, and network
+namespaces apart from the browser's, confined to an empty directory, under Chromium's seccomp-bpf
+filter. Creating those namespaces needs syscalls that Docker's default seccomp profile, and
+containerd's `RuntimeDefault`, deny to a container without `CAP_SYS_ADMIN`. Under them the browser
+cannot start ("No usable sandbox!"), and the server stays unready and says why.
+
+[`chromium.json`](chromium.json) is Docker's default profile plus the smallest allowance the sandbox
+needs, resolved into a form that Docker, Podman, containerd, and CRI-O all read the same way. See
+[Chromium's sandbox](../../docs/security.md#chromiums-sandbox) for what the sandbox protects and
+where it is supported.
+
+```bash
+docker run --security-opt seccomp=deploy/seccomp/chromium.json ... atli-reports-server
+```
+
+- **Docker Compose:** `security_opt: ["seccomp=../../deploy/seccomp/chromium.json"]`, relative to
+  the Compose file, as in [`src/Atli.Reports.Server/docker-compose.yml`](../../src/Atli.Reports.Server/docker-compose.yml).
+- **Kubernetes:** a `Localhost` profile installed on each node; see
+  [`deploy/kubernetes/reports.yaml`](../kubernetes/reports.yaml).
+- **Aspire:** `AddReportsServer` passes the profile to Docker or Podman in local runs; deployment
+  targets need it configured separately (see the [Aspire guide](../../docs/aspire.md#deploy)).
+
+## Provenance
+
+| | |
+| --- | --- |
+| Upstream | [moby/profiles](https://github.com/moby/profiles) `seccomp/default.json`, tag `seccomp/v0.2.4` |
+| Commit | [`245180c51918481c0525424b3ee025d2b435d46c`](https://github.com/moby/profiles/blob/245180c51918481c0525424b3ee025d2b435d46c/seccomp/default.json) |
+| File SHA-256 | `785b2429264afba4d594320337cb17f144f3c7d51585f9805eef72e28f4f9334` |
+| Why this version | The version moby's `go.mod` required on 2026-10-02. `main` already restricts more socket address families; those changes were unreleased. |
+
+[`.github/scripts/chromium-seccomp-profile.py`](../../.github/scripts/chromium-seccomp-profile.py)
+downloads that file, checks its hash, and writes `chromium.json`. `check` (the default) regenerates
+it and fails if the committed file differs; the server image workflow runs it. To move to a newer
+upstream, change the commit and hash in the script, run it with `write`, and review the diff. The
+script refuses conditions it does not know how to resolve.
+
+```bash
+.github/scripts/chromium-seccomp-profile.py check
+.github/scripts/chromium-seccomp-profile.py write
+```
+
+## The exact delta from Docker's default
+
+**1. Conditions resolved.** Docker's profile carries conditional rules (`includes` and `excludes` on
+capabilities, architectures, and kernel versions) that Docker resolves when it starts a container.
+containerd does not: it decodes a `Localhost` profile as the OCI runtime spec's `LinuxSeccomp`,
+silently ignores those fields, and so applies every conditional rule. As a `Localhost` profile,
+Docker's file would let `mount`, `setns`, `bpf`, `ptrace`, and every `unshare` and `clone` past
+seccomp in a container without capabilities. Tested with kind v0.31.0 (Kubernetes 1.35.0, containerd
+2.2.0, runc 1.2.9): under Docker's unmodified file, `unshare --user --mount true` succeeded in a pod
+without capabilities, which Docker itself denies; under `chromium.json` it fails.
+
+The script therefore resolves the conditions the way Docker does for this image: a container with no
+capabilities (the image runs as a non-root user and the examples drop every capability) on an
+`amd64` or `arm64` host with Linux 4.8 or later.
+
+- Rules that need a capability are dropped: `CAP_SYS_ADMIN` (`bpf`, `clone`, `clone3`, `mount`,
+  `setns`, `unshare`, and the rest of that group), `CAP_SYS_CHROOT` (`chroot`), `CAP_SYS_PTRACE`,
+  `CAP_SYS_MODULE`, `CAP_SYS_BOOT`, `CAP_SYS_PACCT`, `CAP_SYS_RAWIO`, `CAP_SYS_TIME`,
+  `CAP_SYS_TTY_CONFIG`, `CAP_SYS_NICE`, `CAP_SYSLOG`, `CAP_BPF`, `CAP_PERFMON`, and
+  `CAP_DAC_READ_SEARCH`.
+- Rules excluded only with `CAP_SYS_ADMIN` are kept: `clone` without namespace flags, and `clone3`
+  answered with `ENOSYS`.
+- Rules for `ppc64le`, `s390`/`s390x`, and `riscv64` are dropped. The `amd64`-only rules
+  (`arch_prctl`, `modify_ldt`) and the `arm`/`arm64`-only rules (`arm_fadvise64_64`,
+  `arm_sync_file_range`, `sync_file_range2`, `breakpoint`, `cacheflush`, `set_tls`) are both kept:
+  those syscalls do not exist on the other architecture, so one file serves both.
+- `ptrace`, `process_vm_readv`, and `process_vm_writev` (Linux 4.8 or later) are kept.
+- `archMap` becomes `architectures`: `SCMP_ARCH_X86_64`, `SCMP_ARCH_X86`, `SCMP_ARCH_X32`,
+  `SCMP_ARCH_AARCH64`, `SCMP_ARCH_ARM`.
+
+**2. Three rules added**, each with a `comment` in the file:
+
+| Syscall | Allowed when | Why |
+| --- | --- | --- |
+| `clone` | No `CLONE_NEWNS`, `CLONE_NEWCGROUP`, `CLONE_NEWUTS`, or `CLONE_NEWIPC` (`args[0] & 0x0E020000 == 0`) | Chromium clones its zygote into new user, PID, and network namespaces and its renderers into new PID namespaces. Docker's default allows `clone` only without any namespace flag. |
+| `unshare` | Only `CLONE_NEWUSER` (`args[0] & 0xEFFFFFFF == 0`) | Chromium checks for, and enters, a new user namespace with `unshare(CLONE_NEWUSER)`. |
+| `chroot` | Always | Chromium confines sandboxed processes to an empty directory (`/proc/self/fdinfo/`) inside their user namespace. Docker's default allows `chroot` only with `CAP_SYS_CHROOT`, which `--cap-drop ALL` removes. |
+
+Nothing else changes. Inside the new user namespace the process holds capabilities over it, so the
+argument filters matter: mount, cgroup, UTS, and IPC namespaces stay denied there too, which keeps
+`mount` and its relatives out of reach.
+
+## How the allowance was established
+
+On 2026-10-02, with chrome-headless-shell 154.0.8037.92 in this image, on Docker 29.4.0 (OrbStack,
+Linux 7.0.14, arm64), each container started with `--cap-drop ALL`, `--read-only`,
+`--security-opt no-new-privileges:true`, and the image's non-root user:
+
+- Docker's default profile alone: "No usable sandbox!".
+- Without the `clone` or the `unshare` rule: "No usable sandbox!". Without the `chroot` rule:
+  `Check failed: sys_chroot("/proc/self/fdinfo/") == 0`.
+- With `clone` also denying `CLONE_NEWPID`, or also denying `CLONE_NEWNET`, or allowing only
+  `CLONE_NEWUSER`: the zygote exits (`zygote_linux.cc ... write: Broken pipe`).
+- With the three rules as above: the server converted the four
+  [benchmark fixtures](../../benchmarks/fixtures) (invoice, inlined assets, 49-page table, and the
+  chart with `waitForSignal`), no browser process had `--no-sandbox`, and renderers ran in their
+  own PID namespaces and outside the browser's user namespace, with a second seccomp filter
+  (Chromium's). In a container with the same settings, `unshare --user` succeeded and
+  `unshare --user` with `--mount`, `--uts`, `--ipc`, `--cgroup`, `--pid`, or `--net` failed.
+
+The same profile passed [the Kubernetes validation](../../.github/scripts/validate-kubernetes-security.sh)
+in kind as a `Localhost` profile. CI runs the server image's smoke test, which checks the sandbox,
+on `amd64` and `arm64` GitHub runners.
+
+## Not verified
+
+- Ubuntu 23.10+ and 24.04 hosts restrict unprivileged user namespaces through AppArmor
+  (`kernel.apparmor_restrict_unprivileged_userns=1`). The kernel applies that restriction to
+  processes AppArmor does not confine. Docker's `docker-default` and containerd's default AppArmor
+  profiles declare AppArmor ABI 3.0, which does not mediate user namespaces, so by the kernel and
+  profile sources containers under them are unaffected. That has not been tested here on such a
+  host; the GitHub `ubuntu-24.04` runners that run the smoke test are the first check. Containers
+  that run AppArmor-unconfined (`--security-opt apparmor=unconfined`, privileged containers, pods in
+  kind) are affected.
+- Podman, CRI-O, and Kubernetes nodes other than kind were not tested.
+- Under gVisor, Chromium's own seccomp-bpf filter crashes on arm64 (`seccomp-bpf failure in syscall
+  nr=0x7b`), so the [isolated worker experiment](../../docs/isolated-workers.md) keeps its browser
+  unsandboxed inside the gVisor boundary.
