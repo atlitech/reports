@@ -15,5 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
     <ProjectReference Include="..\..\src\Atli.Reports.Server\Atli.Reports.Server.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Worker.Protocol\Atli.Reports.Worker.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Worker\Atli.Reports.Worker.csproj" />
   </ItemGroup>
 </Project>

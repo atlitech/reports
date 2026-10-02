@@ -1,0 +1,83 @@
+name: Isolated worker prototype
+
+# Local disposable infrastructure only; this workflow does not publish or deploy a service.
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/Atli.Reports.Engine/**"
+      - "src/Atli.Reports.Server/**"
+      - "src/Atli.Reports.Worker/**"
+      - "src/Atli.Reports.Worker.Protocol/**"
+      - "benchmarks/fixtures/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - ".github/scripts/validate-isolated-workers.py"
+      - ".github/scripts/smoke-test-worker-gateway-aot.py"
+      - ".github/workflows/isolated-workers.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-workers-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Sandbox and gateway (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Build the HTTP gateway
+        run: dotnet build src/Atli.Reports.Server --configuration Debug
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build NativeAOT worker
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: src/Atli.Reports.Worker/Dockerfile
+          tags: atli-reports-worker:security
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=isolated-worker-${{ matrix.arch }}
+          cache-to: type=gha,scope=isolated-worker-${{ matrix.arch }},mode=max
+      - name: Build integrated comparison
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: src/Atli.Reports.Server/Dockerfile
+          tags: atli-reports-server:security
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=server-image-${{ matrix.arch }}
+          cache-to: type=gha,scope=server-image-${{ matrix.arch }},mode=max
+      - name: Validate NativeAOT gateway worker-mode binding and conversion
+        run: python3 -B .github/scripts/smoke-test-worker-gateway-aot.py atli-reports-server:security atli-reports-worker:security
+      - name: Validate gVisor containment and real gateway lifecycle; collect exploratory timings
+        run: python3 -B .github/scripts/validate-isolated-workers.py --samples 3
+      - name: Preserve measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: isolated-worker-results-${{ matrix.arch }}
+          path: artifacts/isolated-worker-results.json
+          if-no-files-found: ignore

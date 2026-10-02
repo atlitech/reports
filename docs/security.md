@@ -236,6 +236,9 @@ the actual probes rather than relying on Aspire's local readiness check.
 
 ## Managed hosting boundary
 
+The [isolated renderer experiment](isolated-workers.md) documents the optional worker boundary,
+its launcher authority, performance comparisons, and the gates for a future hosted service.
+
 The self-hosted implementation supplies portable caller identity, permissions, local admission,
 and rendering policy. It deliberately has no accounts database, token issuer, billing system, or
 shared cloud worker pool. A managed service must add those components before accepting hostile
