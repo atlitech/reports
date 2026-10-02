@@ -48,6 +48,7 @@ builder.Build().Run();
 | Image | `ghcr.io/atlitech/reports-server:<version>`, where `<version>` is the hosting package's version |
 | Endpoint | `http`, to the server's port 8080 in the container. `port` fixes the host port; by default Aspire picks one. The endpoint is not external. |
 | Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails (a missing library, say), the server answers `503` with the reason and retries in the background, so the resource stays unhealthy and `WaitFor(reports)` keeps waiting until a launch succeeds. See [the server's health endpoints](engine/server.md#health). |
+| Probes | When the app deploys, a readiness probe on `/health/ready` and a liveness probe on `/health/live`, for the targets that run probes, such as Azure Container Apps. Not on Kubernetes yet; see [Deploy](#deploy). |
 | Telemetry | Logs, metrics, and traces go to the dashboard over OTLP, including the engine's `atli.reports.convert` spans below each `POST /convert`. |
 | OpenAPI | The dashboard links the server's OpenAPI document, `/openapi/v1.json`, which describes `POST /convert`. A server built from a clone that predates the document answers the link with `404`. |
 | Command | `Convert a test page` converts a one-page document and writes the PDF's size and the round trip's duration to the server's console log. It is enabled while the server is healthy. From a terminal: `aspire resource reports convert-test-page`. |
@@ -274,17 +275,39 @@ services:
   dashboard for it.
 - **Health in production.** Aspire's health check only drives the local dashboard and `WaitFor`; in
   Docker Compose, `WaitFor` becomes `service_started`. The client copes with a server that is still
-  starting: it retries connection failures and `503`s. On targets with probes (Azure Container Apps,
-  Kubernetes), Aspire's experimental `WithHttpProbe` adds them. Use `/health/ready` for readiness:
-  it fails while the browser cannot launch, and recovers on its own once a background retry
-  succeeds. Use `/health/live` for liveness: it runs no engine check, because a restart does not
-  repair a browser that cannot start.
+  starting: it retries connection failures and `503`s. On targets that run probes, the server has
+  two:
+
+  | Probe | Path | Timing |
+  | --- | --- | --- |
+  | Readiness | `/health/ready` | Every 5 s, 3 s timeout, unready after 3 failures. It fails while the browser cannot launch, and recovers on its own once a background retry succeeds. |
+  | Liveness | `/health/live` | Every 10 s, 5 s timeout, restarted after 3 failures. It runs no engine check: a restart does not repair a browser that cannot start, and it drops the conversions in flight. |
+
+  Azure Container Apps runs both, Azure App Service uses `/health/live` as its health check path,
+  and Docker Compose runs none. `WithHttpProbe` replaces a probe of the same type, but not on
+  `/health/ready`: it also adds a health check on the path, and Aspire rejects the duplicate of the
+  resource's own.
+
+  Kubernetes, including Azure Kubernetes Service, gets no probes for now: Aspire's Kubernetes
+  publisher writes the probe's scheme in lower case, and Kubernetes then never creates the pod
+  ([microsoft/aspire#18271](https://github.com/microsoft/aspire/issues/18271), tracked in
+  [#147](https://github.com/atlitech/reports/issues/147)). To probe the server on Kubernetes today,
+  add the probe and correct its scheme:
 
   ```csharp
   #pragma warning disable ASPIREPROBES001 // Probes are experimental in Aspire 13.
   reports
-    .WithHttpProbe(ProbeType.Liveness, "/health/live")
-    .WithHttpProbe(ProbeType.Readiness, "/health/ready");
+    .WithHttpProbe(ProbeType.Liveness, "/health/live", periodSeconds: 10, timeoutSeconds: 5)
+    .PublishAsKubernetesService(service =>
+    {
+      foreach (var container in service.Workload!.PodTemplate.Spec.Containers)
+      {
+        if (container.LivenessProbe?.HttpGet is { } httpGet)
+        {
+          httpGet.Scheme = httpGet.Scheme.ToUpperInvariant();
+        }
+      }
+    });
   #pragma warning restore ASPIREPROBES001
   ```
 
