@@ -13,6 +13,7 @@ namespace Atli.Reports.Server.Serialization;
 [JsonSerializable(typeof(PdfOptionsRequest))]
 [JsonSerializable(typeof(MarginsRequest))]
 [JsonSerializable(typeof(HealthCheckResponse))]
+[JsonSerializable(typeof(HealthSummaryResponse))]
 // Results.Problem writes ProblemDetails; without this, NativeAOT builds cannot serialize error responses.
 [JsonSerializable(typeof(ProblemDetails))]
 // Never serialized, but the OpenAPI document needs metadata for every type it describes, including

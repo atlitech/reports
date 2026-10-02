@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json.Nodes;
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Models;
+using Atli.Reports.Server.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
@@ -35,6 +36,7 @@ internal static class ServerOpenApi
     services.AddOpenApi(options =>
     {
       options.AddDocumentTransformer(DescribeServer);
+      options.AddDocumentTransformer(DescribeAuthentication);
       options.AddSchemaTransformer(DescribeProblemKind);
       options.AddSchemaTransformer(DescribeOptionValues);
     });
@@ -56,6 +58,51 @@ internal static class ServerOpenApi
       .InformationalVersion.Split('+')[0];
     document.Info.Description =
       "Converts HTML to PDF in a headless browser. Errors are RFC 9457 problem details with a `kind` member.";
+    return Task.CompletedTask;
+  }
+
+  private static Task DescribeAuthentication(
+    OpenApiDocument document,
+    OpenApiDocumentTransformerContext context,
+    CancellationToken cancellationToken
+  )
+  {
+    var authentication = context
+      .ApplicationServices.GetRequiredService<ReportsSecurityOptions>()
+      .Authentication;
+    if (authentication.Mode == "None")
+    {
+      return Task.CompletedTask;
+    }
+
+    const string schemeName = "ReportsAuthentication";
+    document.Components ??= new OpenApiComponents();
+    document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+    document.Components.SecuritySchemes[schemeName] =
+      authentication.Mode == "ApiKey"
+        ? new OpenApiSecurityScheme
+        {
+          Type = SecuritySchemeType.ApiKey,
+          In = ParameterLocation.Header,
+          Name = ApiKeyAuthenticationHandler.HeaderName,
+          Description =
+            "A scoped API credential in the form key-id.random-secret. Requires reports.convert permission.",
+        }
+        : new OpenApiSecurityScheme
+        {
+          Type = SecuritySchemeType.Http,
+          Scheme = "bearer",
+          BearerFormat = "JWT",
+          Description =
+            "An access token from the configured trusted issuer, for this API's audience and with conversion permission.",
+        };
+    document.Security =
+    [
+      new OpenApiSecurityRequirement
+      {
+        [new OpenApiSecuritySchemeReference(schemeName, document)] = [],
+      },
+    ];
     return Task.CompletedTask;
   }
 

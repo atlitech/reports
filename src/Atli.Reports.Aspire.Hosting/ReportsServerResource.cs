@@ -8,7 +8,8 @@ namespace Aspire.Hosting.ApplicationModel;
 /// <param name="name">The name of the resource.</param>
 /// <remarks>
 /// <para>
-/// The connection string is <c>Endpoint=&lt;url&gt;</c>, the URL of the server's HTTP endpoint, which
+/// The connection string is <c>Endpoint=&lt;url&gt;</c>, with a secret <c>ApiKey</c> property when
+/// API-key authentication is configured, which
 /// is the form <c>AddReportsClient</c> in <c>Atli.Reports.Client</c> reads. <c>WithReference</c>
 /// passes it to a resource as <c>ConnectionStrings__{name}</c>.
 /// </para>
@@ -26,6 +27,10 @@ public sealed class ReportsServerResource([ResourceName] string name)
   /// The name of the server's HTTP endpoint.
   /// </summary>
   internal const string HttpEndpointName = "http";
+
+  internal ParameterResource? ApiKeyParameter { get; set; }
+
+  internal bool AnonymousAccess { get; set; }
 
   /// <summary>
   /// The server's HTTP endpoint, which serves <c>/convert</c>, its OpenAPI document
@@ -50,10 +55,14 @@ public sealed class ReportsServerResource([ResourceName] string name)
     ReferenceExpression.Create($"{PrimaryEndpoint.Property(EndpointProperty.Url)}");
 
   /// <summary>
-  /// The connection string: <c>Endpoint=</c> followed by the URL of <see cref="PrimaryEndpoint"/>.
+  /// The server endpoint and, when configured, a secret API credential parameter reference.
   /// </summary>
   public ReferenceExpression ConnectionStringExpression =>
-    ReferenceExpression.Create($"Endpoint={PrimaryEndpoint.Property(EndpointProperty.Url)}");
+    ApiKeyParameter is { } apiKey
+      ? ReferenceExpression.Create(
+        $"Endpoint={PrimaryEndpoint.Property(EndpointProperty.Url)};ApiKey={apiKey}"
+      )
+      : ReferenceExpression.Create($"Endpoint={PrimaryEndpoint.Property(EndpointProperty.Url)}");
 
   IEnumerable<
     KeyValuePair<string, ReferenceExpression>
@@ -62,5 +71,9 @@ public sealed class ReportsServerResource([ResourceName] string name)
     yield return new("Host", ReferenceExpression.Create($"{Host}"));
     yield return new("Port", ReferenceExpression.Create($"{Port}"));
     yield return new("Uri", UriExpression);
+    if (ApiKeyParameter is { } apiKey)
+    {
+      yield return new("ApiKey", ReferenceExpression.Create($"{apiKey}"));
+    }
   }
 }

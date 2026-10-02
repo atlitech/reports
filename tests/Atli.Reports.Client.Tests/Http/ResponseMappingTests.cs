@@ -14,6 +14,9 @@ public class ResponseMappingTests
 
   [Test]
   [Arguments(HttpStatusCode.BadRequest, "InvalidRequest", ConversionErrorKind.InvalidRequest)]
+  [Arguments(HttpStatusCode.Unauthorized, "Unauthorized", ConversionErrorKind.Unauthorized)]
+  [Arguments(HttpStatusCode.Forbidden, "Forbidden", ConversionErrorKind.Forbidden)]
+  [Arguments(HttpStatusCode.UnprocessableEntity, "PolicyDenied", ConversionErrorKind.PolicyDenied)]
   [Arguments(
     HttpStatusCode.UnprocessableEntity,
     "SignalTimeout",
@@ -50,6 +53,8 @@ public class ResponseMappingTests
 
   [Test]
   [Arguments(HttpStatusCode.BadRequest, ConversionErrorKind.InvalidRequest)]
+  [Arguments(HttpStatusCode.Unauthorized, ConversionErrorKind.Unauthorized)]
+  [Arguments(HttpStatusCode.Forbidden, ConversionErrorKind.Forbidden)]
   [Arguments(HttpStatusCode.NotFound, ConversionErrorKind.InvalidRequest)]
   [Arguments(HttpStatusCode.RequestEntityTooLarge, ConversionErrorKind.InvalidRequest)]
   [Arguments(HttpStatusCode.RequestTimeout, ConversionErrorKind.Timeout)]

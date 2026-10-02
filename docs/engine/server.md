@@ -1,7 +1,7 @@
 # Atli Reports Server
 
 `Atli.Reports.Server` is a small NativeAOT HTTP service over `Atli.Reports.Engine`. It ships as a
-container image.
+container image. Configure authentication before starting it; see [Security and production deployment](../security.md). The default document network policy rejects external assets.
 
 ## `POST /convert`
 
@@ -42,6 +42,10 @@ never sees, because their body could not be read, and unexpected server errors:
 | `InvalidRequest` | 400 Bad Request | A body that is not a conversion request (see above), blank HTML, unknown orientation or paper size, incomplete custom paper size, blank signal name, negative or out-of-range signal timeout |
 | `InvalidRequest` | 413 Content Too Large | The body is larger than `Kestrel:Limits:MaxRequestBodySize` (see [Configuration](#configuration)) |
 | `InvalidRequest` | 415 Unsupported Media Type | The body is not sent as `application/json` |
+| `Unauthorized` | 401 Unauthorized | Missing, invalid, expired, or revoked credential |
+| `Forbidden` | 403 Forbidden | Authenticated caller lacks permission |
+| `PolicyDenied` | 422 Unprocessable Content | Document networking violates the host policy or an approved asset could not be fetched within its limits |
+| `Busy` | 429 Too Many Requests | Caller admission limit; `Retry-After: 1` |
 | `SignalTimeout` | 422 Unprocessable Content | The document never called its signal; retrying the same document will not help |
 | `Busy` | 503 Service Unavailable | `Retry-After: 1`; the queue is full or the wait for a turn timed out |
 | `BrowserUnavailable` | 503 Service Unavailable | `Retry-After: 5`; the browser is restarting, missing, or the server is shutting down |
@@ -63,7 +67,7 @@ unexpectedly) abort the connection. The client sees a broken response, never a t
 
 ## OpenAPI
 
-`GET /openapi/v1.json` returns the server's OpenAPI 3.1 document, in every environment. It describes
+`GET /openapi/v1.json` returns the server's OpenAPI 3.1 document to callers with `reports.diagnostics`, in every environment. It describes
 `POST /convert` as above, for client generators and API tools:
 
 - the request body, with a description of every option and the values of `orientation` and
@@ -100,7 +104,7 @@ once. Each attempt is an `atli.reports.browser.launch` span (with
 `atli.reports.browser.launch.attempt`) and logs event 301 when it fails and 309 before the next
 retry; event 310 marks the recovery.
 
-The body reports every check:
+The anonymous probes return only the overall status. `GET /health/details`, protected by `reports.diagnostics`, reports every readiness check:
 
 ```json
 {
@@ -130,11 +134,9 @@ reference](architecture.md#configuration-reference). The server's `appsettings.j
 - `ConversionTimeout: 00:01:00`, so overload ends in a clean `504` rather than a client timeout;
 - `Browser:NoSandbox: true` and `Browser:DisableDevShmUsage: true`, for containers.
 
-Request limits are Kestrel's, and the `Kestrel:Limits` section binds onto them, so they are
-configurable like any other setting:
+Authenticated admission defaults to 10 MiB per request and four in-flight requests per caller, with a 90-second whole-request deadline. See [caller limits](../security.md#admission-and-deadlines). A tighter Kestrel limit still applies; the `Kestrel:Limits` section binds as usual:
 
-- `Kestrel__Limits__MaxRequestBodySize`, in bytes, caps the request body: 30,000,000 (about 30 MB)
-  by default. A larger body is a `413` with problem details.
+- `Kestrel__Limits__MaxRequestBodySize`, in bytes, caps the transport request body (30,000,000 by Kestrel default); admission applies its own tighter 10 MiB default. A larger body is a `413` with problem details.
 - The other `KestrelServerLimits` settings bind the same way, for example
   `Kestrel__Limits__MaxRequestHeadersTotalSize`, `Kestrel__Limits__KeepAliveTimeout`, or
   `Kestrel__Limits__Http2__MaxStreamsPerConnection`.
@@ -171,7 +173,7 @@ dashboard](https://learn.microsoft.com/dotnet/aspire/fundamentals/dashboard/stan
 OTLP/gRPC on port 18889) or any OpenTelemetry Collector, and point the server at it:
 
 ```bash
-docker run --rm -p 8080:8080 \
+docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:18889 \
   atli-reports-server
 ```
@@ -182,7 +184,9 @@ export already wired to the AppHost's dashboard.
 ## Container image
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/atlitech/reports-server:0.26.0
+# Once the image is released; until then build it from this checkout.
+docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
+  ghcr.io/atlitech/reports-server:0.26.0
 ```
 
 - **Build and runtime share Ubuntu 24.04** (`sdk:10.0-noble-aot`, which carries the NativeAOT
@@ -266,7 +270,8 @@ resolves on one machine.
 
 ```bash
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
-docker run -p 8080:8080 atli-reports-server
+scripts/create-reports-api-key.sh
+docker run -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env atli-reports-server
 ```
 
 That builds the pinned Chrome version. To try another one, pass it as a build argument: a version

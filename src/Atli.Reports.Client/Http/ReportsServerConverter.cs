@@ -101,13 +101,17 @@ internal sealed class ReportsServerConverter(IHttpClientFactory httpClientFactor
     }
   }
 
-  private static HttpRequestMessage CreateRequest(string html, PdfOptions? options) =>
-    new(HttpMethod.Post, ConvertPath)
+  private static HttpRequestMessage CreateRequest(string html, PdfOptions? options)
+  {
+    HttpRequestMessage request = new(HttpMethod.Post, ConvertPath)
     {
       // JsonContent serializes as it sends, so the HTML is not copied into a second buffer, and a
       // retry serializes it again.
       Content = JsonContent.Create(ConvertRequestBody.Create(html, options), RequestJson.TypeInfo),
     };
+    request.Options.Set(ReportsAuthenticationHandler.Authenticate, true);
+    return request;
+  }
 
   /// <summary>
   /// Sends the request through the resilience pipeline and returns the response once its headers

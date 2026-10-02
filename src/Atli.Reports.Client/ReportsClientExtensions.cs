@@ -118,6 +118,22 @@ public static class ReportsClientExtensions
     ArgumentNullException.ThrowIfNull(settings);
 
     var endpoint = ValidateEndpoint(settings.Endpoint, nameof(settings));
+    var apiKey = settings.ApiKey;
+    var tokenProvider = settings.AccessTokenProvider;
+    if (apiKey is not null && !ReportsAuthenticationHandler.IsSafeCredential(apiKey))
+    {
+      throw new ArgumentException(
+        "ApiKey must be a nonempty credential without whitespace or control characters.",
+        nameof(settings)
+      );
+    }
+    if (apiKey is not null && tokenProvider is not null)
+    {
+      throw new ArgumentException(
+        "Configure either ApiKey or AccessTokenProvider, not both.",
+        nameof(settings)
+      );
+    }
     var attemptTimeout = ValidateTimeout(
       settings.AttemptTimeout,
       nameof(ReportsClientSettings.AttemptTimeout),
@@ -159,6 +175,12 @@ public static class ReportsClientExtensions
         client.Timeout = Timeout.InfiniteTimeSpan;
       }
     );
+    // Redirects can forward custom authentication headers and the document to another origin.
+    // An operator must configure the final endpoint; a redirect is returned as a failed conversion.
+    httpClient.ConfigurePrimaryHttpMessageHandler(() =>
+      new SocketsHttpHandler { AllowAutoRedirect = false }
+    );
+    httpClient.RedactLoggedHeaders(_ => true);
     // Apps with Aspire service defaults add the standard resilience handler to every client. Its
     // 10-second attempt timeout and retries of 500 and 504 would cut conversions short and repeat
     // ones that cannot succeed, so this client keeps only its own pipeline. (The library's own
@@ -179,6 +201,10 @@ public static class ReportsClientExtensions
       ReportsResilience.PipelineName,
       pipeline =>
         ReportsResilience.Configure(pipeline, totalTimeout, maxRetryAttempts, attemptTimeout)
+    );
+    // Inside resilience so long retry delays can acquire a fresh token for the next attempt.
+    httpClient.AddHttpMessageHandler(() =>
+      new ReportsAuthenticationHandler(endpoint, apiKey, tokenProvider)
     );
 
     services.RemoveAll<IHtmlToPdfConverter>();
@@ -213,7 +239,7 @@ public static class ReportsClientExtensions
     )
     {
       throw new ArgumentException(
-        $"{nameof(ReportsClientSettings.Endpoint)} must be an absolute http or https URL.",
+        $"{nameof(ReportsClientSettings.Endpoint)} must be an absolute http or https URL without user information, a query, or a fragment.",
         paramName
       );
     }

@@ -2,6 +2,7 @@ using Atli.Reports.Engine;
 using Atli.Reports.Server.Endpoints;
 using Atli.Reports.Server.Health;
 using Atli.Reports.Server.OpenApi;
+using Atli.Reports.Server.Security;
 using Atli.Reports.Server.Serialization;
 using Atli.Reports.Server.Telemetry;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -28,6 +29,23 @@ public static class ReportsServerApplication
   {
     var builder = WebApplication.CreateBuilder(args);
 
+    builder
+      .Services.AddOptions<HostOptions>()
+      .Configure(options => options.ShutdownTimeout = TimeSpan.FromSeconds(80))
+      .Bind(builder.Configuration.GetSection("HostOptions"))
+      .Validate(
+        options =>
+          options.ShutdownTimeout > TimeSpan.Zero
+          && options.ShutdownTimeout <= TimeSpan.FromDays(1),
+        "HostOptions:ShutdownTimeout must be positive and at most one day."
+      )
+      .ValidateOnStart();
+
+    // These are server defaults, even if appsettings.json is absent or the content root changes.
+    // Configuration binding below can explicitly opt into a different network policy.
+    builder.Services.Configure<ReportsEngineOptions>(options =>
+      options.Network.Mode = ReportsEngineNetworkMode.Disabled
+    );
     builder.Services.AddReportsEngine(
       builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
     );
@@ -75,6 +93,7 @@ public static class ReportsServerApplication
     builder.Services.AddServerOpenApi();
 
     configure?.Invoke(builder);
+    builder.AddReportsSecurity();
 
     var app = builder.Build();
 
@@ -82,11 +101,16 @@ public static class ReportsServerApplication
     // handler rethrows, and Kestrel aborts the connection.
     app.UseExceptionHandler();
     app.UseStatusCodePages();
+    app.UseRouting();
+    app.UseReportsAudit();
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.UseReportsAdmission();
 
     app.MapConvertEndpoints();
 
     // The document is the server's public contract, so every environment serves it.
-    app.MapOpenApi();
+    app.MapOpenApi().RequireAuthorization(ReportsSecurityRegistration.DiagnosticsPolicy);
 
     // Probes poll these every few seconds; like their traces, their request metrics would drown the
     // conversions. They are operational, so the OpenAPI document leaves them out.
@@ -95,7 +119,7 @@ public static class ReportsServerApplication
         new HealthCheckOptions
         {
           Predicate = r => r.Tags.Contains("live"),
-          ResponseWriter = HealthCheckResponseWriter.WriteResponse,
+          ResponseWriter = HealthCheckResponseWriter.WriteSummary,
         }
       )
       .DisableHttpMetrics()
@@ -106,9 +130,21 @@ public static class ReportsServerApplication
         new HealthCheckOptions
         {
           Predicate = r => r.Tags.Contains("ready"),
+          ResponseWriter = HealthCheckResponseWriter.WriteSummary,
+        }
+      )
+      .DisableHttpMetrics()
+      .ExcludeFromDescription();
+
+    app.MapHealthChecks(
+        "/health/details",
+        new HealthCheckOptions
+        {
+          Predicate = r => r.Tags.Contains("ready"),
           ResponseWriter = HealthCheckResponseWriter.WriteResponse,
         }
       )
+      .RequireAuthorization(ReportsSecurityRegistration.DiagnosticsPolicy)
       .DisableHttpMetrics()
       .ExcludeFromDescription();
 

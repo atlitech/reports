@@ -24,6 +24,24 @@ image="$1"
 ready_timeout_seconds="${READY_TIMEOUT_SECONDS:-90}"
 container="reports-server-smoke-$$-$RANDOM"
 work="$(mktemp -d)"
+umask 077
+
+# Exercise the shipped authentication path, not anonymous mode. Credentials are held in private
+# files so curl's command line and failure diagnostics do not expose them.
+key_id=smoke
+credential="$key_id.$(openssl rand -hex 32)"
+verifier="$(printf '%s' "$credential" | openssl dgst -sha256 -binary | openssl base64 -A)"
+printf 'header = "X-Reports-Api-Key: %s"\n' "$credential" > "$work/client.curl"
+cat > "$work/server.env" <<EOF
+ReportsServer__Authentication__Mode=ApiKey
+ReportsServer__Authentication__ApiKeys__0__Id=$key_id
+ReportsServer__Authentication__ApiKeys__0__Hash=$verifier
+ReportsServer__Authentication__ApiKeys__0__CallerId=smoke
+ReportsServer__Authentication__ApiKeys__0__Permissions__0=reports.convert
+ReportsServer__Authentication__ApiKeys__0__Permissions__1=reports.diagnostics
+ATLI_SMOKE_SECRET=must-not-reach-the-browser
+EOF
+unset credential verifier
 
 fail() {
   echo "::error::$*" >&2
@@ -48,7 +66,9 @@ size_bytes="$(docker image inspect --format '{{.Size}}' "$image")"
 echo "Image: $image ($((size_bytes / 1024 / 1024)) MiB)"
 
 # Publish on a free loopback port, so concurrent runs on one machine do not collide.
-docker run --detach --name "$container" --publish 127.0.0.1::8080 "$image" >/dev/null
+docker run --detach --name "$container" --publish 127.0.0.1::8080 \
+  --env-file "$work/server.env" --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m,mode=1777 \
+  --cap-drop ALL --security-opt no-new-privileges:true "$image" >/dev/null
 address="$(docker port "$container" 8080/tcp | head -n 1)"
 base_url="http://$address"
 echo "Started $container at $base_url"
@@ -66,9 +86,18 @@ until curl --silent --fail --max-time 5 --output "$work/ready.json" "$base_url/h
 done
 echo "Ready after $((SECONDS - start))s: $(cat "$work/ready.json")"
 
+status="$(curl --silent --show-error --max-time 10 --output "$work/unauthorized.json" \
+  --write-out '%{http_code}' --header 'Content-Type: application/json' \
+  --data '{"html":"<h1>Must not render</h1>"}' "$base_url/convert")"
+[ "$status" = 401 ] || fail "Unauthenticated conversion returned $status, expected 401."
+if grep -q 'description\|process\|/opt/' "$work/ready.json"; then
+  fail "Anonymous readiness exposes internal diagnostics."
+fi
+echo "Unauthenticated conversions are rejected; readiness exposes no diagnostics"
+
 # The body is Models/ConvertRequest.cs, serialized in camelCase.
 status="$(
-  curl --silent --show-error --max-time 60 \
+  curl --config "$work/client.curl" --silent --show-error --max-time 60 \
     --header 'Content-Type: application/json' \
     --data '{"html":"<!doctype html><html><body><h1>Atli Reports smoke test</h1><p>Hello, PDF.</p></body></html>","options":{"paperSize":"A4"}}' \
     --dump-header "$work/headers.txt" \
@@ -90,7 +119,7 @@ echo "POST /convert: 200, $(wc -c <"$work/output.pdf" | tr -d ' ') bytes of PDF"
 # The server builds its OpenAPI document at runtime, so only the NativeAOT binary itself shows that it
 # can: a type the document needs but the trimmed binary lacks fails the request, not the build.
 status="$(
-  curl --silent --show-error --max-time 10 \
+  curl --config "$work/client.curl" --silent --show-error --max-time 10 \
     --output "$work/openapi.json" \
     --write-out '%{http_code}' \
     "$base_url/openapi/v1.json"
@@ -145,6 +174,28 @@ if [ "$root_found" = true ]; then
   fail "A process in the container runs as root."
 fi
 echo "tini is PID 1, the server is its child, and no process runs as root"
+
+# Never print process environments: they contain credentials. Check only for our canary's name.
+if docker exec "$container" sh -c '
+  inspected=0
+  for task in /proc/[0-9]*; do
+    [ -r "$task/comm" ] || continue
+    case "$(cat "$task/comm")" in
+      chrome*|headless*)
+        # Chromium can make sandboxed child processes non-dumpable. Require at least the
+        # readable browser parent; do not mistake a denied /proc read for a passed check.
+        browser_environment=$( (tr "\000" "\n" < "$task/environ") 2>/dev/null) || continue
+        inspected=$((inspected + 1))
+        if printf "%s\n" "$browser_environment" | grep -q "^ATLI_SMOKE_SECRET="; then exit 1; fi
+        ;;
+    esac
+  done
+  [ "$inspected" -gt 0 ]
+'; then
+  echo "Readable browser process environments contain no application secret canary"
+else
+  fail "Browser environment verification failed or no browser environment was readable."
+fi
 
 # tini forwards SIGTERM to the server, which drains and closes the browser; a clean shutdown exits 0.
 docker stop --time 30 "$container" >/dev/null

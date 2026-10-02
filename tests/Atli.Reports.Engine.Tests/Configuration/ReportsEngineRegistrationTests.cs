@@ -30,6 +30,10 @@ public class ReportsEngineRegistrationTests
           ["ReportsEngine:Concurrency:MaxQueueLength"] = "12",
           ["ReportsEngine:Concurrency:QueueTimeout"] = "00:00:09",
           ["ReportsEngine:ConversionTimeout"] = "00:02:00",
+          ["ReportsEngine:Network:Mode"] = "AllowList",
+          ["ReportsEngine:Network:AllowedOrigins:0"] = "https://assets.example.test",
+          ["ReportsEngine:Network:MaxRequests"] = "25",
+          ["ReportsEngine:Browser:EnvironmentVariables:FONTCONFIG_PATH"] = "/fonts/config",
         }
       )
       .Build();
@@ -57,6 +61,14 @@ public class ReportsEngineRegistrationTests
     await Assert.That(options.Concurrency.MaxQueueLength).IsEqualTo(12);
     await Assert.That(options.Concurrency.QueueTimeout).IsEqualTo(TimeSpan.FromSeconds(9));
     await Assert.That(options.ConversionTimeout).IsEqualTo(TimeSpan.FromMinutes(2));
+    await Assert.That(options.Network.Mode).IsEqualTo(ReportsEngineNetworkMode.AllowList);
+    await Assert
+      .That(options.Network.AllowedOrigins)
+      .IsEquivalentTo(["https://assets.example.test"]);
+    await Assert.That(options.Network.MaxRequests).IsEqualTo(25);
+    await Assert
+      .That(options.Browser.EnvironmentVariables["FONTCONFIG_PATH"])
+      .IsEqualTo("/fonts/config");
   }
 
   [Test]
@@ -114,5 +126,24 @@ public class ReportsEngineRegistrationTests
     await Assert
       .That(services.Count(descriptor => descriptor.ServiceType == typeof(IHtmlToPdfConverter)))
       .IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task Invalid_network_policies_fail_before_the_browser_is_started()
+  {
+    ServiceCollection services = new();
+    services.AddReportsEngine(options =>
+    {
+      options.Network.Mode = ReportsEngineNetworkMode.AllowList;
+      options.Network.MaxRequests = 0;
+      options.Network.RequestTimeout = TimeSpan.Zero;
+    });
+    await using var provider = services.BuildServiceProvider();
+
+    var exception = await Assert
+      .That(() => provider.GetRequiredService<IHtmlToPdfConverter>())
+      .Throws<OptionsValidationException>();
+
+    await Assert.That(exception!.Failures.Count()).IsEqualTo(3);
   }
 }

@@ -1,3 +1,4 @@
+using Atli.Reports.Engine.Chromium.Network;
 using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Engine.Configuration;
@@ -19,6 +20,50 @@ internal sealed class ReportsEngineOptionsValidator : IValidateOptions<ReportsEn
     RequirePositiveOrInfinite(failures, "Browser:MaxProcessLifetime", browser.MaxProcessLifetime);
     RequirePositiveOrInfinite(failures, "ConversionTimeout", options.ConversionTimeout);
     RequirePositiveOrInfinite(failures, "Browser:IdleTimeout", browser.IdleTimeout);
+    RequirePositive(failures, "Network:RequestTimeout", options.Network.RequestTimeout);
+
+    if (!Enum.IsDefined(options.Network.Mode))
+    {
+      failures.Add("Network:Mode must be Unrestricted, Disabled, or AllowList.");
+    }
+
+    if (
+      options.Network.MaxRequests < 1
+      || options.Network.MaxResponseBytes < 1
+      || options.Network.MaxTotalResponseBytes < 1
+    )
+    {
+      failures.Add("Network request and response byte limits must be positive.");
+    }
+
+    if (options.Network.AllowedOrigins.Any(origin => !AssetNetworkPolicy.IsValidOrigin(origin)))
+    {
+      failures.Add(
+        "Network:AllowedOrigins must contain exact HTTP(S) origins without paths, credentials, queries, or wildcards."
+      );
+    }
+
+    if (
+      options.Network.Mode == ReportsEngineNetworkMode.AllowList
+      && options.Network.AllowedOrigins.Count == 0
+    )
+    {
+      failures.Add("Network:AllowedOrigins must not be empty in AllowList mode.");
+    }
+
+    if (
+      browser.EnvironmentVariables.Any(variable =>
+        string.IsNullOrEmpty(variable.Key)
+        || variable.Key.Contains('=', StringComparison.Ordinal)
+        || variable.Key.Contains('\0', StringComparison.Ordinal)
+        || variable.Value.Contains('\0', StringComparison.Ordinal)
+      )
+    )
+    {
+      failures.Add(
+        "Browser:EnvironmentVariables must have valid names and values without null characters."
+      );
+    }
 
     if (browser.MaxConversionsPerProcess < 0)
     {

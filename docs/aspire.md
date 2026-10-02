@@ -34,7 +34,7 @@ dotnet add package Atli.Reports.Aspire.Hosting
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var reports = builder.AddReportsServer("reports");
+var reports = builder.AddReportsServer("reports").WithDevelopmentApiKey();
 
 builder.AddProject<Projects.Api>("api").WithReference(reports).WaitFor(reports);
 
@@ -138,6 +138,19 @@ off the engine's browser warm-up. `IReportService` and `MapBlazorReport` work as
 in-process engine. [`examples/RemoteReportServer`](../examples/RemoteReportServer) is this app in
 full, with a Blazor report and an endpoint that converts any HTML through `IHtmlToPdfConverter`.
 
+## Authentication
+
+The server requires explicit authentication. `WithDevelopmentApiKey()` generates ephemeral secret
+parameters for local runs and passes the credential through `WithReference`; publishing this helper
+fails deliberately. Use secret parameters with `WithApiKeyAuthentication(keyId, apiKey, apiKeyHash)`
+for deployment, or configure JWT authentication and acquire tokens in the application. The hash is
+base64 SHA-256 of the entire `id.secret` credential. See the [hosting package](../src/Atli.Reports.Aspire.Hosting/README.md)
+and [security guide](security.md) for production configuration and key rotation. Anonymous local
+access is an explicit `.WithAnonymousAccess()` choice.
+
+The server blocks external document networking by default. Inline report assets or configure an
+explicit public-origin allowlist; this is a server policy, not a `PdfOptions` setting.
+
 ## Configure the server
 
 The server reads the engine's settings from `ReportsEngine__*` environment variables. Typed methods
@@ -235,7 +248,7 @@ runs the server this way.
 
 ## Deploy
 
-The server is an ordinary container resource, so Aspire's deployment targets publish it like any
+Replace development credentials with production secret parameters first. The server is an ordinary container resource, so Aspire's deployment targets publish it like any
 other. Add the target's environment to the AppHost and run `aspire publish` (artifacts only) or
 `aspire deploy`:
 
@@ -291,8 +304,7 @@ services:
   Kubernetes, including Azure Kubernetes Service, gets no probes for now: Aspire's Kubernetes
   publisher writes the probe's scheme in lower case, and Kubernetes then never creates the pod
   ([microsoft/aspire#18271](https://github.com/microsoft/aspire/issues/18271), tracked in
-  [#147](https://github.com/atlitech/reports/issues/147)). To probe the server on Kubernetes today,
-  add the probe and correct its scheme:
+  [#147](https://github.com/atlitech/reports/issues/147)). For a complete standalone container deployment with explicit startup, readiness, and liveness probes, see [the Kubernetes example](../deploy/kubernetes/reports.yaml). When using Aspire, add the probe and correct its scheme:
 
   ```csharp
   #pragma warning disable ASPIREPROBES001 // Probes are experimental in Aspire 13.

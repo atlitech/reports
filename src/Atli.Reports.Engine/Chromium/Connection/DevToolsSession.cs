@@ -40,11 +40,31 @@ internal sealed class DevToolsSession : IDisposable
   public event DevToolsEventHandler? EventReceived;
 
   /// <inheritdoc cref="DevToolsConnection.SendAsync"/>
-  public Task<DevToolsReply> SendAsync(
+  public async Task<DevToolsReply> SendAsync(
     DevToolsMessage message,
     CancellationToken cancellationToken,
     TimeSpan? timeout = null
-  ) => _connection.SendAsync(message, SessionId, cancellationToken, timeout);
+  )
+  {
+    if (_terminated.Task.IsCompleted)
+    {
+      await _terminated.Task;
+    }
+
+    try
+    {
+      return await _connection.SendAsync(message, SessionId, cancellationToken, timeout);
+    }
+    catch when (_terminated.Task.IsCompleted)
+    {
+      // Preserve the reason if termination raced command registration.
+      await _terminated.Task;
+      throw;
+    }
+  }
+
+  /// <summary>Stops pending and future commands, preserving the policy or lifecycle failure.</summary>
+  internal void Fail(Exception reason) => _connection.TerminateSession(SessionId, reason);
 
   /// <summary>
   /// Sends <paramref name="message"/> and discards its result.

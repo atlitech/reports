@@ -33,7 +33,7 @@ public class HealthEndpointTests
       $"--ReportsEngine:Browser:ExecutablePath={fake.Path}"
     );
 
-    var ready = await GetHealthAsync(server, "/health/ready");
+    var ready = await GetHealthAsync(server, "/health/details");
     var live = await GetHealthAsync(server, "/health/live");
 
     await Assert.That(ready.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
@@ -82,7 +82,7 @@ public class HealthEndpointTests
       await Assert.That(converted.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
     }
 
-    var failing = await GetHealthAsync(server, "/health/ready");
+    var failing = await GetHealthAsync(server, "/health/details");
     await Assert.That(failing.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
     await Assert.That(failing.Checks["browser"].Status).IsEqualTo("Unhealthy");
 
@@ -95,7 +95,7 @@ public class HealthEndpointTests
         await TestEngine.EventuallyAsync(
           async () =>
           {
-            recovered = await GetHealthAsync(server, "/health/ready");
+            recovered = await GetHealthAsync(server, "/health/details");
             return recovered.StatusCode == HttpStatusCode.OK;
           },
           TimeSpan.FromSeconds(90)
@@ -125,7 +125,7 @@ public class HealthEndpointTests
       $"--ReportsEngine:Browser:ExecutablePath={fake.Path}"
     );
 
-    var ready = await GetHealthAsync(server, "/health/ready");
+    var ready = await GetHealthAsync(server, "/health/details");
 
     await Assert.That(ready.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(ready.Checks["browser"].Status).IsEqualTo("Healthy");
@@ -142,7 +142,7 @@ public class HealthEndpointTests
       $"--ReportsEngine:Browser:ExecutablePath={missing}"
     );
 
-    var ready = await GetHealthAsync(server, "/health/ready");
+    var ready = await GetHealthAsync(server, "/health/details");
 
     await Assert.That(ready.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
     await Assert
@@ -170,18 +170,19 @@ public class HealthEndpointTests
   {
     using var response = await server.Client.GetAsync(path, TestToken);
     using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestToken));
-    var checks = body
-      .RootElement.GetProperty("checks")
-      .EnumerateObject()
-      .ToDictionary(
-        check => check.Name,
-        check => new HealthCheckEntry(
-          check.Value.GetProperty("status").GetString()!,
-          check.Value.TryGetProperty("description", out var description)
-            ? description.GetString()
-            : null
+    var checks = body.RootElement.TryGetProperty("checks", out var checkEntries)
+      ? checkEntries
+        .EnumerateObject()
+        .ToDictionary(
+          check => check.Name,
+          check => new HealthCheckEntry(
+            check.Value.GetProperty("status").GetString()!,
+            check.Value.TryGetProperty("description", out var description)
+              ? description.GetString()
+              : null
+          )
         )
-      );
+      : new Dictionary<string, HealthCheckEntry>();
     return new HealthResponse(
       response.StatusCode,
       response.Content.Headers.ContentType?.MediaType,

@@ -38,6 +38,22 @@ public sealed class ReportsClientSettings
   public Uri? Endpoint { get; set; }
 
   /// <summary>
+  /// A full API credential (<c>key-id.secret</c>), sent only to conversion requests in the
+  /// <c>X-Reports-Api-Key</c> header. Configure through a secret store, not source control.
+  /// Cannot be combined with <see cref="AccessTokenProvider"/>.
+  /// </summary>
+  public string? ApiKey { get; set; }
+
+  /// <summary>
+  /// Acquires a bearer access token for each conversion attempt. The application owns token
+  /// caching, expiry, and refresh; return the token without the <c>Bearer</c> prefix.
+  /// The callback runs within the attempt timeout and receives its cancellation token.
+  /// Set this in code, for example using a workload identity credential. Authentication
+  /// failures (<c>401</c>, <c>403</c>) are not retried. Health probes do not acquire credentials.
+  /// </summary>
+  public Func<CancellationToken, ValueTask<string>>? AccessTokenProvider { get; set; }
+
+  /// <summary>
   /// Whether to skip registering the health check that probes the server's <c>/health/ready</c>.
   /// Defaults to <see langword="false"/>.
   /// </summary>
@@ -84,7 +100,8 @@ public sealed class ReportsClientSettings
   public int MaxRetryAttempts { get; set; } = 3;
 
   /// <summary>
-  /// Reads <see cref="Endpoint"/> from a connection string: either <c>Endpoint=&lt;url&gt;</c>, as
+  /// Reads <see cref="Endpoint"/> and an optional <see cref="ApiKey"/> from a connection string:
+  /// <c>Endpoint=&lt;url&gt;;ApiKey=&lt;credential&gt;</c>, as
   /// the Aspire hosting integration writes it, or a bare absolute URL.
   /// </summary>
   /// <exception cref="ArgumentException">The connection string has neither form.</exception>
@@ -101,9 +118,10 @@ public sealed class ReportsClientSettings
     {
       builder.ConnectionString = connectionString;
     }
-    catch (ArgumentException exception)
+    catch (ArgumentException)
     {
-      throw new ArgumentException(InvalidConnectionString, nameof(connectionString), exception);
+      // Parser errors can include the connection string, which may contain a credential.
+      throw new ArgumentException(InvalidConnectionString, nameof(connectionString));
     }
 
     if (
@@ -112,6 +130,10 @@ public sealed class ReportsClientSettings
     )
     {
       Endpoint = endpoint;
+      if (builder.TryGetValue("ApiKey", out var apiKey))
+      {
+        ApiKey = apiKey as string;
+      }
       return;
     }
 
@@ -129,6 +151,9 @@ public sealed class ReportsClientSettings
     if (
       Uri.TryCreate(value?.Trim(), UriKind.Absolute, out endpoint)
       && (endpoint.Scheme == Uri.UriSchemeHttp || endpoint.Scheme == Uri.UriSchemeHttps)
+      && string.IsNullOrEmpty(endpoint.UserInfo)
+      && string.IsNullOrEmpty(endpoint.Query)
+      && string.IsNullOrEmpty(endpoint.Fragment)
     )
     {
       return true;

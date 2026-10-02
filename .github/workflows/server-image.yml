@@ -19,6 +19,10 @@ on:
       - "global.json"
       - ".github/workflows/server-image.yml"
       - ".github/scripts/smoke-test-server-image.sh"
+      - ".github/scripts/smoke-test-server-jwt.py"
+      - ".github/scripts/validate-kubernetes-security.sh"
+      - "scripts/create-reports-api-key.sh"
+      - "deploy/kubernetes/**"
       - ".github/scripts/chrome-headless-shell.sh"
   push:
     branches: [ "main" ]
@@ -30,6 +34,10 @@ on:
       - "global.json"
       - ".github/workflows/server-image.yml"
       - ".github/scripts/smoke-test-server-image.sh"
+      - ".github/scripts/smoke-test-server-jwt.py"
+      - ".github/scripts/validate-kubernetes-security.sh"
+      - "scripts/create-reports-api-key.sh"
+      - "deploy/kubernetes/**"
       - ".github/scripts/chrome-headless-shell.sh"
   workflow_dispatch:
 
@@ -89,3 +97,19 @@ jobs:
 
       - name: Smoke test
         run: .github/scripts/smoke-test-server-image.sh reports-server:smoke-test
+
+      - name: Verify JWT authentication in the NativeAOT image
+        run: python3 .github/scripts/smoke-test-server-jwt.py reports-server:smoke-test
+
+      - name: Validate Kubernetes deployment in a disposable cluster
+        if: matrix.arch == 'amd64'
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.31.0/kind-linux-amd64 \
+            --output "$RUNNER_TEMP/kind-linux-amd64"
+          printf '%s  %s\n' \
+            eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa \
+            "$RUNNER_TEMP/kind-linux-amd64" | sha256sum --check
+          chmod 700 "$RUNNER_TEMP/kind-linux-amd64"
+          KIND_BIN="$RUNNER_TEMP/kind-linux-amd64" \
+            .github/scripts/validate-kubernetes-security.sh reports-server:smoke-test

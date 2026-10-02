@@ -46,6 +46,7 @@ internal interface IBrowserProvider
 internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisposable
 {
   private readonly ReportsEngineBrowserOptions _options;
+  private readonly ReportsEngineNetworkOptions _network;
   private readonly EngineMetrics _metrics;
   private readonly TimeProvider _timeProvider;
   private readonly ILoggerFactory _loggerFactory;
@@ -74,6 +75,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   )
   {
     _options = options.Value.Browser;
+    _network = options.Value.Network;
     _metrics = metrics;
     _timeProvider = timeProvider;
     _loggerFactory = loggerFactory;
@@ -388,7 +390,8 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         generation,
         _timeProvider,
         _loggerFactory,
-        _stopping.Token
+        _stopping.Token,
+        _network
       );
     }
     catch (Exception exception)

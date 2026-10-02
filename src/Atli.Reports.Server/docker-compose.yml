@@ -4,6 +4,17 @@ services:
       context: ../..
       dockerfile: src/Atli.Reports.Server/Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    env_file:
+      # Generate from the repository root: scripts/create-reports-api-key.sh
+      - ../../.reports-secrets/server.env
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s

@@ -1,4 +1,5 @@
 using Atli.Reports.Engine.Chromium.Connection;
+using Atli.Reports.Engine.Chromium.Network;
 using Atli.Reports.Engine.Chromium.Page;
 using Atli.Reports.Engine.Chromium.Protocol.Messages;
 using Atli.Reports.Engine.Chromium.Protocol.Results;
@@ -22,6 +23,7 @@ internal sealed class BrowserInstance : IAsyncDisposable
   private readonly ILogger _logger;
   private readonly TimeSpan _commandTimeout;
   private readonly int _pdfReadChunkSize;
+  private readonly ReportsEngineNetworkOptions _network;
   private readonly Lock _warmLock = new();
   private Task<IsolatedPage>? _warmPage;
   private bool _closing;
@@ -32,7 +34,8 @@ internal sealed class BrowserInstance : IAsyncDisposable
     int generation,
     long startedTimestamp,
     ReportsEngineBrowserOptions options,
-    ILogger logger
+    ILogger logger,
+    ReportsEngineNetworkOptions network
   )
   {
     _process = process;
@@ -42,6 +45,7 @@ internal sealed class BrowserInstance : IAsyncDisposable
     _commandTimeout = options.CommandTimeout;
     _pdfReadChunkSize = options.PdfReadChunkSize;
     _logger = logger;
+    _network = network;
     Terminated = Task.WhenAny(process.Exited, connection.Closed);
   }
 
@@ -109,14 +113,16 @@ internal sealed class BrowserInstance : IAsyncDisposable
     int generation,
     TimeProvider timeProvider,
     ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken
+    CancellationToken cancellationToken,
+    ReportsEngineNetworkOptions? network = null
   )
   {
     var logger = loggerFactory.CreateLogger<BrowserInstance>();
     var process = await BrowserProcess.LaunchAsync(
       options,
       loggerFactory.CreateLogger<BrowserProcess>(),
-      cancellationToken
+      cancellationToken,
+      network is { Mode: not ReportsEngineNetworkMode.Unrestricted }
     );
 
     DevToolsConnection connection;
@@ -145,14 +151,25 @@ internal sealed class BrowserInstance : IAsyncDisposable
       );
     }
 
-    BrowserInstance instance = new(
-      process,
-      connection,
-      generation,
-      timeProvider.GetTimestamp(),
-      options,
-      logger
-    );
+    BrowserInstance instance;
+    try
+    {
+      instance = new(
+        process,
+        connection,
+        generation,
+        timeProvider.GetTimestamp(),
+        options,
+        logger,
+        network ?? new ReportsEngineNetworkOptions()
+      );
+    }
+    catch
+    {
+      await connection.DisposeAsync();
+      await process.DisposeAsync();
+      throw;
+    }
     LogMessages.BrowserLaunched(logger, generation, process.Id);
     return instance;
   }
@@ -249,15 +266,20 @@ internal sealed class BrowserInstance : IAsyncDisposable
     // The commands run without the caller's token: abandoning them halfway could leave a browser
     // context the engine no longer knows about. They are bounded by the command timeout.
     string? browserContextId = null;
+    PageNetworkController? network = null;
+    DenyNetworkProxy? proxy = null;
     try
     {
-      using (
-        var created = await _connection.SendAsync(
-          new DevToolsMessage("Target.createBrowserContext"),
-          null,
-          CancellationToken.None
-        )
-      )
+      DevToolsMessage createContext = new("Target.createBrowserContext");
+      if (_network.Mode != ReportsEngineNetworkMode.Unrestricted)
+      {
+        proxy = new DenyNetworkProxy();
+        createContext.Parameters.Add("proxyServer", proxy.Address);
+        // Chromium otherwise bypasses proxies for loopback and link-local destinations.
+        createContext.Parameters.Add("proxyBypassList", "<-loopback>");
+      }
+
+      using (var created = await _connection.SendAsync(createContext, null, CancellationToken.None))
       {
         browserContextId = created
           .Deserialize(DevToolsResultsContext.Default.CreateBrowserContextResult)
@@ -285,13 +307,33 @@ internal sealed class BrowserInstance : IAsyncDisposable
       }
 
       var session = _connection.AttachSession(sessionId, targetId);
-      return new IsolatedPage(this, session, browserContextId, _pdfReadChunkSize, _logger);
+      if (proxy is not null)
+      {
+        network = new PageNetworkController(session, _network, proxy);
+        await network.EnableAsync();
+      }
+
+      return new IsolatedPage(this, session, browserContextId, _pdfReadChunkSize, _logger, network);
     }
     catch
     {
-      if (browserContextId is not null)
+      try
       {
-        _ = DisposeContextAsync(browserContextId);
+        if (network is not null)
+        {
+          await network.DisposeAsync();
+        }
+        else if (proxy is not null)
+        {
+          await proxy.DisposeAsync();
+        }
+      }
+      finally
+      {
+        if (browserContextId is not null)
+        {
+          await DisposeContextAsync(browserContextId);
+        }
       }
 
       throw;

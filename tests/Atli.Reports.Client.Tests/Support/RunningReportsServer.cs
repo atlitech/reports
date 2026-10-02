@@ -29,6 +29,7 @@ public sealed class RunningReportsServer : IAsyncInitializer, IAsyncDisposable
     _app = ReportsServerApplication.Create(
       [
         "--urls=http://127.0.0.1:0",
+        "--ReportsServer:Authentication:Mode=None",
         "--ReportsEngine:Browser:WarmUpOnStartup=false",
         "--ReportsEngine:Browser:NoSandbox=true",
         "--ReportsEngine:Browser:DisableDevShmUsage=true",

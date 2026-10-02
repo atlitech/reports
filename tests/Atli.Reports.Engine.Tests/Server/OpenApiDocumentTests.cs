@@ -166,7 +166,7 @@ public class OpenApiDocumentTests
     var document = await GetDocumentAsync(server);
 
     // Every status a conversion error is written with (a canceled request's 499 reaches no client),
-    // and the 413 and 415 of a body the server cannot read, with the kinds each one carries.
+    // plus body-binding failures and the per-caller 429, with the kinds each status carries.
     var kindsByStatus = Enum.GetValues<ConversionErrorKind>()
       .Where(kind => kind != ConversionErrorKind.Canceled)
       .Select(kind => (Status: ConversionProblems.StatusCode(kind), Kind: kind))
@@ -175,6 +175,7 @@ public class OpenApiDocumentTests
         {
           StatusCodes.Status413PayloadTooLarge,
           StatusCodes.Status415UnsupportedMediaType,
+          StatusCodes.Status429TooManyRequests,
         }.Select(status => (Status: status, Kind: ConversionProblems.KindForStatus(status)))
       )
       .ToLookup(entry => entry.Status.ToString(CultureInfo.InvariantCulture), entry => entry.Kind);
@@ -202,8 +203,11 @@ public class OpenApiDocumentTests
       await Assert.That(Texts(kind["enum"])).IsEquivalentTo(Enum.GetNames<ConversionErrorKind>());
     }
 
-    var retryAfter = responses["503"]!["headers"]!["Retry-After"]!;
-    await Assert.That(Text(retryAfter["schema"]!["type"])).IsEqualTo("integer");
+    foreach (var status in new[] { "429", "503" })
+    {
+      var retryAfter = responses[status]!["headers"]!["Retry-After"]!;
+      await Assert.That(Text(retryAfter["schema"]!["type"])).IsEqualTo("integer");
+    }
   }
 
   private static async Task<JsonObject> GetDocumentAsync(RunningServer server)

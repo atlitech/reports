@@ -59,7 +59,8 @@ internal static class ServerErrors
       is HttpRequestException
         or IOException
         or OperationCanceledException
-        or TimeoutRejectedException;
+        or TimeoutRejectedException
+        or ReportsAuthenticationException;
 
   /// <summary>
   /// Maps a failure to reach the server or to read its answer: cancellation by the caller is
@@ -73,6 +74,11 @@ internal static class ServerErrors
     string? context = null
   )
   {
+    if (exception is ReportsAuthenticationException)
+    {
+      return new ConversionError(ConversionErrorKind.Unauthorized, exception.Message);
+    }
+
     if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
     {
       return new ConversionError(
@@ -106,6 +112,8 @@ internal static class ServerErrors
   internal static ConversionErrorKind KindForStatus(HttpStatusCode status) =>
     (int)status switch
     {
+      401 => ConversionErrorKind.Unauthorized,
+      403 => ConversionErrorKind.Forbidden,
       422 => ConversionErrorKind.SignalTimeout,
       408 or 504 => ConversionErrorKind.Timeout,
       429 => ConversionErrorKind.Busy,

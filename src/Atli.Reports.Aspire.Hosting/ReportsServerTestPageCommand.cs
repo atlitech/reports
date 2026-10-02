@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json.Nodes;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,32 +44,49 @@ internal static partial class ReportsServerTestPageCommand
   /// </summary>
   internal static IResourceBuilder<ReportsServerResource> WithConvertTestPageCommand(
     this IResourceBuilder<ReportsServerResource> builder
-  ) =>
-    builder.WithCommand(
+  )
+  {
+    builder
+      .ApplicationBuilder.Services.AddHttpClient(Name)
+      .ConfigurePrimaryHttpMessageHandler(() =>
+        new SocketsHttpHandler { AllowAutoRedirect = false }
+      )
+      .RedactLoggedHeaders(_ => true);
+    return builder.WithCommand(
       Name,
       "Convert a test page",
       context => ExecuteAsync(builder.Resource, context),
       new CommandOptions
       {
         Description =
-          "Converts a one-page document to a PDF and logs the PDF's size and the time it took.",
+          "Converts a one-page document to a PDF. Requires WithApiKeyAuthentication, WithDevelopmentApiKey, or explicit WithAnonymousAccess.",
         IconName = "DocumentPdf",
         UpdateState = context =>
           context.ResourceSnapshot.HealthStatus is HealthStatus.Healthy
+          && (builder.Resource.ApiKeyParameter is not null || builder.Resource.AnonymousAccess)
             ? ResourceCommandState.Enabled
             : ResourceCommandState.Disabled,
       }
     );
+  }
 
   private static async Task<ExecuteCommandResult> ExecuteAsync(
     ReportsServerResource resource,
     ExecuteCommandContext context
   )
   {
+    if (resource.ApiKeyParameter is null && !resource.AnonymousAccess)
+    {
+      return CommandResults.Failure(
+        "No dashboard conversion credential is configured. Use WithApiKeyAuthentication or send an authorized request from your application."
+      );
+    }
     var logger = context
       .ServiceProvider.GetRequiredService<ResourceLoggerService>()
       .GetLogger(resource);
-    var client = context.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
+    var client = context
+      .ServiceProvider.GetRequiredService<IHttpClientFactory>()
+      .CreateClient(Name);
     Uri convert = new(new Uri(resource.PrimaryEndpoint.Url), "convert");
 
     using StringContent content = new(RequestBody);
@@ -82,14 +98,27 @@ internal static partial class ReportsServerTestPageCommand
     var started = Stopwatch.GetTimestamp();
     try
     {
-      using var response = await client.PostAsync(convert, content, context.CancellationToken);
+      using HttpRequestMessage request = new(HttpMethod.Post, convert) { Content = content };
+      if (resource.ApiKeyParameter is { } parameter)
+      {
+        var credential = await parameter.GetValueAsync(context.CancellationToken);
+        if (
+          string.IsNullOrWhiteSpace(credential)
+          || credential.Any(character => character is <= ' ' or >= '\u007f')
+        )
+        {
+          return CommandResults.Failure("The dashboard conversion credential is invalid.");
+        }
+        request.Headers.Add("X-Reports-Api-Key", credential);
+      }
+      using var response = await client.SendAsync(request, context.CancellationToken);
       var body = await response.Content.ReadAsByteArrayAsync(context.CancellationToken);
       var elapsed = Stopwatch.GetElapsedTime(started);
 
       if (!response.IsSuccessStatusCode)
       {
         var status = (int)response.StatusCode;
-        LogTestPageRejected(logger, status, Encoding.UTF8.GetString(body));
+        LogTestPageRejected(logger, status);
         return CommandResults.Failure(
           $"The server answered {status} {response.ReasonPhrase}; its console log has the details."
         );
@@ -127,7 +156,7 @@ internal static partial class ReportsServerTestPageCommand
   [LoggerMessage(
     EventId = 2,
     Level = LogLevel.Warning,
-    Message = "The test page failed with status {StatusCode}: {Problem}"
+    Message = "The test page failed with status {StatusCode}."
   )]
-  private static partial void LogTestPageRejected(ILogger logger, int statusCode, string problem);
+  private static partial void LogTestPageRejected(ILogger logger, int statusCode);
 }

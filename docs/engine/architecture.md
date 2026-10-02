@@ -117,7 +117,7 @@ Atli renders documents for different tenants in the same browser, so nothing one
 may be visible to the next: cookies, `localStorage` and `sessionStorage`, IndexedDB, Cache Storage,
 the HTTP cache, service workers, permissions, bindings, and injected scripts.
 
-**Choice: a browser context per conversion.** A browser context is Chromium's own isolation boundary
+**Choice: a browser context per conversion.** This separates document storage; it is not an OS security boundary for malicious code. See [the supported trust model](../security.md). A browser context is Chromium's storage isolation boundary
 (it is what an incognito window is): it has its own cookie jar, storage partition, HTTP cache, and
 service workers, and `Target.disposeBrowserContext` discards all of it. Every conversion gets a new
 context and a new page in it; bindings and scripts registered for the page die with it.

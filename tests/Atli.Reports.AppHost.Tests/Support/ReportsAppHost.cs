@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -46,6 +47,7 @@ public sealed class ReportsAppHost : IAsyncInitializer, IAsyncDisposable
 
   private readonly FileLoggerProvider _logs;
   private DistributedApplication? _app;
+  private string? _apiKey;
 
   public ReportsAppHost()
   {
@@ -91,6 +93,14 @@ public sealed class ReportsAppHost : IAsyncInitializer, IAsyncDisposable
 
     _app = await builder.BuildAsync(timeout.Token);
     await _app.StartAsync(timeout.Token);
+    var model = App.Services.GetRequiredService<DistributedApplicationModel>();
+    var reports = (IResourceWithConnectionString)
+      model.Resources.Single(resource => resource.Name == ReportsServer);
+    var connection = new DbConnectionStringBuilder
+    {
+      ConnectionString = await reports.GetConnectionStringAsync(timeout.Token),
+    };
+    _apiKey = (string)connection["ApiKey"];
   }
 
   /// <summary>
@@ -120,8 +130,15 @@ public sealed class ReportsAppHost : IAsyncInitializer, IAsyncDisposable
   /// <summary>
   /// A client for the resource's <c>http</c> endpoint.
   /// </summary>
-  public HttpClient CreateHttpClient(string resourceName) =>
-    App.CreateHttpClient(resourceName, "http");
+  public HttpClient CreateHttpClient(string resourceName)
+  {
+    var client = App.CreateHttpClient(resourceName, "http");
+    if (resourceName == ReportsServer)
+    {
+      client.DefaultRequestHeaders.Add("X-Reports-Api-Key", _apiKey);
+    }
+    return client;
+  }
 
   /// <summary>
   /// The ID of the process the orchestrator started for a project resource.

@@ -112,7 +112,10 @@ public class AddReportsServerTests
   [Test]
   public async Task Offers_a_test_page_command_while_the_server_is_healthy()
   {
-    var server = AppModel.CreateBuilder().AddReportsServer("reports-server");
+    var server = AppModel
+      .CreateBuilder()
+      .AddReportsServer("reports-server")
+      .WithDevelopmentApiKey();
 
     var command = server
       .Resource.Annotations.OfType<ResourceCommandAnnotation>()

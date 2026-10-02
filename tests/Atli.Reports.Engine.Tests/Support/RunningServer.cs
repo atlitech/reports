@@ -26,6 +26,7 @@ internal sealed class RunningServer(WebApplication app) : IAsyncDisposable
     var app = ReportsServerApplication.Create(
       [
         "--urls=http://127.0.0.1:0",
+        "--ReportsServer:Authentication:Mode=None",
         "--ReportsEngine:Browser:WarmUpOnStartup=false",
         "--ReportsEngine:Browser:NoSandbox=true",
         .. arguments,

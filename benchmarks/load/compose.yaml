@@ -31,7 +31,7 @@ services:
       context: ../..
       dockerfile: src/Atli.Reports.Server/Dockerfile
     ports:
-      - "${ATLI_PORT:-18080}:8080"
+      - "127.0.0.1:${ATLI_PORT:-18080}:8080"
     # Optional, git-ignored: put ReportsEngine__* tuning here instead of editing this file. The
     # results record every ReportsEngine__* variable the container ran with.
     env_file:
@@ -39,6 +39,10 @@ services:
         required: false
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # This loopback-only benchmark uses controlled, self-contained fixtures. Explicitly opt out
+      # of caller authentication/quotas so concurrency measures engine capacity, not admission.
+      ReportsServer__Authentication__Mode: None
+      ReportsServer__Limits__MaxConcurrentRequestsPerCaller: "128"
       # Engine knobs bind from ReportsEngine__* (see src/Atli.Reports.Server/appsettings.json, which
       # already sets WarmUpOnStartup, Headless, NoSandbox, DisableDevShmUsage, a 30 s CommandTimeout,
       # a 60 s ConversionTimeout, and a queue of 100 with a 30 s QueueTimeout; the Dockerfile sets
@@ -53,7 +57,7 @@ services:
     # (linux/amd64 and linux/arm64).
     image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c}
     ports:
-      - "${GOTENBERG_PORT:-13000}:3000"
+      - "127.0.0.1:${GOTENBERG_PORT:-13000}:3000"
     # Defaults in 8.37.0: --chromium-max-concurrency=6, --chromium-max-queue-size=0 (unbounded),
     # --chromium-restart-after=100, --chromium-auto-start=false, --api-timeout=30s. None are changed;
     # pass extra flags through GOTENBERG_ARGS, for example "--chromium-restart-after=0".

@@ -22,7 +22,7 @@ dotnet add package Atli.Reports.Aspire.Hosting
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var reports = builder.AddReportsServer("reports");
+var reports = builder.AddReportsServer("reports").WithDevelopmentApiKey();
 
 builder.AddProject<Projects.Api>("api").WithReference(reports).WaitFor(reports);
 
@@ -31,6 +31,25 @@ builder.Build().Run();
 
 In the app, `builder.AddReportsClient("reports")` from `Atli.Reports.Client` registers
 `IHtmlToPdfConverter` over the server.
+
+`WithDevelopmentApiKey` generates a fresh random secret for each local run. It wires the server's
+hashed verifier, client credentials, and dashboard test command. It refuses publishing. For
+deployment, supply separate secret parameters containing the full API credential and base64
+SHA-256 of that entire credential:
+
+```csharp
+var apiKey = builder.AddParameter("reports-api-key", secret: true);
+var apiKeyHash = builder.AddParameter("reports-api-key-hash", secret: true);
+var reports = builder.AddReportsServer("reports")
+  .WithApiKeyAuthentication("api", apiKey, apiKeyHash, callerId: "my-application");
+```
+
+The credential must be `api.<random secret>` with at least 32 random bytes of entropy. The helper
+grants `reports.convert`. The server receives the hash; authorized referenced applications receive
+the full credential through secret parameter references. Protect application configuration and use
+distinct caller identities for independent applications. Never check credentials into source control.
+The server requires an explicit authentication mode. `WithAnonymousAccess()` is available only as
+an explicit choice for trusted development or a separately enforced authentication boundary.
 
 `AddReportsServer` runs `ghcr.io/atlitech/reports-server`, tagged with this package's version, and:
 
@@ -41,13 +60,18 @@ In the app, `builder.AddReportsClient("reports")` from `Atli.Reports.Client` reg
   run probes, such as Azure Container Apps (not on Kubernetes yet, see
   [Deploy](https://github.com/atlitech/reports/blob/main/docs/aspire.md#deploy));
 - sends the server's logs, metrics, and traces to the dashboard over OTLP;
-- links the server's OpenAPI document, `/openapi/v1.json`, in the dashboard;
+- links the server's OpenAPI document, `/openapi/v1.json`, which requires `reports.diagnostics`;
 - adds a `Convert a test page` dashboard command, which converts a one-page document and logs the
   PDF's size and the time it took.
 
-`WithReference` passes the connection string `Endpoint=<url>` as `ConnectionStrings__reports`, and
+`WithReference` passes the connection string `Endpoint=<url>;ApiKey=<credential>` when API-key
+authentication is configured (otherwise only `Endpoint=<url>`) as `ConnectionStrings__reports`, and
 the connection properties as `REPORTS_HOST`, `REPORTS_PORT`, and `REPORTS_URI` for apps in other
 languages.
+With API-key authentication it also provides the secret `REPORTS_APIKEY` connection property.
+The test-page command is disabled without an API-key helper or explicit anonymous mode; JWT-only
+deployments should send an authorized conversion from their application. Readiness probes stay
+anonymous and do not include credentials.
 
 ## Configure
 

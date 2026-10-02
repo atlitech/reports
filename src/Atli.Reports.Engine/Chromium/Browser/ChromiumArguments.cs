@@ -8,9 +8,13 @@ internal static class ChromiumArguments
   /// <summary>
   /// Builds the arguments for a browser that stores its profile in <paramref name="userDataDirectory"/>
   /// and reports a DevTools endpoint on a free port. <see cref="ReportsEngineBrowserOptions.ExtraArguments"/>
-  /// come last, so they can override the engine's own switches.
+  /// can override ordinary switches; required restricted-network switches are appended last.
   /// </summary>
-  public static List<string> Build(ReportsEngineBrowserOptions options, string userDataDirectory)
+  public static List<string> Build(
+    ReportsEngineBrowserOptions options,
+    string userDataDirectory,
+    bool restrictNetwork = false
+  )
   {
     List<string> arguments =
     [
@@ -56,6 +60,16 @@ internal static class ChromiumArguments
     }
 
     arguments.AddRange(options.ExtraArguments);
+    if (restrictNetwork)
+    {
+      // HTTP(S)/WebSocket traffic uses the context's deny proxy. Prevent common UDP/direct-DNS
+      // alternatives too; only an infrastructure boundary can contain a compromised browser.
+      arguments.Add("--disable-quic");
+      arguments.Add("--dns-prefetch-disable");
+      arguments.Add("--host-resolver-rules=MAP * ~NOTFOUND");
+      arguments.Add("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+    }
+
     return arguments;
   }
 }

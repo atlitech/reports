@@ -1,4 +1,5 @@
 using Atli.Reports.Engine.Chromium;
+using Atli.Reports.Engine.Chromium.Network;
 using Atli.Reports.Engine.Chromium.Protocol;
 
 namespace Atli.Reports.Engine.Conversion;
@@ -27,6 +28,11 @@ internal static class ConversionErrors
 
     return exception switch
     {
+      NetworkPolicyException => new ConversionError(
+        ConversionErrorKind.PolicyDenied,
+        exception.Message,
+        exception
+      ),
       ConversionBusyException => new ConversionError(
         ConversionErrorKind.Busy,
         exception.Message,
@@ -59,6 +65,7 @@ internal static class ConversionErrors
   public static bool IsExpected(Exception exception) =>
     exception
       is ConversionBusyException
+        or NetworkPolicyException
         or BrowserUnavailableException
         or TimeoutException
         or DevToolsProtocolException

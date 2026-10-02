@@ -38,6 +38,9 @@ public class AddReportsClientTests
   [Arguments("Endpoint=/relative")]
   [Arguments("Host=reports;Port=8080")]
   [Arguments("not a url")]
+  [Arguments("https://caller:secret@reports.example.com")]
+  [Arguments("https://reports.example.com?api-key=secret")]
+  [Arguments("https://reports.example.com#secret")]
   public async Task An_unusable_connection_string_fails_with_its_name(string connectionString)
   {
     var exception = await Assert
@@ -54,6 +57,59 @@ public class AddReportsClientTests
 
     await Assert.That(exception!.Message).Contains("ConnectionStrings:reports");
     await Assert.That(exception.Message).Contains("ReportsClient:Endpoint");
+  }
+
+  [Test]
+  public async Task Api_keys_bind_from_secret_configuration_and_connection_strings_override_them()
+  {
+    ReportsClientSettings? seen = null;
+    using var host = Build(
+      new()
+      {
+        ["ReportsClient:ApiKey"] = "section.secret",
+        ["ConnectionStrings:reports"] =
+          "Endpoint=https://reports.example.com;ApiKey=connection.secret",
+      },
+      settings => seen = settings
+    );
+
+    await Assert.That(seen!.ApiKey).IsEqualTo("connection.secret");
+  }
+
+  [Test]
+  public async Task Malformed_secret_connection_strings_are_not_exposed_by_exceptions()
+  {
+    var exception = await Assert
+      .That(() =>
+        Build(
+          new()
+          {
+            ["ConnectionStrings:reports"] =
+              "Endpoint=https://reports.example.com;ApiKey=secret;\"sensitive-secret",
+          }
+        )
+      )
+      .Throws<InvalidOperationException>();
+
+    await Assert.That(exception!.ToString()).DoesNotContain("sensitive-secret");
+  }
+
+  [Test]
+  public async Task Configuring_both_authentication_methods_is_rejected()
+  {
+    ServiceCollection services = new();
+    await Assert
+      .That(() =>
+        services.AddReportsClient(
+          new ReportsClientSettings
+          {
+            Endpoint = StubServer.Endpoint,
+            ApiKey = "caller.secret",
+            AccessTokenProvider = _ => ValueTask.FromResult("token"),
+          }
+        )
+      )
+      .Throws<ArgumentException>();
   }
 
   [Test]

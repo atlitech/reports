@@ -129,6 +129,7 @@ public class RetryTests
 
   [Test]
   [Arguments(HttpStatusCode.BadRequest, "InvalidRequest")]
+  [Arguments(HttpStatusCode.UnprocessableEntity, "PolicyDenied")]
   [Arguments(HttpStatusCode.UnprocessableEntity, "SignalTimeout")]
   [Arguments(HttpStatusCode.InternalServerError, "RenderFailed")]
   [Arguments(HttpStatusCode.GatewayTimeout, "Timeout")]
