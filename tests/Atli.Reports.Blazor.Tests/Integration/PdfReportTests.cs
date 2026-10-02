@@ -24,9 +24,7 @@ public class PdfReportTests
   public async Task Renders_a_component_report_to_a_pdf()
   {
     await using var services = TestEngine.CreateServices();
-    var report = services
-      .GetRequiredService<BlazorReportRegistry>()
-      .AddReport<GreetingReport, GreetingData>();
+    var report = services.GetRequiredService<BlazorReportRegistry>().AddReport<GreetingReport>();
     var reportService = services.GetRequiredService<IReportService>();
     using MemoryStream destination = new();
 
@@ -63,9 +61,8 @@ public class PdfReportTests
     await Assert.That(Pdf.ReadHeader(body)).IsEqualTo(Pdf.Header);
   }
 
-#pragma warning disable CS0618 // Covers the obsolete PipeWriter overloads kept for BlazorReports callers.
   [Test]
-  public async Task The_obsolete_pipe_writer_overload_still_writes_and_completes_the_pdf()
+  public async Task A_pipe_destination_is_completed_by_the_caller()
   {
     await using var services = TestEngine.CreateServices();
     var report = services.GetRequiredService<BlazorReportRegistry>().AddReport<StaticReport>();
@@ -75,17 +72,22 @@ public class PdfReportTests
     );
 
     var result = await reportService.GenerateReport(
-      pipe.Writer,
+      pipe.Writer.AsStream(leaveOpen: true),
       report,
       TestContext.Current!.Execution.CancellationToken
     );
+    await Assert.That(result.IsT0).IsTrue();
+    var pending = await pipe.Reader.ReadAsync(TestContext.Current!.Execution.CancellationToken);
+    await Assert.That(pending.IsCompleted).IsFalse();
+    pipe.Reader.AdvanceTo(pending.Buffer.Start);
+
+    await pipe.Writer.CompleteAsync();
     using MemoryStream document = new();
     await pipe.Reader.AsStream().CopyToAsync(document);
+    await pipe.Reader.CompleteAsync();
 
-    await Assert.That(result.IsT0).IsTrue();
     await Assert.That(Pdf.ReadHeader(document.ToArray())).IsEqualTo(Pdf.Header);
   }
-#pragma warning restore CS0618
 
   private static string Describe(object value) =>
     value is ConversionError error

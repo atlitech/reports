@@ -1,8 +1,7 @@
 # Atli Reports
 
 Open-source PDF generation for .NET. Atli Reports renders HTML to PDF in a headless Chromium
-browser over the Chrome DevTools Protocol, and turns Blazor components into PDF reports. It was
-formerly **BlazorReports**.
+browser over the Chrome DevTools Protocol, and turns Blazor components into PDF reports.
 
 > [!IMPORTANT]
 > The `Atli.Reports.*` packages are **not on NuGet yet**. They first ship with version 0.26.0,
@@ -177,7 +176,7 @@ the HTML, and prints at the moment it is called. A page that does not call it wi
 - **Blazor:** set `JavaScriptSettings.WaitForCompletedSignal = true` (see
   [below](#waiting-for-a-reports-javascript)), and call `blazorReport.completed()` from the report.
 
-The design note [docs/engine/reactive-signal-approach.md](docs/engine/reactive-signal-approach.md)
+The [JavaScript completion signal guide](docs/engine/reactive-signal-approach.md)
 explains how the signal works.
 
 ## Configuration
@@ -335,7 +334,7 @@ builder.Services.AddBlazorReports(options =>
 
 ### Assets
 
-Files in `AssetsPath` reach reports that inherit `BlazorReportsBase` as `data:` URIs in the
+Files in `AssetsPath` reach reports that inherit `BlazorReportBase` as `data:` URIs in the
 `GlobalAssets` dictionary, keyed by file name:
 
 ```csharp
@@ -346,7 +345,7 @@ builder.Services.AddBlazorReports(options =>
 ```
 
 ```razor
-@inherits Atli.Reports.Blazor.Components.BlazorReportsBase
+@inherits Atli.Reports.Blazor.Components.BlazorReportBase
 
 <img src="@GlobalAssets.GetValueOrDefault("logo.png")" alt="Logo" />
 ```
@@ -354,22 +353,36 @@ builder.Services.AddBlazorReports(options =>
 Styles and assets are read once, when the reports are registered; restart the app to pick up
 changes to them.
 
-### Page settings and per-report options
+### PDF and per-report options
 
-`options.PageSettings` sets the default orientation, margins, paper size (in inches), and
-background printing. Each mapped report can override the defaults, and choose its route and
-output format:
+`options.PdfOptions` uses the engine's `PdfOptions` directly: orientation, margins and paper size
+(in inches), background printing, scale, header/footer templates, page ranges, CSS page sizing,
+PDF tagging, and completion signals. For example:
+
+```csharp
+using Atli.Reports.Engine;
+
+builder.Services.AddBlazorReports(options =>
+{
+  options.PdfOptions.PaperSize = PaperSize.A4;
+  options.PdfOptions.Margins = new Margins { Top = 0.5, Bottom = 0.5 };
+  options.PdfOptions.PrintBackground = true;
+});
+```
+
+Each mapped or registered report starts with a copy of the global PDF options. Overrides do not
+change other reports. Reports can also choose their route and output format:
 
 ```csharp
 app.MapBlazorReport<HelloReport, HelloReportData>(options =>
 {
   options.ReportName = "greeting"; // POST /greeting
-  options.OutputFormat = ReportOutputFormat.Html;
+  options.PdfOptions.Orientation = PageOrientation.Landscape;
   options.BaseStylesPath = "wwwroot/styles/greeting.css";
 });
 ```
 
-HTML output skips the browser entirely.
+Set `options.OutputFormat = ReportOutputFormat.Html` to return HTML and skip the browser entirely.
 
 ### Waiting for a report's JavaScript
 
@@ -417,7 +430,7 @@ describe their request body and responses to OpenAPI (`builder.Services.AddOpenA
 Register the report without an endpoint, and generate it through `IReportService`:
 
 ```csharp
-app.RegisterBlazorReport<HelloReport, HelloReportData>();
+app.RegisterBlazorReport<HelloReport>();
 ```
 
 ```csharp
@@ -432,6 +445,9 @@ if (result.TryPickT1(out var error, out _))
 }
 ```
 
+Generation writes to a caller-owned `Stream`; the service does not flush or dispose it. When
+using `pipeWriter.AsStream(leaveOpen: true)`, the caller also owns completion of the pipe writer.
+
 ### Configuring the engine
 
 `AddBlazorReports` registers the engine. To configure it, also call `AddReportsEngine`, before or
@@ -444,14 +460,6 @@ builder.Services.AddReportsEngine(
 );
 ```
 
-## Migrating from BlazorReports
-
-Atli.Reports.Blazor keeps BlazorReports' type and method names. Moving over takes three steps:
-swap the packages, replace `BlazorReports.` with `Atli.Reports.Blazor.` in `using`, `@using`, and
-`@inherits` directives, and target .NET 10. Some behavior changed, such as endpoint status codes
-and obsolete `IReportService` overloads. The
-[migration guide](docs/migration/from-blazorreports.md) covers every change.
-
 ## Documentation and examples
 
 - [Engine architecture](docs/engine/architecture.md): browser lifecycle, isolation, concurrency,
@@ -460,7 +468,6 @@ and obsolete `IReportService` overloads. The
 - [Aspire](docs/aspire.md): run the server from an AppHost and convert from your apps through
   `Atli.Reports.Client`, locally and deployed
 - [JavaScript completion signals](docs/engine/reactive-signal-approach.md)
-- [Migrating from BlazorReports](docs/migration/from-blazorreports.md)
 - [Benchmarks](benchmarks/README.md)
 - [`examples/SimpleReportServer`](examples/SimpleReportServer): reports with and without data,
   HTML output, and a report that waits for its JavaScript

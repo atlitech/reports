@@ -1,6 +1,5 @@
 using Atli.Reports.Blazor.Extensions;
 using Atli.Reports.Blazor.Services;
-using Atli.Reports.Blazor.Services.BrowserServices;
 using Atli.Reports.Engine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -28,52 +27,37 @@ public class AddBlazorReportsTests
   }
 
   [Test]
-  public async Task Browser_options_that_were_set_reach_the_engine()
+  [Arguments(true)]
+  [Arguments(false)]
+  public async Task Engine_configuration_is_preserved_in_either_registration_order(bool engineFirst)
   {
     ServiceCollection services = new();
-    FileInfo executable = new(Path.Combine(Path.GetTempPath(), "custom-browser"));
-
-    services.AddBlazorReports(options =>
+    if (!engineFirst)
     {
-      options.BrowserOptions.Browser = Browsers.Edge;
-      options.BrowserOptions.BrowserExecutableLocation = executable;
-      options.BrowserOptions.NoSandbox = true;
-      options.BrowserOptions.DisableDevShmUsage = true;
-      options.BrowserOptions.DisableHeadless = true;
-      options.BrowserOptions.ResponseTimeout = TimeSpan.FromSeconds(7);
-    });
-
-    await using var provider = services.BuildServiceProvider();
-    var browser = provider.GetRequiredService<IOptions<ReportsEngineOptions>>().Value.Browser;
-    await Assert.That(browser.Kind).IsEqualTo(BrowserKind.Edge);
-    await Assert.That(browser.ExecutablePath).IsEqualTo(executable.FullName);
-    await Assert.That(browser.NoSandbox).IsTrue();
-    await Assert.That(browser.DisableDevShmUsage).IsTrue();
-    await Assert.That(browser.Headless).IsFalse();
-    await Assert.That(browser.CommandTimeout).IsEqualTo(TimeSpan.FromSeconds(7));
-  }
-
-  [Test]
-  public async Task Browser_options_left_at_their_defaults_keep_the_engine_configuration()
-  {
-    ServiceCollection services = new();
+      services.AddBlazorReports();
+    }
 
     services.AddReportsEngine(options =>
     {
       options.Browser.Kind = BrowserKind.Edge;
       options.Browser.ExecutablePath = "/opt/browser";
       options.Browser.NoSandbox = true;
+      options.Browser.DisableDevShmUsage = true;
       options.Browser.Headless = false;
       options.Browser.CommandTimeout = TimeSpan.FromSeconds(5);
+      options.Concurrency.MaxConcurrentConversions = 3;
     });
     services.AddBlazorReports();
 
     await using var provider = services.BuildServiceProvider();
-    var browser = provider.GetRequiredService<IOptions<ReportsEngineOptions>>().Value.Browser;
-    await Assert.That(browser.Kind).IsEqualTo(BrowserKind.Edge);
-    await Assert.That(browser.ExecutablePath).IsEqualTo("/opt/browser");
-    await Assert.That(browser.NoSandbox).IsTrue();
-    await Assert.That(browser.Headless).IsFalse();
-    await Assert.That(browser.CommandTimeout).IsEqualTo(TimeSpan.FromSeconds(5));
+    var engine = provider.GetRequiredService<IOptions<ReportsEngineOptions>>().Value;
+    await Assert.That(engine.Browser.Kind).IsEqualTo(BrowserKind.Edge);
+    await Assert.That(engine.Browser.ExecutablePath).IsEqualTo("/opt/browser");
+    await Assert.That(engine.Browser.NoSandbox).IsTrue();
+    await Assert.That(engine.Browser.DisableDevShmUsage).IsTrue();
+    await Assert.That(engine.Browser.Headless).IsFalse();
+    await Assert.That(engine.Browser.CommandTimeout).IsEqualTo(TimeSpan.FromSeconds(5));
+    await Assert.That(engine.Concurrency.MaxConcurrentConversions).IsEqualTo(3);
+    await Assert.That(provider.GetServices<IHtmlToPdfConverter>().Count()).IsEqualTo(1);
   }
 }

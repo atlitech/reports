@@ -120,9 +120,7 @@ public class BlazorThroughClientTests(RunningReportsServer server)
     InvoiceData data
   )
   {
-    var report = app
-      .Services.GetRequiredService<BlazorReportRegistry>()
-      .AddReport<InvoiceReport, InvoiceData>();
+    var report = app.Services.GetRequiredService<BlazorReportRegistry>().AddReport<InvoiceReport>();
     return await app
       .Services.GetRequiredService<IReportService>()
       .GenerateReport(destination, report, data, TestToken);

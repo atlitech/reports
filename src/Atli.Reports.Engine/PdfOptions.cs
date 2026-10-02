@@ -97,4 +97,13 @@ public sealed class PdfOptions
   /// values fail the conversion with <see cref="ConversionErrorKind.InvalidRequest"/>.
   /// </remarks>
   public TimeSpan WaitTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+  /// <summary>
+  /// Creates a copy that can be configured independently of this instance.
+  /// </summary>
+  /// <remarks>
+  /// The immutable <see cref="Margins"/> and <see cref="PaperSize"/> values are shared by the copy.
+  /// </remarks>
+  /// <returns>A copy of these options.</returns>
+  public PdfOptions Clone() => (PdfOptions)MemberwiseClone();
 }

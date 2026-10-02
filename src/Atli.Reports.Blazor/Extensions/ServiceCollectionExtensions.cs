@@ -1,10 +1,8 @@
 using Atli.Reports.Blazor.Models;
 using Atli.Reports.Blazor.Services;
-using Atli.Reports.Blazor.Services.BrowserServices;
 using Atli.Reports.Engine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Blazor.Extensions;
 
@@ -17,7 +15,7 @@ public static class ServiceCollectionExtensions
   /// Adds the Blazor report services and Atli.Reports.Engine to the specified <see cref="IServiceCollection" />.
   /// </summary>
   /// <param name="services"> The service collection to add the services to. </param>
-  /// <param name="options"> Configures <see cref="BlazorReportsOptions"/>. </param>
+  /// <param name="options"> Configures <see cref="BlazorReportOptions"/>. </param>
   /// <returns> The <see cref="IServiceCollection" /> so that additional calls can be chained. </returns>
   /// <remarks>
   /// <para>
@@ -27,10 +25,6 @@ public static class ServiceCollectionExtensions
   /// <see cref="ReportsEngineOptions"/> from configuration.
   /// </para>
   /// <para>
-  /// Values set on <see cref="BlazorReportsOptions.BrowserOptions"/> that differ from their defaults are
-  /// copied onto <see cref="ReportsEngineOptions.Browser"/>.
-  /// </para>
-  /// <para>
   /// To convert on an Atli Reports server instead, also call <c>AddReportsClient</c> from
   /// Atli.Reports.Client, before or after this method. Components then render in the app, their HTML
   /// is converted by the server, and the app never starts a browser.
@@ -38,65 +32,16 @@ public static class ServiceCollectionExtensions
   /// </remarks>
   public static IServiceCollection AddBlazorReports(
     this IServiceCollection services,
-    Action<BlazorReportsOptions>? options = null
+    Action<BlazorReportOptions>? options = null
   )
   {
     ArgumentNullException.ThrowIfNull(services);
 
     services.Configure(options ?? (_ => { }));
     services.AddReportsEngine();
-    services
-      .AddOptions<ReportsEngineOptions>()
-      .Configure<IOptions<BlazorReportsOptions>>(
-        (engineOptions, blazorReportsOptions) =>
-          ApplyBrowserOptions(blazorReportsOptions.Value.BrowserOptions, engineOptions.Browser)
-      );
-
     services.TryAddSingleton<BlazorReportRegistry>();
     services.TryAddSingleton<IReportService, ReportService>();
-#pragma warning disable CS0618 // Keeps the obsolete IBrowserService resolvable for existing callers.
-    services.TryAddSingleton<IBrowserService, EngineBrowserService>();
-#pragma warning restore CS0618
 
     return services;
-  }
-
-  /// <summary>
-  /// Copies the browser options that differ from their defaults onto the engine's browser options.
-  /// </summary>
-  internal static void ApplyBrowserOptions(
-    BlazorReportsBrowserOptions browserOptions,
-    ReportsEngineBrowserOptions engineBrowserOptions
-  )
-  {
-    if (browserOptions.Browser == Browsers.Edge)
-    {
-      engineBrowserOptions.Kind = BrowserKind.Edge;
-    }
-
-    if (browserOptions.BrowserExecutableLocation is not null)
-    {
-      engineBrowserOptions.ExecutablePath = browserOptions.BrowserExecutableLocation.FullName;
-    }
-
-    if (browserOptions.NoSandbox)
-    {
-      engineBrowserOptions.NoSandbox = true;
-    }
-
-    if (browserOptions.DisableDevShmUsage)
-    {
-      engineBrowserOptions.DisableDevShmUsage = true;
-    }
-
-    if (browserOptions.DisableHeadless)
-    {
-      engineBrowserOptions.Headless = false;
-    }
-
-    if (browserOptions.ResponseTimeout != BlazorReportsBrowserOptions.DefaultResponseTimeout)
-    {
-      engineBrowserOptions.CommandTimeout = browserOptions.ResponseTimeout;
-    }
   }
 }

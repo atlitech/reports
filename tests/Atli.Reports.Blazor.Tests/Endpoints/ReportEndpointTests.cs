@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using Atli.Reports.Blazor.Enums;
 using Atli.Reports.Blazor.Extensions;
 using Atli.Reports.Blazor.Models;
 using Atli.Reports.Blazor.Tests.Reports;
@@ -67,21 +66,30 @@ public class ReportEndpointTests
   }
 
   [Test]
-  public async Task Page_settings_reach_the_engine()
+  public async Task Pdf_options_reach_the_engine()
   {
     var converter = FakeHtmlToPdfConverter.Succeeding();
     await using var server = await StartAsync(
       converter,
       options =>
       {
-        options.PageSettings.Orientation = BlazorReportsPageOrientation.Landscape;
-        options.PageSettings.PaperWidth = 8.27;
-        options.PageSettings.PaperHeight = 11.69;
-        options.PageSettings.MarginTop = 1;
-        options.PageSettings.MarginRight = 0.5;
-        options.PageSettings.MarginBottom = 0.25;
-        options.PageSettings.MarginLeft = 0;
-        options.PageSettings.IgnoreBackground = true;
+        options.PdfOptions.Orientation = PageOrientation.Landscape;
+        options.PdfOptions.PaperSize = PaperSize.A4;
+        options.PdfOptions.Margins = new Margins
+        {
+          Top = 1,
+          Right = 0.5,
+          Bottom = 0.25,
+          Left = 0,
+        };
+        options.PdfOptions.PrintBackground = false;
+        options.PdfOptions.Scale = 0.8;
+        options.PdfOptions.HeaderTemplate = "<span class=\"title\"></span>";
+        options.PdfOptions.FooterTemplate = "<span class=\"pageNumber\"></span>";
+        options.PdfOptions.DisplayHeaderFooter = true;
+        options.PdfOptions.PageRanges = "1-2";
+        options.PdfOptions.PreferCssPageSize = true;
+        options.PdfOptions.GenerateTaggedPdf = false;
       }
     );
 
@@ -107,13 +115,20 @@ public class ReportEndpointTests
         }
       );
     await Assert.That(options.PrintBackground).IsFalse();
+    await Assert.That(options.Scale).IsEqualTo(0.8);
+    await Assert.That(options.HeaderTemplate).IsEqualTo("<span class=\"title\"></span>");
+    await Assert.That(options.FooterTemplate).IsEqualTo("<span class=\"pageNumber\"></span>");
+    await Assert.That(options.DisplayHeaderFooter).IsTrue();
+    await Assert.That(options.PageRanges).IsEqualTo("1-2");
+    await Assert.That(options.PreferCssPageSize).IsTrue();
+    await Assert.That(options.GenerateTaggedPdf).IsFalse();
     await Assert.That(options.WaitForSignal).IsNull();
     await Assert.That(converter.LastHtml).Contains("<h1>Hello, settings</h1>");
   }
 
   private static Task<TestReportServer> StartAsync(
     FakeHtmlToPdfConverter converter,
-    Action<BlazorReportsOptions>? configureReports = null
+    Action<BlazorReportOptions>? configureReports = null
   )
   {
     return TestReportServer.StartAsync(

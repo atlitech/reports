@@ -1,9 +1,11 @@
+using Atli.Reports.Engine;
+
 namespace Atli.Reports.Blazor.Models;
 
 /// <summary>
-/// Options for BlazorReports
+/// Default options for Blazor reports.
 /// </summary>
-public class BlazorReportsOptions
+public class BlazorReportOptions
 {
   /// <summary>
   /// The path to the base styles file to use in this report
@@ -16,18 +18,14 @@ public class BlazorReportsOptions
   public string? AssetsPath { get; set; }
 
   /// <summary>
-  /// The options for the browser
+  /// Default PDF conversion options from Atli.Reports.Engine. Mapped and registered reports start
+  /// with their own copy of these options.
   /// </summary>
-  public BlazorReportsBrowserOptions BrowserOptions { get; set; } = new();
-
-  /// <summary>
-  /// Settings for generating a PDF
-  /// </summary>
-  public BlazorReportsPageSettings PageSettings { get; set; } = new();
+  public PdfOptions PdfOptions { get; set; } = new();
 
   /// <summary>
   /// The default settings for reports whose JavaScript must finish before the PDF is printed. Each report
   /// can override them through <see cref="BlazorReportRegistrationOptions.JavaScriptSettings"/>.
   /// </summary>
-  public BlazorReportsJavaScriptSettings JavaScriptSettings { get; set; } = new();
+  public BlazorReportJavaScriptOptions JavaScriptSettings { get; set; } = new();
 }

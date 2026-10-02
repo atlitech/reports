@@ -12,7 +12,7 @@ namespace Atli.Reports.Blazor;
 /// <example>
 /// <code>
 /// builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
-///   .AddSource(BlazorReportsTelemetry.ActivitySourceName)
+///   .AddSource(BlazorReportTelemetry.ActivitySourceName)
 ///   .AddSource(ReportsEngineTelemetry.ActivitySourceName));
 /// </code>
 /// </example>
@@ -25,7 +25,7 @@ namespace Atli.Reports.Blazor;
 /// the error status and an <c>error.type</c> attribute: the <see cref="ConversionErrorKind"/>, or the
 /// exception type when rendering throws. Spans never contain the report's data or HTML.
 /// </remarks>
-public static class BlazorReportsTelemetry
+public static class BlazorReportTelemetry
 {
   /// <summary>
   /// The name of the <see cref="ActivitySource"/>: <c>Atli.Reports.Blazor</c>.
@@ -35,7 +35,7 @@ public static class BlazorReportsTelemetry
   internal static readonly ActivitySource Source = new(
     new ActivitySourceOptions(ActivitySourceName)
     {
-      Version = typeof(BlazorReportsTelemetry).Assembly.GetName().Version?.ToString(3),
+      Version = typeof(BlazorReportTelemetry).Assembly.GetName().Version?.ToString(3),
     }
   );
 

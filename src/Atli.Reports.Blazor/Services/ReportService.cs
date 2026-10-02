@@ -1,8 +1,6 @@
-using System.IO.Pipelines;
 using System.Text;
 using Atli.Reports.Blazor.Components;
 using Atli.Reports.Blazor.Models;
-using Atli.Reports.Blazor.Services.BrowserServices.Problems;
 using Atli.Reports.Engine;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -28,46 +26,7 @@ public sealed class ReportService(
   IHtmlToPdfConverter converter
 ) : IReportService
 {
-  /// <inheritdoc />
-  public async ValueTask<OneOf<Success, ConversionError>> GenerateReport<T, TD>(
-    Stream destination,
-    TD data,
-    CancellationToken cancellationToken = default
-  )
-    where T : ComponentBase
-    where TD : class
-  {
-    ArgumentNullException.ThrowIfNull(destination);
-
-    using var activity = BlazorReportsTelemetry.StartGenerate(
-      typeof(T),
-      reportName: null,
-      ReportOutputFormat.Pdf
-    );
-    try
-    {
-      Dictionary<string, object?> componentParameters = new()
-      {
-        { "BaseStyles", reportRegistry.BaseStyles },
-        { "Data", data },
-        { "GlobalAssets", reportRegistry.GlobalAssets },
-      };
-
-      var html = await RenderAsync(typeof(T), componentParameters);
-      var result = await converter.ConvertAsync(
-        html,
-        destination,
-        PdfOptionsMapper.Map(reportRegistry.DefaultPageSettings),
-        cancellationToken
-      );
-      return BlazorReportsTelemetry.Finished(activity, result);
-    }
-    catch (Exception exception)
-    {
-      BlazorReportsTelemetry.Failed(activity, exception);
-      throw;
-    }
-  }
+  internal const string CompletedSignalName = "atliReportCompleted";
 
   /// <inheritdoc />
   public async ValueTask<OneOf<Success, ConversionError>> GenerateReport<T>(
@@ -81,21 +40,21 @@ public sealed class ReportService(
     ArgumentNullException.ThrowIfNull(destination);
     ArgumentNullException.ThrowIfNull(blazorReport);
 
-    using var activity = BlazorReportsTelemetry.StartGenerate(
+    using var activity = BlazorReportTelemetry.StartGenerate(
       blazorReport.Component,
       blazorReport.Name,
       blazorReport.OutputFormat
     );
     try
     {
-      return BlazorReportsTelemetry.Finished(
+      return BlazorReportTelemetry.Finished(
         activity,
         await GenerateCoreAsync(destination, blazorReport, data, cancellationToken)
       );
     }
     catch (Exception exception)
     {
-      BlazorReportsTelemetry.Failed(activity, exception);
+      BlazorReportTelemetry.Failed(activity, exception);
       throw;
     }
   }
@@ -110,9 +69,16 @@ public sealed class ReportService(
   {
     var javaScriptSettings =
       blazorReport.JavaScriptSettings ?? reportRegistry.DefaultJavaScriptSettings;
+    var pdfOptions = (blazorReport.PdfOptions ?? reportRegistry.DefaultPdfOptions).Clone();
+    if (javaScriptSettings.WaitForCompletedSignal)
+    {
+      pdfOptions.WaitForSignal = CompletedSignalName;
+      pdfOptions.WaitTimeout = javaScriptSettings.CompletedSignalTimeout;
+    }
+
     var html = await RenderAsync(
-      typeof(BlazorReportsTemplate),
-      GetTemplateParameters(blazorReport, javaScriptSettings, data)
+      typeof(BlazorReportTemplate),
+      GetTemplateParameters(blazorReport, pdfOptions.WaitForSignal, data)
     );
 
     if (blazorReport.OutputFormat == ReportOutputFormat.Html)
@@ -133,13 +99,7 @@ public sealed class ReportService(
       return new Success();
     }
 
-    var pageSettings = blazorReport.PageSettings ?? reportRegistry.DefaultPageSettings;
-    return await converter.ConvertAsync(
-      html,
-      destination,
-      PdfOptionsMapper.Map(pageSettings, javaScriptSettings),
-      cancellationToken
-    );
+    return await converter.ConvertAsync(html, destination, pdfOptions, cancellationToken);
   }
 
   /// <inheritdoc />
@@ -150,69 +110,6 @@ public sealed class ReportService(
   )
   {
     return GenerateReport<object>(destination, blazorReport, null, cancellationToken);
-  }
-
-  /// <inheritdoc />
-  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
-  public async ValueTask<
-    OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
-  > GenerateReport<T, TD>(
-    PipeWriter pipeWriter,
-    TD data,
-    CancellationToken cancellationToken = default
-  )
-    where T : ComponentBase
-    where TD : class
-  {
-    ArgumentNullException.ThrowIfNull(pipeWriter);
-
-    var result = await GenerateReport<T, TD>(
-      pipeWriter.AsStream(leaveOpen: true),
-      data,
-      cancellationToken
-    );
-    return await LegacyResults.ToLegacyResultAsync(pipeWriter, result, completeOnSuccess: true);
-  }
-
-  /// <inheritdoc />
-  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
-  public async ValueTask<
-    OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
-  > GenerateReport<T>(
-    PipeWriter pipeWriter,
-    BlazorReport blazorReport,
-    T? data,
-    CancellationToken cancellationToken = default
-  )
-    where T : class
-  {
-    ArgumentNullException.ThrowIfNull(pipeWriter);
-    ArgumentNullException.ThrowIfNull(blazorReport);
-
-    var result = await GenerateReport(
-      pipeWriter.AsStream(leaveOpen: true),
-      blazorReport,
-      data,
-      cancellationToken
-    );
-    return await LegacyResults.ToLegacyResultAsync(
-      pipeWriter,
-      result,
-      completeOnSuccess: blazorReport.OutputFormat == ReportOutputFormat.Pdf
-    );
-  }
-
-  /// <inheritdoc />
-  [Obsolete(ObsoleteMessages.PipeWriterOverloads)]
-  public ValueTask<
-    OneOf<Success, ServerBusyProblem, OperationCancelledProblem, BrowserProblem>
-  > GenerateReport(
-    PipeWriter pipeWriter,
-    BlazorReport blazorReport,
-    CancellationToken cancellationToken = default
-  )
-  {
-    return GenerateReport<object>(pipeWriter, blazorReport, null, cancellationToken);
   }
 
   /// <summary>
@@ -229,7 +126,7 @@ public sealed class ReportService(
 
   private Dictionary<string, object?> GetTemplateParameters(
     BlazorReport blazorReport,
-    BlazorReportsJavaScriptSettings javaScriptSettings,
+    string? completedSignalName,
     object? data
   )
   {
@@ -239,7 +136,7 @@ public sealed class ReportService(
 
     Dictionary<string, object?> childComponentParameters = [];
     if (
-      blazorReport.Component.BaseType == typeof(BlazorReportsBase)
+      blazorReport.Component.BaseType == typeof(BlazorReportBase)
       && reportRegistry.GlobalAssets.Count != 0
     )
     {
@@ -262,9 +159,9 @@ public sealed class ReportService(
       templateParameters.Add("BaseStyles", baseStyles);
     }
 
-    if (javaScriptSettings.WaitForCompletedSignal)
+    if (completedSignalName is not null)
     {
-      templateParameters.Add("CompletedSignalName", PdfOptionsMapper.CompletedSignalName);
+      templateParameters.Add("CompletedSignalName", completedSignalName);
     }
 
     templateParameters.Add("ChildComponentType", blazorReport.Component);
@@ -277,7 +174,7 @@ public sealed class ReportService(
     IDictionary<string, object?> parameters
   )
   {
-    using var activity = BlazorReportsTelemetry.StartRender();
+    using var activity = BlazorReportTelemetry.StartRender();
     try
     {
       await using var scope = serviceProvider.CreateAsyncScope();
@@ -295,7 +192,7 @@ public sealed class ReportService(
     }
     catch (Exception exception)
     {
-      BlazorReportsTelemetry.Failed(activity, exception);
+      BlazorReportTelemetry.Failed(activity, exception);
       throw;
     }
   }

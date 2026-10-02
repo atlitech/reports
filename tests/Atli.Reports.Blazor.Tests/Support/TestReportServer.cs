@@ -1,5 +1,6 @@
 using Atli.Reports.Blazor.Extensions;
 using Atli.Reports.Blazor.Models;
+using Atli.Reports.Engine;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,18 +32,15 @@ internal sealed class TestReportServer : IAsyncDisposable
   /// </summary>
   public static async Task<TestReportServer> StartAsync(
     Action<WebApplication> mapReports,
-    Action<BlazorReportsOptions>? configureReports = null,
+    Action<BlazorReportOptions>? configureReports = null,
     Action<IServiceCollection>? configureServices = null
   )
   {
     var builder = WebApplication.CreateSlimBuilder();
     builder.WebHost.UseUrls("http://127.0.0.1:0");
     builder.Logging.ClearProviders();
-    builder.Services.AddBlazorReports(options =>
-    {
-      TestEngine.Configure(options);
-      configureReports?.Invoke(options);
-    });
+    builder.Services.AddBlazorReports(configureReports);
+    builder.Services.AddReportsEngine(TestEngine.Configure);
     configureServices?.Invoke(builder.Services);
 
     var app = builder.Build();

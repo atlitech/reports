@@ -1,3 +1,5 @@
+using Atli.Reports.Engine;
+
 namespace Atli.Reports.Blazor.Models;
 
 /// <summary>
@@ -26,11 +28,6 @@ public class BlazorReport
   public required Type Component { get; set; }
 
   /// <summary>
-  /// The type of the data to pass to the component.
-  /// </summary>
-  public required Type? Data { get; set; }
-
-  /// <summary>
   /// Base styles path to use for the report.
   /// </summary>
   public string? BaseStyles { get; set; }
@@ -41,13 +38,14 @@ public class BlazorReport
   public Dictionary<string, string> Assets { get; set; } = [];
 
   /// <summary>
-  /// The page settings to use for the report.
+  /// The PDF conversion options to use for the report. <see langword="null"/> uses
+  /// <see cref="BlazorReportRegistry.DefaultPdfOptions"/>.
   /// </summary>
-  public BlazorReportsPageSettings? PageSettings { get; set; }
+  public PdfOptions? PdfOptions { get; set; }
 
   /// <summary>
   /// The JavaScript settings to use for the report. <see langword="null"/> uses
   /// <see cref="BlazorReportRegistry.DefaultJavaScriptSettings"/>.
   /// </summary>
-  public BlazorReportsJavaScriptSettings? JavaScriptSettings { get; set; }
+  public BlazorReportJavaScriptOptions? JavaScriptSettings { get; set; }
 }

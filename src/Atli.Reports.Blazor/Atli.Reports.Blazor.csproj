@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Title>Atli Reports Blazor</Title>
-    <Description>Generate PDF reports from Blazor components. Map a component to an HTTP endpoint or render it from your own code. Formerly BlazorReports.</Description>
+    <Description>Generate PDF reports from Blazor components. Map a component to an HTTP endpoint or render it from your own code.</Description>
     <IsPackable>true</IsPackable>
     <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
