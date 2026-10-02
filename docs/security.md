@@ -245,19 +245,22 @@ The [isolated renderer experiment](isolated-workers.md) records why per-request 
 by the API are not that design, and describes the [hosted renderer
 design](isolated-workers.md#hosted-renderer-design). A shared public API authenticates callers,
 resolves product-tenant membership, applies deployment-wide quotas, and relays the streamed PDF.
-It never parses or executes document HTML. Each customer gets its own renderer deployment: this
-server image in integrated mode with Chromium's sandbox on, internal-only ingress, denied egress
-and renderer-to-renderer traffic, a read-only filesystem, and no application secrets, service
-identity, or service-account token. A renderer accepts only the API's authenticated identity, and
-the API treats renderer responses as untrusted. Renderers run on a node pool separate from the API.
-The API derives the renderer from the authenticated product tenant, never from a caller-provided
-header.
+It never parses or executes document HTML, and it holds no rights to create, scale, or reassign
+renderers. Each customer gets its own renderer deployment: this server image in integrated mode
+with Chromium's sandbox on, internal-only ingress, denied egress and renderer-to-renderer traffic,
+a read-only filesystem, resource limits, and no application secrets, service identity, or
+service-account token. The shipped image does not enable Chromium's sandbox yet, and the renderer
+platform must allow it: a seccomp profile that permits it and nodes that allow unprivileged user
+namespaces. A renderer accepts only the API, which presents a credential unique to that renderer
+so that a compromised renderer cannot replay it against another. The API treats renderer
+responses as untrusted. Renderers run on a node pool separate from the API. The API derives the
+renderer from the authenticated product tenant, never from a caller-provided header.
 
 Chromium's sandbox is one layer, not the boundary between customers. A hostile customer can submit
 exploits repeatedly and read the exact browser build from its own PDF. Browser contexts remain
 useful storage separation within one trust domain but are not that boundary either. If a customer
 accepts raw HTML from end users who distrust each other, the trust domain is the end user, and the
-platform must provide per-user or per-job isolation.
+platform must provide per-user or per-job isolation, which the hosted design does not yet provide.
 
 For durable jobs, add a durable queue and private PDF storage with product-tenant authorization,
 expiry, and ownership checks on every retrieval.
@@ -265,8 +268,8 @@ expiry, and ownership checks on every retrieval.
 Audit identity, policy outcome, status, and duration; never record document content, credentials,
 or sensitive asset URLs. A hosted release additionally needs adversarial containment and
 cross-customer tests against its actual runtime and network, fair global admission, product-tenant
-routing, rotation and revocation across replicas, a browser patch target, and incident-response
-procedures.
+routing, rotation and revocation across replicas, patch targets for the browser, renderer nodes,
+and container and sandbox runtimes, and incident-response procedures.
 
 ## Validation
 

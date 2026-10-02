@@ -37,8 +37,8 @@ worker, protocol, engine, and server sources are identical.
   authentication, no `WorkerConverter`. Single-use timings start when the client starts
   `docker run`; warm timings cover one job, from its request to the end of its PDF stream.
 - Fixtures come from [`benchmarks/fixtures`](../fixtures): A4 paper, 0.4 in margins,
-  `printBackground`, and `waitForSignal: "reportReady"` for `chart`. `generateTaggedPdf` is stated
-  per table.
+  `printBackground`, and `waitForSignal: "reportReady"` for `chart`. Each table states
+  `generateTaggedPdf`, or says that it was not recorded.
 - Unless a table says otherwise, a value is the median of four or five samples after one warmup.
   Values are rounded; derived columns need not subtract exactly. Sizes are in MB (10^6 bytes).
 
@@ -70,19 +70,22 @@ the whole command, median of four:
 | `vfs` | 0.74 |
 | `overlay2` | 0.26 |
 
-A single-use worker converting `invoice` once. *PDF complete* is the end of the PDF stream; *gone*
-is the point at which the container no longer existed. The tail is the time between them.
+A single-use worker converting `invoice` once; tagging was not recorded. *PDF complete* is the end
+of the PDF stream; *gone* is the point at which the container no longer existed. The tail is the
+time between them. The runc tail was not recorded separately; the table gives the difference
+of its two medians.
 
 | Runtime and storage | PDF complete (s) | Gone (s) | Tail (s) |
 |---|---:|---:|---:|
 | gVisor, nested `vfs` | 1.50 | 1.79 | 0.29 |
 | gVisor, nested `overlay2` | 1.06 | 1.25 | 0.18 |
-| runc, host `overlay2` | 0.26 | 0.34 | not recorded |
+| runc, host `overlay2` | 0.26 | 0.34 | about 0.08 |
 
 The recorded run's disposable gVisor `invoice` p50 was 2.246 s on `vfs`. Its timing also covers
 the harness's own cleanup: `docker rm --force` and, when that finds no container, a `docker ps`
-check, each issued through `docker exec` into the test daemon. The follow-up did not use the
-harness, and the cause of the remaining difference was not isolated.
+check, each issued through `docker exec` into the test daemon. The gateway also runs
+`docker rm --force` before it responds, so that cleanup belongs in a client-visible figure. The
+follow-up did not use the harness, and the cause of the remaining difference was not isolated.
 
 On the gateway path (at `b88e5b5`), teardown precedes the end of the HTTP response.
 `WorkerConverter.ConvertAsync` awaits its reader, which requires the worker's end of output, and
@@ -90,27 +93,31 @@ then the process exit (`src/Atli.Reports.Server/Execution/WorkerConverter.cs`, l
 `finally` block then calls `CleanupAsync` (line 224), which runs `docker rm --force` (lines
 401–429) before `ConvertAsync` returns. The `/convert` endpoint completes the response only after
 that call returns (`src/Atli.Reports.Server/Endpoints/ConvertEndpoints.cs`, line 144). After its
-last job, the worker stops its hosted services, closing the browser gracefully, before it exits
-(`src/Atli.Reports.Worker/Program.cs`, lines 35–42). In the gateway, a tail like the one above is
+last job, the worker stops its hosted services before it exits
+(`src/Atli.Reports.Worker/Program.cs`, lines 35–42). They drain, close the DevTools connection,
+kill the browser's whole process tree, wait for it to exit, and delete the profile directory,
+rather than asking the browser to close. In the gateway, a tail like the one above is
 therefore client-visible latency, and the job slot stays occupied until cleanup completes. The
 gateway path itself was not timed.
 
-## 3. Warm gVisor: clean run against the recorded run
+## 3. Warm gVisor: follow-up run against the recorded run
 
 A fresh warm worker per fixture on nested `overlay2`, against the recorded warm gVisor p50 (one
-worker for all fixtures in sequence, nested `vfs`):
+worker for all fixtures in sequence, nested `vfs`, all tagged):
 
 | Fixture | Follow-up (s) | Recorded p50 (s) |
 |---|---:|---:|
 | long-table, tagged | 4.37 | 11.356 |
 | chart | 0.21 | 0.598 |
-| invoice | 0.21 | 0.294 |
+| invoice, tagging not recorded | 0.21 | 0.294 |
 
 The chart measured 0.21 s tagged and untagged. The recorded run differed in two ways. It used
 `vfs`, and one warm worker ran invoice, assets, long-table, and chart in that order. That worker's
 cumulative cgroup memory peak reached 844,541,952 bytes (about 805 MiB) of its 1 GiB limit by the
-end of the long table, before the chart ran. Both runs used the same laptop VM. Which difference
-explains the gap was not isolated.
+end of the long table, before the chart ran. Both runs used the same laptop VM, where later runs
+drifted by amounts of the same order (section 4). The storage driver,
+sequential reuse near the memory limit, and drift are all candidates; none was isolated, and this
+comparison does not show that either run is the representative one.
 
 ## 4. Repeat-run noise (gVisor, nested `overlay2`)
 
@@ -130,8 +137,8 @@ inconclusive about CPU and memory budgets. The laptop VM is not a stable host fo
 
 A cold command-line print: `chrome-headless-shell --print-to-pdf` in a fresh gVisor container,
 nested `overlay2`, timed for the whole container including sandbox and browser start. Median of
-three samples. This path bypasses the worker protocol, so compare rows with each other, not with
-other sections.
+three samples; tagging was not recorded. This path bypasses the worker protocol, so compare rows
+with each other, not with other sections.
 
 | Added process-model flags | invoice (s) | long-table (s) |
 |---|---:|---:|
@@ -158,9 +165,10 @@ without `--no-sandbox`:
 The full message continues: "If you are running on Ubuntu 23.10+ or another Linux distro that has
 disabled unprivileged user namespaces with AppArmor, see
 https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
-...". Docker's default profile blocks the sandbox, which is why both images currently pass
-`--no-sandbox`. The base profile was `seccomp/default.json` from the `main` branch of
-`moby/profiles`, fetched on 2026-10-02 and not pinned. The added rule was
+...". Docker's default profile blocks the sandbox. The server image disables Chromium's sandbox
+for container compatibility; the worker image relies on the outer runtime instead (and, under
+gVisor on arm64, has to; see section 7). The base profile was `seccomp/default.json` from the
+`main` branch of `moby/profiles`, fetched on 2026-10-02 and not pinned. The added rule was
 `{"names": ["clone", "unshare", "chroot"], "action": "SCMP_ACT_ALLOW"}`. Whether that set is
 minimal was not tested. This is the probe's profile, not a profile shipped by the repository.
 
@@ -174,7 +182,9 @@ Cost of the sandbox, five interleaved rounds, untagged:
 | Warm long-table | 1.139 | 1.115 |
 
 The sandbox showed no measurable cost beyond about 30 ms at cold start. Warm differences are within
-noise in both directions. This series is separate from section 2's timings.
+noise in both directions. The probe notes do not record whether the cold value ends at *PDF
+complete* or at *gone*, and this series was untagged and run separately, so do not compare it with
+section 2.
 
 OrbStack's kernel permits unprivileged user namespaces. Ubuntu 23.10 and later, including 24.04,
 restrict them through AppArmor (`kernel.apparmor_restrict_unprivileged_userns`); no such host was

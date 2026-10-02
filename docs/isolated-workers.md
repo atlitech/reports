@@ -24,11 +24,13 @@ wrong for production in two ways, and the self-hosted product does not need it:
 
 Decisions:
 
-1. Self-hosted deployments use the integrated engine; it is the supported mode. A separate change
-   turns Chromium's sandbox on by default in the server image. Operators who want defense in depth
-   can run the same image under a sandboxed runtime, such as a gVisor or Kata RuntimeClass.
-   Chromium's sandbox does not start under gVisor on arm64 today, so on gVisor they currently trade
-   one layer for the other.
+1. Self-hosted deployments use the integrated engine; it is the supported mode. A planned separate
+   change will turn Chromium's sandbox on by default in the server image, which disables it today.
+   Operators who want defense in depth can run the same image under a sandboxed runtime, such as a
+   gVisor or Kata RuntimeClass. Under gVisor on arm64, Chromium's sandbox currently crashes and
+   then hangs the browser instead of failing at startup, so operators there must disable it
+   explicitly (`ReportsEngine:Browser:NoSandbox=true`) and trade one layer for the other. amd64 was
+   not tested.
 2. A managed service, if one is built, puts a shared API in front of per-customer renderer
    deployments. See [Hosted renderer design](#hosted-renderer-design).
 3. Keep the private protocol, the worker binary, the tests, and the benchmark harness from #152.
@@ -59,20 +61,23 @@ uncommitted client drove the private protocol directly. Values are medians of fo
 after one warmup unless the results file says otherwise. They are exploratory, and no CPU, memory,
 or p95 figures were measured.
 
-- **The recorded warm gVisor numbers were pessimistic.** A fresh warm gVisor worker per fixture on
-  `overlay2` took 4.37 s for the tagged 49-page report (recorded: 11.36 s), 0.21 s for the chart
-  (0.60 s), and 0.21 s for the invoice (0.29 s). The recorded run used `vfs` and ran all four
-  fixtures in one worker, whose cgroup memory peak reached about 805 MiB of its 1 GiB limit. Which
-  difference explains the gap was not isolated.
+- **Follow-up probes measured much lower warm gVisor times; the gap is unexplained.** A fresh warm
+  gVisor worker per fixture on `overlay2` took 4.37 s for the tagged 49-page report (recorded:
+  11.36 s), 0.21 s for the chart (0.60 s), and 0.21 s for the invoice (0.29 s). The recorded run
+  used `vfs` and ran all four fixtures in one worker, whose cgroup memory peak reached about
+  805 MiB of its 1 GiB limit. Later runs on this host drifted by amounts of the same order (see the
+  render-time bullet below). The storage driver, sequential reuse near the memory limit, and drift
+  are all candidates; none was isolated.
 - **Startup and teardown dominate single-use workers.** An empty gVisor sandbox's full lifecycle
   took 0.74 s on `vfs` and 0.26 s on `overlay2`. A single-use gVisor worker finished the invoice
   PDF 1.50 s (`vfs`) or 1.06 s (`overlay2`) after `docker run` started, and its container was gone
   0.29 s or 0.18 s later. A single-use runc worker finished in 0.26 s and was gone at 0.34 s. The
-  recorded disposable gVisor p50 was 2.25 s on `vfs`, including the harness's cleanup commands.
+  recorded disposable gVisor p50 was 2.25 s on `vfs`, including the harness's cleanup commands;
+  the gateway runs the same `docker rm --force` before it responds.
 - **Teardown sits on the response path.** The gateway waits for the worker to exit, which follows
-  graceful browser shutdown, and removes the container before `ConvertAsync` returns. The endpoint
-  completes the HTTP response only after that, so the teardown tail is client-visible latency and
-  holds a job slot.
+  browser shutdown (a process-tree kill, then profile cleanup), and removes the container before
+  `ConvertAsync` returns. The endpoint completes the HTTP response only after that, so the teardown
+  tail is client-visible latency and holds a job slot.
 - **The storage driver matters.** The harness's nested daemon uses `vfs`, which added about 0.5 s
   to every sandbox lifecycle compared with `overlay2`. Measure on the storage driver production
   would use.
@@ -80,23 +85,25 @@ or p95 figures were measured.
   instead of 0.54 MB and took 1.899 s instead of 1.076 s. Under gVisor it took 4.37 s instead of
   3.36 s. One-page fixtures showed no material difference. The harness and the load benchmark
   always tag, and the integrated engine tags unless a request sets `generateTaggedPdf` to false.
-- **gVisor still costs render time on long reports.** In the clean probes the 49-page report took
+- **gVisor still costs render time on long reports.** In one follow-up run, the 49-page report took
   2.3 times as long under gVisor as under runc tagged, and 3.1 times untagged. The runc probes used
   the host daemon and the gVisor probes a nested one. A later run of the same untagged gVisor
-  configuration took 5.04 s instead of 3.36 s, and successive rounds kept slowing, so this laptop
-  VM cannot size CPU or memory budgets.
+  configuration took 5.04 s instead of 3.36 s, and the next rounds, with more CPU or more memory,
+  took 7.67 s and 9.49 s. This laptop VM can neither pin down the ratio nor size CPU or memory
+  budgets.
 - **The browser process model is not the lever.** Under gVisor, reduced process models
   (`--no-zygote`, `--single-process`, one renderer process without site isolation) shortened a
   cold one-page command-line print from 1.79 s to as little as 1.34 s. They did not materially
   change the long report (7.25 to 7.84 s), and they weaken Chromium's own isolation.
 - **Chromium's sandbox is cheap under runc.** Docker's default seccomp profile makes Chrome abort
-  with "No usable sandbox!", which is why both images pass `--no-sandbox` today. With a probe
-  profile that added `clone`, `unshare`, and `chroot` to Docker's default, Chrome started with its
-  sandbox and the worker converted every fixture, with all other container hardening kept. Five
-  interleaved rounds showed about 30 ms extra at cold start and warm differences within noise in
-  both directions. OrbStack's kernel permits unprivileged user namespaces; hosts that restrict them,
+  with "No usable sandbox!". The server image disables Chromium's sandbox for container
+  compatibility; the worker image relies on the outer runtime instead. With a probe profile that
+  added `clone`, `unshare`, and `chroot` to Docker's default, Chrome started with its sandbox and
+  the worker converted every fixture, with all other container hardening kept. Five interleaved
+  rounds showed about 30 ms extra at cold start and warm differences within noise in both
+  directions. OrbStack's kernel permits unprivileged user namespaces; hosts that restrict them,
   such as Ubuntu 23.10 and later through AppArmor, were not tested.
-- **Chromium's sandbox does not run inside gVisor on arm64.** Chrome's own seccomp-bpf SIGSYS
+- **Chromium's sandbox crashes inside gVisor on arm64.** Chrome's own seccomp-bpf SIGSYS
   handler crashes on arm64 syscall 123 (`sched_getaffinity`), and the process hangs until killed.
   The worker image's `ATLI_WORKER_NO_SANDBOX=true` is therefore currently required under gVisor on
   arm64, not merely convenient. amd64 was not tested.
@@ -106,13 +113,14 @@ or p95 figures were measured.
 ### Reading the results now
 
 The recorded run's conclusion stands: keep the integrated default. Three parts of its reading
-change. First, the recorded gVisor figures overstate both lifecycle and render cost compared with
-cleaner probes on the same host. The warm long-report ratio to runc was 3.7 in the recorded run
-and 2.3 (tagged, runc on the host daemon) in the follow-up. Second, most of the per-job cost for
-small reports is sandbox and browser lifecycle, storage driver, and teardown, not rendering. Warm
-renderers remove it; a faster per-job launcher would only shrink it. Third, a gVisor render
-overhead on long reports appears in every run, but its size is not stable on a laptop VM and must
-be measured on the intended platform.
+change. First, the recorded gVisor lifecycle and render figures were higher than the follow-up
+probes on the same host, but later runs there drifted by amounts of the same order, so neither
+set is a stable cost. The warm long-report ratio to runc was 3.7 in the recorded run and 2.3
+(tagged, runc on the host daemon, gVisor nested) in one follow-up run. Second, most of the per-job
+cost for small reports is sandbox and browser lifecycle, storage driver, and teardown, not
+rendering. Warm renderers remove it; a faster per-job launcher would only shrink it. Third, a
+gVisor render overhead on long reports appears in every run, but its size is not stable on a
+laptop VM and must be measured on the intended platform.
 
 ## Hosted renderer design
 
@@ -126,7 +134,7 @@ flowchart LR
     subgraph apipool [API node pool]
         API[Shared API: authentication, product tenant, quotas, routing, PDF relay]
     end
-    subgraph rendererpool [Renderer node pool: no egress, no secrets]
+    subgraph rendererpool [Renderer node pool: no egress, no application secrets]
         RA[Customer A renderer deployment]
         RB[Customer B renderer deployment]
     end
@@ -143,36 +151,91 @@ HTML. Each customer has its own renderer deployment behind it.
 ### What a renderer runs
 
 A renderer runs the existing server image in integrated mode: a warm browser, a fresh browser
-context per conversion, and Chromium's sandbox on. It accepts conversions only from the API's
-identity. It receives document HTML and PDF options, never customer credentials.
+context per conversion, and Chromium's sandbox on. It accepts conversions only from the API. It
+receives document HTML and PDF options, never customer credentials.
+
+Chromium's sandbox is a requirement the shipped image does not meet yet: the image sets
+`ReportsEngine:Browser:NoSandbox=true`, and turning the sandbox on is a planned separate change.
+The renderer platform must also permit it. It needs a seccomp profile that allows the namespace
+system calls Docker's default profile blocks. On Kubernetes that means a `Localhost` profile
+distributed to renderer nodes, because `RuntimeDefault` derives from the same default and is
+expected to block them too (untested). It also needs nodes that allow unprivileged user
+namespaces, which Ubuntu 23.10 and later restrict through AppArmor.
+
+### API-to-renderer transport
+
+The API calls a renderer over HTTPS `POST /convert`, the endpoint the server image already serves.
+That is not the #152 private protocol, which runs over a worker process's standard input and
+output; the server streams a plain chunked HTTP PDF. The hosted API therefore needs its own checks
+on every renderer response: a size cap, a deadline, the `%PDF-` prefix, a complete response, and an
+aborted client response if the renderer resets or truncates the stream. The #152 gateway
+(`WorkerConverter`) is the model to follow for the output cap, the prefix check, and aborting after
+the response has started; its stdio framing does not apply. Exposing the private protocol over the
+network instead would be new work.
+
+### Provisioning and scaling authority
+
+The public API holds no control-plane or deployment rights: it cannot create, modify, scale, or
+reassign renderers. Creating a renderer when a customer is onboarded, destroying it, and scaling
+it, including from zero, belong to the platform (Azure Container Apps scale rules, or KEDA or
+Knative on Kubernetes) or to a separate provisioning service off the request path with narrowly
+scoped rights. Any activator or proxy that holds a first request while a renderer scales from zero,
+and can reach every renderer, is part of the trusted control plane and falls under the same
+separation tests.
 
 ### Separation requirements
 
-- Ingress is internal only and reachable only from the API.
+- Ingress is internal only and reachable only from the API, apart from the platform's health
+  probes to `/health/live` and `/health/ready`.
 - Network policy denies renderer-to-renderer traffic and all renderer egress. Documents must be
   self-contained; fetching approved remote assets would need its own design.
 - Renderers have no application secrets, no service identity, and no mounted service-account
-  token. Their root filesystem is read-only, with bounded temporary storage.
+  token. The only key material a renderer may hold authenticates its own channel to the API (see
+  below). Their root filesystem is read-only, with bounded temporary storage.
+- Each renderer has CPU, memory, process-count, and ephemeral-storage limits, and renderer nodes
+  have eviction thresholds, so one customer cannot exhaust a shared node.
 - Renderers run on a node pool separate from the API, enforced with taints and affinity, so a
-  kernel escape lands among renderers rather than next to the API's secrets. Large customers can
-  have dedicated nodes.
-- The API and renderers authenticate each other, with mTLS or managed identity.
-- The API treats every renderer response as untrusted input: bounded size, checked framing and
-  completion, a PDF prefix check, and an aborted client response if the renderer fails mid-stream.
-  The #152 gateway already applies these checks to worker output.
+  kernel escape lands among renderers rather than next to the API's secrets. Such an escape still
+  gains the node's own credentials, so renderer nodes carry minimal node identity (image pull
+  only), no rights to API or cluster secrets, and restricted access to the cloud metadata endpoint
+  where the platform allows. Large customers can have dedicated nodes.
+- The API and renderers authenticate each other, each direction separately. The mechanism is an
+  [open question](#open-questions-and-next-measurements).
+  - A renderer verifies the API without egress, for example with an API-key verifier, a pinned
+    public key, or a client certificate. The credential the API presents must be unique to that
+    renderer: a distinct API key or token audience per renderer, or mTLS in which the API's
+    private key never reaches a renderer. A renderer in API-key mode receives the raw key on every
+    request, so a key shared across renderers would let a compromised renderer replay it against
+    any other renderer it can reach.
+  - The API verifies that it reached the intended renderer, for example through a per-renderer TLS
+    server certificate (the renderer may hold that narrowly scoped private key) or through the
+    platform's internal addressing.
+- The API treats every renderer response as untrusted input; see
+  [API-to-renderer transport](#api-to-renderer-transport).
+- Renderer logs leave through the platform's standard-output collection, or through one allowed
+  egress to a collector that needs no shared secret. The server's OTLP export otherwise needs
+  egress and often a collector header. Renderer telemetry is untrusted: label it by deployment
+  rather than by attributes the renderer reports, and rate-limit it. Scaling uses API and platform
+  metrics.
+- Responding to a compromised renderer means destroying it and rotating the credential the API
+  presents to it.
 
 ### Routing
 
-The API maps the caller's authenticated product tenant to that customer's renderer. It never takes
-the renderer from a request header, a body field, or a caller-supplied renderer ID. A renderer
-serves one customer for its entire lifetime; moving capacity to another customer requires
-destroying the renderer first.
+The API maps the caller's authenticated product tenant to that customer's renderer. If one
+credential belongs to several product tenants, a tenant named in the request is only a selector:
+the API checks it against the credential's verified membership and rejects it otherwise. The
+renderer is always looked up from that verified tenant; it never comes from a request header, a
+body field, or a caller-supplied renderer ID. A renderer serves one customer for its entire
+lifetime; moving capacity to another customer requires destroying the renderer first.
 
 On Azure Container Apps, apps in one environment can reach each other, and there are no network
-policies between them. A renderer there must authenticate the API itself, and egress must be
-blocked at the VNet level; alternatively, renderers get their own environment. On Kubernetes, the
-cluster's CNI must actually enforce NetworkPolicy. These platform properties are design inputs;
-this repository's tests have not verified them.
+policies between them, so egress must be blocked at the VNet level. Renderers that share an
+environment depend entirely on each renderer authenticating the API with a per-renderer
+credential. Putting each customer's renderer in its own environment removes that dependency; one
+shared renderer environment does not. On Kubernetes, the cluster's CNI must actually enforce
+NetworkPolicy. These platform properties are design inputs; this repository's tests have not
+verified them.
 
 ### Scaling and cost
 
@@ -191,7 +254,7 @@ measured.
 | Runtime | Boundary between customers | Speed in these probes | Chromium's sandbox |
 | --- | --- | --- | --- |
 | Plain containers (runc) with Chromium's sandbox | Customers on a node share its kernel. Crossing customers needs a renderer exploit, a sandbox escape, and a kernel or container escape. | Near native; the sandbox added about 30 ms at cold start | Worked in the probe with a seccomp profile that permits it; AppArmor-restricted hosts untested |
-| gVisor | Stronger: the renderer's system calls go to gVisor's user-space kernel, not the host's | The long report took 2.3 to 3.1 times as long as under runc in clean probes; systrap only | Does not start on arm64; amd64 untested |
+| gVisor | Stronger: the renderer's system calls go to gVisor's user-space kernel, not the host's | The long report took 2.3 to 3.1 times as long as under runc in one follow-up run (runc on the host daemon, gVisor nested) and 3.7 times in the recorded run; systrap only | Crashes and then hangs on arm64; amd64 untested |
 | MicroVMs: Kata, Firecracker, or Hyper-V-backed Azure Container Apps dynamic sessions | Stronger: each sandbox runs its own guest kernel | Not measured | A normal guest kernel should support it; untested |
 
 Only the runc and gVisor rows rest on measurements, and those come from an ARM64 laptop VM. The
@@ -217,12 +280,16 @@ reaches, and the runtime and node pool decide how hard the next step is.
 If one customer's documents come from parties that distrust each other, for example when the
 customer lets its own end users upload raw HTML, the trust domain is the end user, not the
 customer. That calls for per-job or per-user isolation delivered by the platform, not by the API
-shelling out to Docker.
+shelling out to Docker. This design does not provide it, so it does not cover such customers yet;
+how the hosted service handles them is an
+[open question](#open-questions-and-next-measurements).
 
 ### What to keep from #152
 
 - The private protocol: bounded framing, worker output treated as untrusted, and streaming
-  ([`src/Atli.Reports.Worker.Protocol`](../src/Atli.Reports.Worker.Protocol)).
+  ([`src/Atli.Reports.Worker.Protocol`](../src/Atli.Reports.Worker.Protocol)). The hosted design
+  does not carry it over the network; its checks are the model for the API's renderer-response
+  checks.
 - The worker binary ([`src/Atli.Reports.Worker`](../src/Atli.Reports.Worker)).
 - The tests
   ([`tests/Atli.Reports.Engine.Tests/Workers`](../tests/Atli.Reports.Engine.Tests/Workers)).
@@ -240,25 +307,32 @@ Before accepting hostile documents in a hosted service:
 1. Validate each renderer runtime on the actual deployment platform. From a deliberately
    compromised renderer, test direct network access (other renderers, the API's other endpoints,
    metadata endpoints, the internet), filesystem, identity, process, and control-plane access, in
-   addition to normal document policy tests. Verify that Chromium's sandbox is active wherever the
-   runtime supports it. Verify resource exhaustion, cancellation, and crash recovery. Runtime
-   canaries establish specific controls, not the absence of sandbox vulnerabilities.
+   addition to normal document policy tests. Verify that Chromium's sandbox is active on the
+   actual node image wherever the runtime supports it. Verify resource exhaustion, cancellation,
+   and crash recovery. Runtime canaries establish specific controls, not the absence of sandbox
+   vulnerabilities.
 2. Introduce authoritative product-tenant membership and routing. Derive the renderer from
    authenticated entitlements, never a request header or caller-supplied renderer ID. Enforce fair
    admission and quotas across API replicas. Authenticate the API-to-renderer channel in both
-   directions, and confirm that a renderer rejects every other caller.
+   directions with per-renderer credentials. Confirm that a renderer rejects every other caller,
+   and that a credential captured from one renderer is rejected by every other renderer.
 3. Verify separation on the real cluster or environment: enforced network policy (on Azure
-   Container Apps, VNet-level egress blocking or a separate environment), node-pool placement, and
-   the absence of secrets, identities, and service-account tokens in renderers.
+   Container Apps, VNet-level egress blocking and the chosen environment layout; see
+   [Routing](#routing)), node-pool placement, minimal identity on renderer nodes, per-renderer
+   resource limits, and the absence of secrets, identities, and service-account tokens in
+   renderers. Verify that a compromised API cannot create, modify, scale, or reassign renderers.
 4. Measure on the intended platform and storage: sustained and burst load, cold start of a new
    replica, warm latency, CPU time per report, peak memory per renderer, idle cost, and failure
    rate. Choose always-on and scale-to-zero policies, replica limits, and scaling rules from those
    results; cap total cost and shed load explicitly.
-5. Set and meet a browser patch target: the time from a Chrome security release to redeployed
-   renderers, since any document can read the exact build.
+5. Set and meet patch targets, measured from a security release to redeployed renderers, for the
+   browser, the renderer nodes' kernel and node image, the container runtime, and the sandbox
+   runtime (runsc or Kata) if one is selected. Any document can read the exact browser build, and
+   under runc the node kernel is the last layer between customers.
 6. Add lifecycle observability and operator recovery without logging HTML, PDF content, credentials,
-   or sensitive URLs. Establish incident response and adversarial tests. Durable asynchronous jobs
-   additionally require a durable queue and authorized, expiring storage.
+   or sensitive URLs. Establish incident response, including destroying a compromised renderer and
+   rotating its credential, and adversarial tests. Durable asynchronous jobs additionally require a
+   durable queue and authorized, expiring storage.
 
 Kubernetes renderer deployments need enforcing network policy on their actual nodes, and a tested
 RuntimeClass if a sandboxed runtime is selected. Azure Container Apps' ordinary container profile
@@ -275,10 +349,16 @@ describe integrated self-hosting.
 - Add per-phase worker timings: sandbox start, browser launch, load, print, and stream.
 - Test gVisor's KVM platform where `/dev/kvm` exists.
 - Test Chromium's sandbox inside gVisor on amd64, and inside a microVM runtime.
-- Verify whether Azure Container Apps supports the user namespaces Chromium's sandbox needs.
-- Choose a mutual-authentication mechanism that works without renderer egress or a renderer
-  service identity. API-key verifiers need neither; validating the API's managed-identity tokens
-  needs signing-key metadata, and mTLS needs certificate distribution.
+- Verify whether Azure Container Apps supports the user namespaces Chromium's sandbox needs, and
+  whether it lets a deployment set a seccomp profile that permits the sandbox.
+- Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a
+  renderer service identity, and the API's credential must be unique to each renderer so that a
+  compromised renderer cannot replay it against another. Per-renderer API-key verifiers need
+  neither egress nor identity but need per-renderer issuance and rotation; validating the API's
+  managed-identity tokens needs signing-key metadata; mTLS needs certificate distribution.
+- Decide how the hosted service handles customers whose documents come from end users who distrust
+  each other: refuse them, require them to escape or sanitize end-user input as a service term, or
+  offer per-user isolation.
 - Measure concurrent load on a warm renderer.
 
 ## The experiment as built
