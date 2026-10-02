@@ -60,6 +60,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
   private Task<BrowserInstance>? _launch;
   private Task? _retrying;
   private string? _launchFailure;
+  private bool _sandboxUnavailable;
   private int _failedLaunches;
   private TaskCompletionSource? _drained;
   private Task? _shutdown;
@@ -112,6 +113,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         ShuttingDown: _shutdown is not null,
         Running: _current is { Retired: false, IsAlive: true } current ? current : null,
         LaunchFailure: _launchFailure,
+        SandboxUnavailable: _sandboxUnavailable,
         FailedLaunches: _failedLaunches,
         Retrying: _retrying is not null
       );
@@ -417,7 +419,11 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         if (_shutdown is null && exception is not OperationCanceledException)
         {
           _failedLaunches++;
-          _launchFailure = failure.Message;
+          // The remedy for a sandbox failure is the engine's own text; the health check adds it.
+          _sandboxUnavailable = failure is BrowserSandboxUnavailableException;
+          _launchFailure = failure is BrowserSandboxUnavailableException sandbox
+            ? sandbox.Detail
+            : failure.Message;
           ScheduleRetryLocked();
         }
       }
@@ -448,6 +454,7 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
       failedLaunches = _failedLaunches;
       _failedLaunches = 0;
       _launchFailure = null;
+      _sandboxUnavailable = false;
     }
 
     _metrics.BrowserLaunched();
