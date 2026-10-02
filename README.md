@@ -112,8 +112,8 @@ result.Switch(
 `IHtmlToPdfConverter` is a thread-safe singleton with two overloads. One streams the PDF into a
 `Stream` you pass in, as above. The other returns the PDF as a seekable in-memory `Stream` that
 you dispose. Failures come back as a `ConversionError` instead of an exception. Its `Kind` is one
-of `InvalidRequest`, `Busy`, `BrowserUnavailable`, `Timeout`, `SignalTimeout`, `RenderFailed`, or
-`Canceled`.
+of `InvalidRequest`, `Busy`, `BrowserUnavailable`, `Timeout`, `SignalTimeout`, `RenderFailed`,
+`Canceled`, or `PolicyDenied`. Remote conversions can also return `Unauthorized` or `Forbidden`.
 
 The browser starts on the first conversion. It closes when the service provider is disposed, or
 when the host stops. In a generic host or ASP.NET Core app, register the engine with
@@ -496,7 +496,7 @@ aspire stop
 
 | Resource | What it is |
 | --- | --- |
-| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile; `POST /convert` as in [the server quick start](#quick-start-the-server-in-docker), and the dashboard links its OpenAPI document. The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
+| `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile, with a generated development API key wired to the remote example and dashboard test command. Direct conversions require that key; OpenAPI requires a separate diagnostics permission. The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
 | `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |

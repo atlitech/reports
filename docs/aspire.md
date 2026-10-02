@@ -47,22 +47,25 @@ builder.Build().Run();
 | --- | --- |
 | Image | `ghcr.io/atlitech/reports-server:<version>`, where `<version>` is the hosting package's version |
 | Endpoint | `http`, to the server's port 8080 in the container. `port` fixes the host port; by default Aspire picks one. The endpoint is not external. |
-| Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails (a missing library, say), the server answers `503` with the reason and retries in the background, so the resource stays unhealthy and `WaitFor(reports)` keeps waiting until a launch succeeds. See [the server's health endpoints](engine/server.md#health). |
+| Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails, the status-only probe answers `503` and the server retries in the background. `WaitFor(reports)` keeps waiting until a launch succeeds. Authorized operators can inspect `/health/details` for the reason. See [the server's health endpoints](engine/server.md#health). |
 | Probes | When the app deploys, a readiness probe on `/health/ready` and a liveness probe on `/health/live`, for the targets that run probes, such as Azure Container Apps. Not on Kubernetes yet; see [Deploy](#deploy). |
 | Telemetry | Logs, metrics, and traces go to the dashboard over OTLP, including the engine's `atli.reports.convert` spans below each `POST /convert`. |
-| OpenAPI | The dashboard links the server's OpenAPI document, `/openapi/v1.json`, which describes `POST /convert`. A server built from a clone that predates the document answers the link with `404`. |
-| Command | `Convert a test page` converts a one-page document and writes the PDF's size and the round trip's duration to the server's console log. It is enabled while the server is healthy. From a terminal: `aspire resource reports convert-test-page`. |
+| OpenAPI | The dashboard links `/openapi/v1.json`, which requires `reports.diagnostics`. The link does not attach credentials. Development and production API-key helpers grant conversion permission only; use an operator credential for diagnostics. |
+| Command | `Convert a test page` converts a one-page document and logs its PDF size and duration. It is enabled while the server is healthy and an API-key helper or explicit anonymous access is configured. From a terminal: `aspire resource reports convert-test-page`. JWT-only deployments use the calling application's token flow. |
 
 `WithReference(reports)` gives the app these environment variables:
 
 | Variable | Example | For |
 | --- | --- | --- |
-| `ConnectionStrings__reports` | `Endpoint=http://localhost:51006` | `AddReportsClient("reports")` |
+| `ConnectionStrings__reports` | `Endpoint=http://localhost:51006;ApiKey=<credential>` | `AddReportsClient("reports")`; treat the entire value as a secret |
 | `REPORTS_URI` | `http://localhost:51006` | apps in other languages |
 | `REPORTS_HOST`, `REPORTS_PORT` | `localhost`, `51006` | apps in other languages |
+| `REPORTS_APIKEY` | `<credential>` | Secret header value for `X-Reports-Api-Key` when an API-key helper is configured |
 
 The connection string's name is the resource's name, and the other variables start with it in
-upper case. A plain name such as `reports` keeps them easy to read from any language.
+upper case. A plain name such as `reports` keeps them easy to read from any language. Without an
+API-key helper, the connection string contains only `Endpoint` and there is no `REPORTS_APIKEY`.
+The URI, host, and port never include credentials.
 
 ## The app
 
