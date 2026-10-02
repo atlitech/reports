@@ -36,6 +36,9 @@ public static class ConversionProblems
     kind switch
     {
       ConversionErrorKind.InvalidRequest => StatusCodes.Status400BadRequest,
+      ConversionErrorKind.Unauthorized => StatusCodes.Status401Unauthorized,
+      ConversionErrorKind.Forbidden => StatusCodes.Status403Forbidden,
+      ConversionErrorKind.PolicyDenied => StatusCodes.Status422UnprocessableEntity,
       ConversionErrorKind.SignalTimeout => StatusCodes.Status422UnprocessableEntity,
       ConversionErrorKind.Busy => StatusCodes.Status503ServiceUnavailable,
       ConversionErrorKind.BrowserUnavailable => StatusCodes.Status503ServiceUnavailable,
@@ -66,6 +69,8 @@ public static class ConversionProblems
   public static ConversionErrorKind KindForStatus(int status) =>
     status switch
     {
+      StatusCodes.Status401Unauthorized => ConversionErrorKind.Unauthorized,
+      StatusCodes.Status403Forbidden => ConversionErrorKind.Forbidden,
       StatusCodes.Status422UnprocessableEntity => ConversionErrorKind.SignalTimeout,
       StatusCodes.Status408RequestTimeout or StatusCodes.Status504GatewayTimeout =>
         ConversionErrorKind.Timeout,
@@ -89,6 +94,8 @@ public static class ConversionProblems
     problem.Extensions.TryAdd("kind", KindForStatus(status).ToString());
     problem.Detail ??= status switch
     {
+      StatusCodes.Status401Unauthorized => "Valid conversion service credentials are required.",
+      StatusCodes.Status403Forbidden => "The caller is not authorized for this operation.",
       StatusCodes.Status400BadRequest =>
         "The request body is not a conversion request. Send a JSON object with an html string and, optionally, options.",
       StatusCodes.Status413PayloadTooLarge => "The request body is larger than the server accepts.",
@@ -137,6 +144,9 @@ public static class ConversionProblems
     kind switch
     {
       ConversionErrorKind.InvalidRequest => "The conversion request is invalid.",
+      ConversionErrorKind.Unauthorized => "Authentication is required.",
+      ConversionErrorKind.Forbidden => "The caller is not authorized.",
+      ConversionErrorKind.PolicyDenied => "The document violates the rendering policy.",
       ConversionErrorKind.SignalTimeout => "The document did not signal that it was ready.",
       ConversionErrorKind.Busy => "The server is busy. Try again later.",
       ConversionErrorKind.BrowserUnavailable =>

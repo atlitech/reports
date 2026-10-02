@@ -6,7 +6,7 @@ namespace Aspire.Hosting;
 /// <summary>
 /// Adds the Atli Reports server to an Aspire application model and configures it.
 /// </summary>
-public static class ReportsServerBuilderExtensions
+public static partial class ReportsServerBuilderExtensions
 {
   /// <summary>
   /// The port the server listens on inside its container.
@@ -80,6 +80,12 @@ public static class ReportsServerBuilderExtensions
   /// path, and Aspire rejects the duplicate.
   /// </para>
   /// <para>
+  /// Select authentication explicitly: <c>WithDevelopmentApiKey()</c> for a local run,
+  /// <c>WithApiKeyAuthentication</c> for secret deployment parameters, or configure the server's
+  /// JWT bearer settings through <c>WithEnvironment</c>. The server refuses to start without an
+  /// authentication mode. <c>WithAnonymousAccess()</c> explicitly opts out of caller authentication.
+  /// </para>
+  /// <para>
   /// Reference the server from an app with <c>WithReference</c>; the app reads the connection string
   /// with <c>builder.AddReportsClient(name)</c> from <c>Atli.Reports.Client</c>. Configure the server
   /// with <see cref="WithMaxConcurrentConversions"/>, <see cref="WithMaxQueueLength"/>,
@@ -95,7 +101,7 @@ public static class ReportsServerBuilderExtensions
   /// </remarks>
   /// <example>
   /// <code>
-  /// var reports = builder.AddReportsServer("reports").WithMaxConcurrentConversions(4);
+  /// var reports = builder.AddReportsServer("reports").WithDevelopmentApiKey().WithMaxConcurrentConversions(4);
   ///
   /// builder.AddProject&lt;Projects.Api&gt;("api").WithReference(reports).WaitFor(reports);
   /// </code>

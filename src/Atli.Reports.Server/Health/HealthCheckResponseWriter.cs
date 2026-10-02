@@ -8,6 +8,14 @@ namespace Atli.Reports.Server.Health;
 /// </summary>
 public static class HealthCheckResponseWriter
 {
+  /// <summary>Writes only the aggregate status for anonymous platform probes.</summary>
+  public static Task WriteSummary(HttpContext context, HealthReport report) =>
+    context.Response.WriteAsJsonAsync(
+      new HealthSummaryResponse(report.Status.ToString()),
+      ServerJsonSerializerContext.Default.HealthSummaryResponse,
+      cancellationToken: context.RequestAborted
+    );
+
   /// <summary>
   /// Writes <paramref name="report"/> as the response.
   /// </summary>
@@ -39,3 +47,5 @@ internal sealed record HealthCheckResponse(
 );
 
 internal sealed record HealthCheckEntry(string Status, string? Description);
+
+internal sealed record HealthSummaryResponse(string Status);

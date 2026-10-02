@@ -12,6 +12,20 @@ public class ReportsServerTests(ReportsAppHost appHost)
   private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
 
   [Test]
+  public async Task The_server_requires_the_development_credential()
+  {
+    await appHost.WaitForHealthyAsync(ReportsAppHost.ReportsServer, TestToken);
+    using var client = appHost.CreateHttpClient(ReportsAppHost.ReportsServer);
+    client.DefaultRequestHeaders.Remove("X-Reports-Api-Key");
+    using var response = await client.PostAsJsonAsync(
+      "/convert",
+      new { html = "<h1>Missing credential</h1>" },
+      TestToken
+    );
+    await Assert.That(response.StatusCode).IsEqualTo(System.Net.HttpStatusCode.Unauthorized);
+  }
+
+  [Test]
   public async Task The_server_converts_html_to_a_pdf()
   {
     await appHost.WaitForHealthyAsync(ReportsAppHost.ReportsServer, TestToken);

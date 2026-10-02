@@ -44,6 +44,9 @@ internal sealed class BrowserProcess : IAsyncDisposable
   private readonly TaskCompletionSource<int> _exited = new(
     TaskCreationOptions.RunContinuationsAsynchronously
   );
+  private readonly TaskCompletionSource _outputPumpsStarted = new(
+    TaskCreationOptions.RunContinuationsAsynchronously
+  );
   private readonly Queue<string> _outputTail = new();
   private readonly Lock _outputTailLock = new();
   private readonly Lock _gate = new();
@@ -86,7 +89,8 @@ internal sealed class BrowserProcess : IAsyncDisposable
   public static async Task<BrowserProcess> LaunchAsync(
     ReportsEngineBrowserOptions options,
     ILogger logger,
-    CancellationToken cancellationToken
+    CancellationToken cancellationToken,
+    bool restrictNetwork = false
   )
   {
     var executable = string.IsNullOrEmpty(options.ExecutablePath)
@@ -119,7 +123,8 @@ internal sealed class BrowserProcess : IAsyncDisposable
       StandardErrorEncoding = Encoding.UTF8,
       StandardOutputEncoding = Encoding.UTF8,
     };
-    foreach (var argument in ChromiumArguments.Build(options, profileDirectory))
+    BrowserEnvironment.Configure(startInfo, options);
+    foreach (var argument in ChromiumArguments.Build(options, profileDirectory, restrictNetwork))
     {
       startInfo.ArgumentList.Add(argument);
     }
@@ -195,11 +200,17 @@ internal sealed class BrowserProcess : IAsyncDisposable
     }
 
     _started = true;
-    Id = _process.Id;
-    LogMessages.BrowserProcessStarted(_logger, Id, ProfileDirectory);
-
-    _errorPump = PumpAsync(_process.StandardError, isError: true);
-    _outputPump = PumpAsync(_process.StandardOutput, isError: false);
+    try
+    {
+      Id = _process.Id;
+      LogMessages.BrowserProcessStarted(_logger, Id, ProfileDirectory);
+      _errorPump = PumpAsync(_process.StandardError, isError: true);
+      _outputPump = PumpAsync(_process.StandardOutput, isError: false);
+    }
+    finally
+    {
+      _outputPumpsStarted.TrySetResult();
+    }
 
     try
     {
@@ -238,6 +249,9 @@ internal sealed class BrowserProcess : IAsyncDisposable
 
   private async Task FailStartupAfterExitAsync(int exitCode)
   {
+    // Exited can arrive before Process.Start returns or before the pumps are assigned. Await
+    // registration first: awaiting the initial completed placeholder would lose startup stderr.
+    await _outputPumpsStarted.Task;
     // Give the error pump a moment to read the browser's last words, which explain the exit.
     try
     {

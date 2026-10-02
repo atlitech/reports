@@ -126,7 +126,13 @@ internal sealed class StubServer : IAsyncDisposable
 /// <summary>
 /// A request the stub received, with its body read.
 /// </summary>
-internal sealed record StubRequest(HttpMethod Method, Uri Uri, string? MediaType, string Body);
+internal sealed record StubRequest(
+  HttpMethod Method,
+  Uri Uri,
+  string? MediaType,
+  string Body,
+  IReadOnlyDictionary<string, string[]> Headers
+);
 
 /// <summary>
 /// Answers requests with a callback and records them.
@@ -149,7 +155,12 @@ internal sealed class StubHandler(
       request.Method,
       request.RequestUri!,
       request.Content?.Headers.ContentType?.MediaType,
-      body
+      body,
+      request.Headers.ToDictionary(
+        header => header.Key,
+        header => header.Value.ToArray(),
+        StringComparer.OrdinalIgnoreCase
+      )
     );
     Requests.Enqueue(received);
     var response = await respond(received, cancellationToken);

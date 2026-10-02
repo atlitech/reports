@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Models;
+using Atli.Reports.Server.Security;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Net.Http.Headers;
 using Microsoft.OpenApi;
@@ -31,10 +32,15 @@ public static partial class ConvertEndpoints
     // which no client sees.
     app.MapPost("/convert", ConvertHtmlToPdf)
       .WithName("Convert")
+      .RequireAuthorization(ReportsSecurityRegistration.ConvertPolicy)
+      .WithMetadata(new ReportsSecurityMiddleware.ConversionAdmissionMetadata())
       .WithTags("Conversion")
       // Stream makes OpenAPI describe the PDF as binary content, not as a JSON object.
       .Produces<Stream>(StatusCodes.Status200OK, "application/pdf")
       .ProducesProblem(StatusCodes.Status400BadRequest)
+      .ProducesProblem(StatusCodes.Status401Unauthorized)
+      .ProducesProblem(StatusCodes.Status403Forbidden)
+      .ProducesProblem(StatusCodes.Status429TooManyRequests)
       .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
       .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
       .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
@@ -64,6 +70,16 @@ public static partial class ConvertEndpoints
       };
     }
 
+    if (operation.Responses?.GetValueOrDefault("429") is OpenApiResponse quotaResponse)
+    {
+      quotaResponse.Headers ??= new Dictionary<string, IOpenApiHeader>();
+      quotaResponse.Headers[HeaderNames.RetryAfter] = new OpenApiHeader
+      {
+        Description = "Seconds to wait before retrying: 1 for per-caller capacity exhaustion.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.Integer },
+      };
+    }
+
     return Task.CompletedTask;
   }
 
@@ -80,9 +96,13 @@ public static partial class ConvertEndpoints
   /// <c>InvalidRequest</c>: the body is not a conversion request, the HTML is blank, or an option is
   /// invalid.
   /// </response>
+  /// <response code="401"><c>Unauthorized</c>: credentials are missing or invalid.</response>
+  /// <response code="403"><c>Forbidden</c>: the caller lacks conversion permission.</response>
+  /// <response code="429"><c>Busy</c>: this caller has reached its in-flight limit.</response>
   /// <response code="413"><c>InvalidRequest</c>: the body is larger than the server accepts.</response>
   /// <response code="415"><c>InvalidRequest</c>: the body is not sent as <c>application/json</c>.</response>
-  /// <response code="422"><c>SignalTimeout</c>: the document never called its signal function.</response>
+  /// <response code="422"><c>SignalTimeout</c>: the document never called its signal function.
+  /// <c>PolicyDenied</c>: the document attempted access prohibited by the rendering policy.</response>
   /// <response code="500">
   /// <c>RenderFailed</c>: the browser could not render or print the document, or the server failed
   /// unexpectedly.
@@ -131,11 +151,7 @@ public static partial class ConvertEndpoints
 
     if (body.HasStarted)
     {
-      LogAbortedAfterStart(
-        loggerFactory.CreateLogger("Atli.Reports.Server.Convert"),
-        error.Kind,
-        error.Message
-      );
+      LogAbortedAfterStart(loggerFactory.CreateLogger("Atli.Reports.Server.Convert"), error.Kind);
       context.Abort();
       return;
     }
@@ -146,13 +162,9 @@ public static partial class ConvertEndpoints
   [LoggerMessage(
     EventId = 1,
     Level = LogLevel.Warning,
-    Message = "The conversion failed ({Kind}) after the PDF response started; aborting the connection: {Message}"
+    Message = "The conversion failed ({Kind}) after the PDF response started; aborting the connection."
   )]
-  private static partial void LogAbortedAfterStart(
-    ILogger logger,
-    ConversionErrorKind kind,
-    string message
-  );
+  private static partial void LogAbortedAfterStart(ILogger logger, ConversionErrorKind kind);
 
   /// <summary>
   /// Maps the request options onto <see cref="PdfOptions"/>, or explains why they are invalid.

@@ -27,6 +27,9 @@ public sealed class ReportsEngineOptions
   /// </summary>
   public ReportsEngineConcurrencyOptions Concurrency { get; } = new();
 
+  /// <summary>Host-controlled document asset access. Conversion requests cannot relax this policy.</summary>
+  public ReportsEngineNetworkOptions Network { get; } = new();
+
   /// <summary>
   /// The longest one conversion may take as a whole, from the call until the last PDF byte is written,
   /// including its wait in the queue. Defaults to <see cref="Timeout.InfiniteTimeSpan"/>: no overall

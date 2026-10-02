@@ -296,6 +296,7 @@ internal sealed class HtmlToPdfConverter(
       is not (
         ConversionErrorKind.Canceled
         or ConversionErrorKind.InvalidRequest
+        or ConversionErrorKind.PolicyDenied
         or ConversionErrorKind.Busy
       )
     )

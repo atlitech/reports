@@ -117,22 +117,18 @@ public static class Extensions
 
   /// <summary>
   /// Maps <c>/health</c> (every check must pass) and <c>/alive</c> (the checks tagged <c>live</c>), in
-  /// the Development environment only.
+  /// every environment. Probe responses contain only a status, not dependency diagnostics.
   /// </summary>
   /// <remarks>
-  /// Health endpoints in other environments have security implications; see
-  /// https://aka.ms/dotnet/aspire/healthchecks before exposing them.
+  /// Restrict these endpoints to the deployment's probe network at ingress.
   /// </remarks>
   public static WebApplication MapDefaultEndpoints(this WebApplication app)
   {
-    if (app.Environment.IsDevelopment())
-    {
-      app.MapHealthChecks(HealthEndpointPath);
-      app.MapHealthChecks(
-        AlivenessEndpointPath,
-        new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") }
-      );
-    }
+    app.MapHealthChecks(HealthEndpointPath);
+    app.MapHealthChecks(
+      AlivenessEndpointPath,
+      new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") }
+    );
 
     return app;
   }

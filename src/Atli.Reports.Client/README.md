@@ -55,6 +55,32 @@ services.AddReportsClient(new ReportsClientSettings { Endpoint = new Uri("http:/
 Both overloads return the `IHttpClientBuilder` of the client's `HttpClient`, so you can add
 handlers, for example for authentication.
 
+## Authenticate
+
+Set `ReportsClient__ApiKey` through your secret store to the full `key-id.secret` credential.
+The Aspire hosting integration supplies `Endpoint=<url>;ApiKey=<credential>` through a secret
+connection expression when configured with `WithApiKeyAuthentication`.
+
+For workload identity, acquire an access token in code:
+
+```csharp
+builder.AddReportsClient("reports", settings =>
+{
+  settings.AccessTokenProvider = cancellationToken => AcquireReportsTokenAsync(cancellationToken);
+});
+```
+
+`AcquireReportsTokenAsync` is your application's `ValueTask<string>` token callback; use your
+identity provider's SDK, cache tokens until near expiry, and request the Reports API audience.
+It runs for each conversion attempt within the attempt timeout. Do not configure both methods.
+Health probes send no credentials. `401` and `403` return `Unauthorized` and `Forbidden` without
+retrying; fix the credential or authorization assignment before resubmitting.
+
+Use TLS across untrusted networks. Endpoints cannot contain credentials, query parameters, or
+fragments. The default HTTP transport does not follow redirects, preventing documents and API
+keys being forwarded to another origin. If you replace the primary handler, keep automatic
+redirects disabled. Credentials are redacted from the client's HTTP header logs.
+
 Aspire's service defaults add `AddStandardResilienceHandler` to every `HttpClient`. That handler
 has a 10-second attempt timeout and retries `500` and `504`, both wrong for conversions, so the
 client removes it from its own `HttpClient` and keeps only its pipeline.
@@ -92,7 +118,10 @@ writes to a destination stream returns that failure as a `ConversionError` inste
 | Server answer | `ConversionErrorKind` |
 | --- | --- |
 | `400 Bad Request` | `InvalidRequest` |
+| `401 Unauthorized` | `Unauthorized` |
+| `403 Forbidden` | `Forbidden` |
 | `422 Unprocessable Content` | `SignalTimeout` |
+| `422` with `kind: PolicyDenied` | `PolicyDenied` |
 | `503` with `kind: Busy` | `Busy`, after the retries |
 | `503` with `kind: BrowserUnavailable` | `BrowserUnavailable`, after the retries |
 | `504 Gateway Timeout` | `Timeout` |
@@ -121,6 +150,8 @@ render the document right now; a later attempt may succeed".
 | Setting | Default | |
 | --- | --- | --- |
 | `Endpoint` | (required) | The server's base address. A path prefix is kept. |
+| `ApiKey` | unset | Full API credential, sent in `X-Reports-Api-Key` on conversion requests. |
+| `AccessTokenProvider` | unset | Code-only asynchronous bearer token callback. |
 | `AttemptTimeout` | 2 minutes | How long one attempt waits for the server to start answering. |
 | `TotalTimeout` | 5 minutes | The same, across all attempts and retry delays. |
 | `MaxRetryAttempts` | 3 | Retries of a `503` or of a transport failure. `0` never retries. |

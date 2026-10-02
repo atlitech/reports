@@ -128,13 +128,15 @@ The image builds from the repository root:
 git clone https://github.com/atlitech/reports.git
 cd reports
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
-docker run --rm -p 8080:8080 atli-reports-server
+scripts/create-reports-api-key.sh
+docker run --rm -p 127.0.0.1:8080:8080 \
+  --env-file .reports-secrets/server.env atli-reports-server
 ```
 
-`docker compose up --build` in `src/Atli.Reports.Server` does the same. Then convert a document:
+`docker compose up --build` in `src/Atli.Reports.Server` uses those credentials too. Then convert a document:
 
 ```bash
-curl -X POST http://localhost:8080/convert \
+curl --config .reports-secrets/client.curl -X POST http://localhost:8080/convert \
   -H "Content-Type: application/json" \
   -d '{"html": "<!DOCTYPE html><h1>Hello, PDF</h1>", "options": {"paperSize": "a4"}}' \
   --output hello.pdf
@@ -144,9 +146,9 @@ The options mirror `PdfOptions`: `orientation`, `paperSize` (`letter`, `a4`, `a3
 `margins`, `printBackground`, `scale`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`,
 `pageRanges`, `preferCSSPageSize`, `waitForSignal`, and `waitTimeoutSeconds`. Failures, including
 a body the server cannot read, are RFC 9457 problem details with a `kind` member.
-`GET /openapi/v1.json` returns the OpenAPI document that describes the endpoint.
+`GET /openapi/v1.json` returns the OpenAPI document to callers with `reports.diagnostics` permission.
 `GET /health/live` and `GET /health/ready` serve container probes. The image runs as a non-root
-user under `tini`, and its browser runs without the sandbox, so send it trusted HTML only. See
+user under `tini`, and its browser runs without the sandbox, so send it controlled, application-owned HTML only. Authentication is explicit; the server refuses unconfigured access and blocks document networking by default. See [Security and production deployment](docs/security.md) for credentials, approved assets, limits, and Azure/Kubernetes examples. See
 [docs/engine/server.md](docs/engine/server.md) for status codes, configuration, and the image.
 
 ## Waiting for JavaScript

@@ -8,6 +8,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 // chrome-headless-shell.
 var reportsServer = builder
   .AddReportsServer("reports-server")
+  .WithDevelopmentApiKey()
   .WithDockerfile("../..", "src/Atli.Reports.Server/Dockerfile");
 
 // The remote example renders its Blazor reports in-process and converts them on the reports server,

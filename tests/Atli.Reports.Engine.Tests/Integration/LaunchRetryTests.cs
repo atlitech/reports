@@ -102,6 +102,30 @@ public class LaunchRetryTests
   }
 
   [Test]
+  public async Task An_exit_before_output_pump_registration_preserves_startup_diagnostics()
+  {
+    if (OperatingSystem.IsWindows())
+    {
+      Skip.Test("Uses a shell script as the browser executable.");
+      return;
+    }
+
+    var marker = Guid.NewGuid().ToString("N");
+    using var fake = FakeBrowser.Create($"echo 'missing library {marker}' >&2; exit 127");
+    var error = await Assert
+      .That(async () =>
+        await BrowserProcess.LaunchAsync(
+          new ReportsEngineBrowserOptions { ExecutablePath = fake.Path },
+          new ExitBeforeOutputLogger(),
+          TestToken
+        )
+      )
+      .Throws<BrowserUnavailableException>();
+
+    await Assert.That(error!.Message).Contains("exited with code 127").And.Contains(marker);
+  }
+
+  [Test]
   public async Task Retries_and_conversions_never_launch_two_browsers_at_once()
   {
     if (OperatingSystem.IsWindows())
@@ -243,6 +267,48 @@ public class LaunchRetryTests
     foreach (var service in provider.GetServices<IHostedService>().Reverse())
     {
       await service.StopAsync(TestToken);
+    }
+  }
+
+  /// <summary>
+  /// Holds the startup log before the pumps are registered, reproducing a fast-exit/slow-logger
+  /// schedule. Waiting for process exit is deterministic; the short delay lets its queued event run.
+  /// </summary>
+  private sealed class ExitBeforeOutputLogger : ILogger
+  {
+    public IDisposable? BeginScope<TState>(TState state)
+      where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel,
+      EventId eventId,
+      TState state,
+      Exception? exception,
+      Func<TState, Exception?, string> formatter
+    )
+    {
+      if (eventId.Id != 200)
+      {
+        return;
+      }
+
+      var values = (IReadOnlyList<KeyValuePair<string, object?>>)(object)state!;
+      var processId = (int)values.Single(value => value.Key == "ProcessId").Value!;
+      try
+      {
+        using var process = Process.GetProcessById(processId);
+        if (!process.WaitForExit(5000))
+        {
+          throw new InvalidOperationException("The fake browser did not exit.");
+        }
+      }
+      catch (ArgumentException)
+      {
+        // The fake exited before the log callback could open it.
+      }
+      Thread.Sleep(100);
     }
   }
 

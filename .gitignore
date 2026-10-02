@@ -56,3 +56,6 @@ TestResults/
 
 # Build output (Directory.Build.props sets the artifacts output path)
 artifacts/
+
+# Locally generated reports service credentials.
+.reports-secrets/

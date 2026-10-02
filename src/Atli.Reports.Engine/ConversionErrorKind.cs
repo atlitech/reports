@@ -52,4 +52,21 @@ public enum ConversionErrorKind
   /// The caller canceled the conversion through its <see cref="CancellationToken"/>.
   /// </summary>
   Canceled,
+
+  /// <summary>
+  /// The reports server requires a valid caller credential. Acquire or configure credentials
+  /// before trying again; repeating the same request does not authenticate it.
+  /// </summary>
+  Unauthorized,
+
+  /// <summary>
+  /// The authenticated caller is not permitted to request the conversion.
+  /// </summary>
+  Forbidden,
+
+  /// <summary>
+  /// The document attempted to access a resource forbidden by the rendering policy.
+  /// Change the document or the authorized rendering policy before trying again.
+  /// </summary>
+  PolicyDenied,
 }

@@ -1,0 +1,138 @@
+# Private, self-hosted deployment for application-owned templates. This is not a hostile-HTML
+# sandbox. Before applying, create reports-auth from scripts/create-reports-api-key.sh's server.env,
+# select the namespace, and replace the image with a tested immutable image from your registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reports
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: reports
+  template:
+    metadata:
+      labels:
+        app: reports
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reports
+          image: atli-reports-server:security
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: reports-auth
+          env:
+            - name: ReportsEngine__Network__Mode
+              value: Disabled
+            - name: ReportsEngine__Concurrency__MaxConcurrentConversions
+              value: "2"
+            - name: ReportsEngine__Concurrency__MaxQueueLength
+              value: "8"
+            - name: ReportsEngine__Browser__ShutdownTimeout
+              value: "00:01:10"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: 24
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: temporary
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reports
+spec:
+  type: ClusterIP
+  selector:
+    app: reports
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: reports
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: reports
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reports
+spec:
+  podSelector:
+    matchLabels:
+      app: reports
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        # Only explicitly labelled clients in this namespace. Authentication still applies.
+        - podSelector:
+            matchLabels:
+              reports-client: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+  # The API-key profile and self-contained documents need no network egress. JWT signing-key
+  # discovery and OTLP export require narrowly scoped extra rules; do not add unrestricted egress.
+  egress: []

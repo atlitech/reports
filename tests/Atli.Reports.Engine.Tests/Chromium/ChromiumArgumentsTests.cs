@@ -43,4 +43,20 @@ public class ChromiumArgumentsTests
     await Assert.That(arguments).Contains("--disable-dev-shm-usage");
     await Assert.That(arguments[^1]).IsEqualTo("--lang=es");
   }
+
+  [Test]
+  public async Task Restricted_networking_disables_direct_browser_DNS_QUIC_and_WebRTC_UDP()
+  {
+    var arguments = ChromiumArguments.Build(
+      new ReportsEngineBrowserOptions(),
+      "/tmp/profile",
+      restrictNetwork: true
+    );
+
+    await Assert.That(arguments).Contains("--disable-quic");
+    await Assert.That(arguments).Contains("--host-resolver-rules=MAP * ~NOTFOUND");
+    await Assert
+      .That(arguments)
+      .Contains("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+  }
 }

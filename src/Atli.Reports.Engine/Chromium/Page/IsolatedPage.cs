@@ -1,5 +1,6 @@
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Connection;
+using Atli.Reports.Engine.Chromium.Network;
 using Atli.Reports.Engine.Chromium.Protocol;
 using Atli.Reports.Engine.Chromium.Protocol.Messages;
 using Atli.Reports.Engine.Chromium.Protocol.Results;
@@ -15,9 +16,10 @@ namespace Atli.Reports.Engine.Chromium.Page;
 /// context afterwards.
 /// </summary>
 /// <remarks>
-/// A browser context is Chromium's isolation boundary: it has its own cookie jar, storage (local,
+/// A browser context separates document state: it has its own cookie jar, storage (local,
 /// session, IndexedDB, Cache Storage), HTTP cache, service workers, and permissions. Disposing the
-/// context discards all of it, so nothing a document stores can reach another conversion.
+/// context discards it. This is not an operating-system security boundary against a hostile tenant
+/// or a compromised browser process.
 /// </remarks>
 internal sealed class IsolatedPage : IConversionPage
 {
@@ -40,6 +42,7 @@ internal sealed class IsolatedPage : IConversionPage
   private readonly string _browserContextId;
   private readonly int _pdfReadChunkSize;
   private readonly ILogger _logger;
+  private readonly PageNetworkController? _network;
   private TaskCompletionSource? _signal;
   private bool _disposed;
 
@@ -48,7 +51,8 @@ internal sealed class IsolatedPage : IConversionPage
     DevToolsSession session,
     string browserContextId,
     int pdfReadChunkSize,
-    ILogger logger
+    ILogger logger,
+    PageNetworkController? network = null
   )
   {
     _browser = browser;
@@ -56,6 +60,7 @@ internal sealed class IsolatedPage : IConversionPage
     _browserContextId = browserContextId;
     _pdfReadChunkSize = pdfReadChunkSize;
     _logger = logger;
+    _network = network;
   }
 
   public async Task EnableSignalAsync(string signalName, CancellationToken cancellationToken)
@@ -196,8 +201,18 @@ internal sealed class IsolatedPage : IConversionPage
     }
 
     _session.EventReceived -= OnEvent;
-    _session.Dispose();
-    await _browser.DisposeContextAsync(_browserContextId);
+    try
+    {
+      if (_network is not null)
+      {
+        await _network.DisposeAsync();
+      }
+    }
+    finally
+    {
+      _session.Dispose();
+      await _browser.DisposeContextAsync(_browserContextId);
+    }
   }
 
   private void OnEvent(string method, ReadOnlySpan<byte> parameters)

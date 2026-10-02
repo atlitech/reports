@@ -40,9 +40,18 @@ public sealed class ReportsEngineBrowserOptions
   public bool DisableDevShmUsage { get; set; }
 
   /// <summary>
-  /// Additional command-line arguments passed to the browser process, after the engine's own arguments.
+  /// Additional command-line arguments passed to the browser process. Required network restriction
+  /// switches take precedence when a restricted network mode is configured.
   /// </summary>
   public IList<string> ExtraArguments { get; } = [];
+
+  /// <summary>
+  /// Additional environment variables deliberately passed to Chromium. By default the child process
+  /// receives only platform, locale, font, display, path, and temporary-directory settings, not the
+  /// application's credentials or configuration. Do not add tokens or secrets here.
+  /// </summary>
+  public IDictionary<string, string> EnvironmentVariables { get; } =
+    new Dictionary<string, string>(StringComparer.Ordinal);
 
   /// <summary>
   /// How long to wait for a launched browser to start and report its DevTools endpoint. Defaults to 30 seconds.

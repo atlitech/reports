@@ -151,6 +151,11 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: .github/scripts/smoke-test-server-image.sh "$IMAGE@$DIGEST"
 
+      - name: Verify JWT authentication in the NativeAOT image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: python3 .github/scripts/smoke-test-server-jwt.py "$IMAGE@$DIGEST"
+
       - name: Record the digest
         env:
           ARCH: ${{ matrix.arch }}
