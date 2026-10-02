@@ -37,6 +37,9 @@ In the app, `builder.AddReportsClient("reports")` from `Atli.Reports.Client` reg
 - exposes the server's port 8080 as the `http` endpoint (pass `port` to fix the host port);
 - marks the resource healthy once `/health/ready` answers `200`; the server answers `503` while its
   browser fails to launch, so `WaitFor` waits for a server that can convert;
+- probes `/health/ready` for readiness and `/health/live` for liveness on deployment targets that
+  run probes, such as Azure Container Apps (not on Kubernetes yet, see
+  [Deploy](https://github.com/atlitech/reports/blob/main/docs/aspire.md#deploy));
 - sends the server's logs, metrics, and traces to the dashboard over OTLP;
 - links the server's OpenAPI document, `/openapi/v1.json`, in the dashboard;
 - adds a `Convert a test page` dashboard command, which converts a one-page document and logs the

@@ -1,6 +1,8 @@
 using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Eventing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Atli.Reports.Aspire.Hosting.Tests.Support;
 
@@ -21,6 +23,30 @@ internal static class AppModel
 
   internal static IDistributedApplicationBuilder CreateBuilder() =>
     DistributedApplication.CreateBuilder([]);
+
+  /// <summary>
+  /// A builder for <c>aspire publish</c>, which adds deployment environments to the model.
+  /// </summary>
+  internal static IDistributedApplicationBuilder CreatePublishBuilder() =>
+    DistributedApplication.CreateBuilder(["--operation", "publish"]);
+
+  /// <summary>
+  /// Builds the app and raises <see cref="BeforeStartEvent"/>, after which the model is complete and
+  /// publishers read it.
+  /// </summary>
+  internal static async Task RaiseBeforeStartAsync(IDistributedApplicationBuilder builder)
+  {
+    await using var app = builder.Build();
+    await app
+      .Services.GetRequiredService<IDistributedApplicationEventing>()
+      .PublishAsync(
+        new BeforeStartEvent(
+          app.Services,
+          app.Services.GetRequiredService<DistributedApplicationModel>()
+        ),
+        TestToken
+      );
+  }
 
   /// <summary>
   /// Gives an endpoint the address a running app would, so expressions over it resolve.

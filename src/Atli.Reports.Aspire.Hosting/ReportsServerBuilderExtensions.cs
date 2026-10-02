@@ -19,6 +19,24 @@ public static class ReportsServerBuilderExtensions
   private const string ReadinessPath = "/health/ready";
 
   /// <summary>
+  /// The server's liveness probe: the server answers at all. It runs no engine check, because a
+  /// restart does not repair a browser that cannot start.
+  /// </summary>
+  private const string LivenessPath = "/health/live";
+
+  /// <summary>
+  /// The compute environments that publish to Kubernetes. Their publisher writes a probe's scheme in
+  /// lower case, which Kubernetes rejects, so a pod with a probe is never created
+  /// (https://github.com/microsoft/aspire/issues/18271); the server gets no probes there until
+  /// Aspire fixes it (https://github.com/atlitech/reports/issues/147).
+  /// </summary>
+  private static readonly string[] KubernetesEnvironmentTypes =
+  [
+    "Aspire.Hosting.Kubernetes.KubernetesEnvironmentResource",
+    "Aspire.Hosting.Azure.Kubernetes.AzureKubernetesEnvironmentResource",
+  ];
+
+  /// <summary>
   /// The server's OpenAPI document, which describes <c>POST /convert</c>.
   /// </summary>
   private const string OpenApiDocumentPath = "/openapi/v1.json";
@@ -52,6 +70,14 @@ public static class ReportsServerBuilderExtensions
   /// logs, metrics, and traces to the dashboard over OTLP, the dashboard links the server's OpenAPI
   /// document (<c>/openapi/v1.json</c>), and it offers a <c>Convert a test page</c> command that
   /// checks the whole path end to end.
+  /// </para>
+  /// <para>
+  /// Deployment targets that run probes, such as Azure Container Apps, probe <c>/health/ready</c>
+  /// for readiness and <c>/health/live</c> for liveness. Kubernetes gets no probes until Aspire's
+  /// Kubernetes publisher writes ones Kubernetes accepts
+  /// (https://github.com/microsoft/aspire/issues/18271). <c>WithHttpProbe</c> replaces a probe of
+  /// the same type, but not on <c>/health/ready</c>: that would add a second health check on the
+  /// path, and Aspire rejects the duplicate.
   /// </para>
   /// <para>
   /// Reference the server from an app with <c>WithReference</c>; the app reads the connection string
@@ -100,7 +126,89 @@ public static class ReportsServerBuilderExtensions
       )
       .WithOtlpExporter()
       .WithIconName("DocumentPdf")
-      .WithConvertTestPageCommand();
+      .WithConvertTestPageCommand()
+      .WithHealthProbes();
+  }
+
+  /// <summary>
+  /// Adds the readiness and liveness probes that deployment targets run, except on Kubernetes (see
+  /// <see cref="KubernetesEnvironmentTypes"/>). <c>WithHttpProbe</c> replaces a probe of the same
+  /// type.
+  /// </summary>
+  private static IResourceBuilder<ReportsServerResource> WithHealthProbes(
+    this IResourceBuilder<ReportsServerResource> builder
+  )
+  {
+    var endpoint = builder.GetEndpoint(ReportsServerResource.HttpEndpointName);
+
+    // The annotations rather than WithHttpProbe, which would also add a second health check on
+    // /health/ready, and Aspire rejects a duplicate.
+#pragma warning disable ASPIREPROBES001 // Probes are experimental in Aspire 13.
+    EndpointProbeAnnotation[] probes =
+    [
+      new()
+      {
+        Type = ProbeType.Readiness,
+        EndpointReference = endpoint,
+        Path = ReadinessPath,
+        InitialDelaySeconds = 5,
+        PeriodSeconds = 5,
+        TimeoutSeconds = 3,
+        FailureThreshold = 3,
+        SuccessThreshold = 1,
+      },
+      // Restarts the server only after about 30 seconds without an answer: a restart drops the
+      // conversions in flight, and a busy browser can hold the container's CPU for a while.
+      new()
+      {
+        Type = ProbeType.Liveness,
+        EndpointReference = endpoint,
+        Path = LivenessPath,
+        InitialDelaySeconds = 5,
+        PeriodSeconds = 10,
+        TimeoutSeconds = 5,
+        FailureThreshold = 3,
+        SuccessThreshold = 1,
+      },
+    ];
+    foreach (var probe in probes)
+    {
+      builder.WithAnnotation(probe);
+    }
+
+    // The environments are known once the model is complete. This runs before the publishers read
+    // the probes: Aspire 13.0's Kubernetes publisher reads them in a BeforeStartEvent handler it
+    // subscribes when the app starts, after this one; later releases read them in a pipeline step.
+    builder.ApplicationBuilder.Eventing.Subscribe<BeforeStartEvent>(
+      (@event, _) =>
+      {
+        if (@event.Model.Resources.Any(IsKubernetesEnvironment))
+        {
+          foreach (var probe in probes)
+          {
+            builder.Resource.Annotations.Remove(probe);
+          }
+        }
+
+        return Task.CompletedTask;
+      }
+    );
+#pragma warning restore ASPIREPROBES001
+
+    return builder;
+  }
+
+  private static bool IsKubernetesEnvironment(IResource resource)
+  {
+    for (var type = resource.GetType(); type is not null; type = type.BaseType)
+    {
+      if (KubernetesEnvironmentTypes.Contains(type.FullName))
+      {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /// <summary>

@@ -37,6 +37,11 @@
       so AppHosts on older Aspire 13 releases get it too.
     -->
     <PackageVersion Include="MessagePack" Version="2.5.302" />
+    <!--
+      Tests only: adds a Kubernetes environment, on which the integration leaves the probes out. On
+      the integration's Aspire.Hosting floor; the package has no stable release.
+    -->
+    <PackageVersion Include="Aspire.Hosting.Kubernetes" Version="13.0.0-preview.1.25560.3" />
   </ItemGroup>
   <ItemGroup Label="Aspire AppHost and service defaults (examples)">
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.0" />
