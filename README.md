@@ -130,8 +130,13 @@ cd reports
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
 scripts/create-reports-api-key.sh
 docker run --rm -p 127.0.0.1:8080:8080 \
+  --security-opt seccomp=deploy/seccomp/chromium.json \
   --env-file .reports-secrets/server.env atli-reports-server
 ```
+
+The seccomp profile lets Chromium create its sandbox, which Docker's default profile prevents (see
+[deploy/seccomp](deploy/seccomp/README.md)). Without it the server stays unready and
+`/health/details` says why.
 
 `docker compose up --build` in `src/Atli.Reports.Server` uses those credentials too. Then convert a document:
 
@@ -148,7 +153,9 @@ The options mirror `PdfOptions`: `orientation`, `paperSize` (`letter`, `a4`, `a3
 a body the server cannot read, are RFC 9457 problem details with a `kind` member.
 `GET /openapi/v1.json` returns the OpenAPI document to callers with `reports.diagnostics` permission.
 `GET /health/live` and `GET /health/ready` serve container probes. The image runs as a non-root
-user under `tini`, and its browser runs without the sandbox, so send it controlled, application-owned HTML only. Authentication is explicit; the server refuses unconfigured access and blocks document networking by default. See [Security and production deployment](docs/security.md) for credentials, approved assets, limits, and Azure/Kubernetes examples. See
+user under `tini`, and its browser runs with Chromium's sandbox, which narrows the damage of a
+browser bug but does not make the server a boundary for hostile HTML: send it controlled,
+application-owned HTML only. Authentication is explicit; the server refuses unconfigured access and blocks document networking by default. See [Security and production deployment](docs/security.md) for credentials, approved assets, limits, and Azure/Kubernetes examples. See
 [docs/engine/server.md](docs/engine/server.md) for status codes, configuration, and the image.
 
 ## Waiting for JavaScript
@@ -224,7 +231,7 @@ section, and also name the properties to set in code. The most used ones:
 | --- | --- | --- |
 | `Browser:ExecutablePath` | found automatically | The browser executable; `chrome-headless-shell` is recommended |
 | `Browser:Kind` | `Chrome` | The browser to look for when no path is set (`Chrome` or `Edge`) |
-| `Browser:NoSandbox` | `false` | Disable Chromium's sandbox; only for trusted HTML |
+| `Browser:NoSandbox` | `false` | Disable Chromium's sandbox; only for trusted HTML where user namespaces cannot be allowed |
 | `Browser:DisableDevShmUsage` | `false` | Use the temporary directory instead of a small `/dev/shm` |
 | `Browser:WarmUpOnStartup` | `false` | Start the browser with the host instead of on the first conversion |
 | `Browser:CommandTimeout` | `00:00:30` | Time per DevTools command; also bounds the load wait and printing |
@@ -266,9 +273,13 @@ launches, crashes, and recycles. See
   throughput at about 7 conversions a second however many cores there are. `chrome-headless-shell`
   does the same work in a few milliseconds and has no such cap (see
   [the measurements](docs/engine/architecture.md#isolation)). The server image ships it.
-- **Linux containers.** Chromium's sandbox needs user namespaces, which containers and some hosts
-  block (for example Ubuntu 24.04 with its default AppArmor policy). Set `Browser:NoSandbox=true`,
-  which suits trusted HTML only, or use the provided server image, which already does. Set
+- **Linux containers.** Chromium's sandbox needs unprivileged user namespaces. Docker's default
+  seccomp profile and Kubernetes' `RuntimeDefault` deny them; run the container with
+  [`deploy/seccomp/chromium.json`](deploy/seccomp/README.md), as the server image's examples do.
+  Ubuntu 23.10+ hosts also restrict them through AppArmor for processes it does not confine, such
+  as Chromium run directly on the host (see
+  [Chromium's sandbox](docs/security.md#chromiums-sandbox)). Where they cannot be allowed, set
+  `Browser:NoSandbox=true`, which suits trusted HTML only. Set
   `Browser:DisableDevShmUsage=true` where `/dev/shm` is small, as in Docker's 64 MB default.
   Install the fonts your documents use; the server image installs Liberation and Noto Color
   Emoji.
@@ -295,7 +306,9 @@ against 0.16 to 0.19 s), and about 2.5 times less on the image-heavy page. At 64
 102 Atli requests for the 49-page table missed the 30 second client deadline. Gotenberg was not
 measured at that level after failing at 16.
 
-These numbers come from one run on one machine, so read them as indicative. The
+These numbers come from one run on one machine, so read them as indicative. The image then ran
+Chromium without its sandbox; turning it on measured about 30 ms on a cold start and no difference
+beyond noise on warm conversions (see [Chromium's sandbox](docs/security.md#chromiums-sandbox)). The
 [full results](benchmarks/results/2026-10-01-3829bfd.md) include every concurrency level, memory,
 errors, and the environment. The [methodology](benchmarks/README.md#methodology) explains how to
 reproduce them with `benchmarks/run.sh`. They measure the server image with

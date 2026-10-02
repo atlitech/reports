@@ -103,9 +103,11 @@ builder.Services.AddReportsEngine(
 );
 ```
 
-With the section bound, Linux containers usually need `ReportsEngine:Browser:NoSandbox` set to
-`true` (trusted HTML only). For throughput, point `ReportsEngine:Browser:ExecutablePath` at
-`chrome-headless-shell`.
+In Linux containers, Chromium's sandbox needs the user namespaces that the seccomp profile
+[`deploy/seccomp/chromium.json`](https://github.com/atlitech/reports/blob/main/deploy/seccomp/README.md)
+allows; run the container with it. Where that is not possible, and only for trusted HTML, set
+`ReportsEngine:Browser:NoSandbox` to `true` (with the section bound). For throughput, point
+`ReportsEngine:Browser:ExecutablePath` at `chrome-headless-shell`.
 
 ## Convert on a reports server
 

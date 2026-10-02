@@ -17,4 +17,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      # Docker's default profile plus the user namespaces Chromium's sandbox needs
+      # (deploy/seccomp/README.md). Without it the browser cannot start.
+      - seccomp=../../deploy/seccomp/chromium.json
     stop_grace_period: 90s

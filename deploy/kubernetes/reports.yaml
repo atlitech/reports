@@ -1,6 +1,26 @@
 # Private, self-hosted deployment for application-owned templates. This is not a hostile-HTML
 # sandbox. Before applying, create reports-auth from scripts/create-reports-api-key.sh's server.env,
 # select the namespace, and replace the image with a tested immutable image from your registry.
+#
+# Chromium runs with its own sandbox, which needs unprivileged user namespaces. The pod therefore
+# uses the seccomp profile deploy/seccomp/chromium.json (Docker's default plus those namespaces; see
+# deploy/seccomp/README.md) instead of RuntimeDefault, which denies them. Install the file on every
+# node that can run the pod, under the kubelet's seccomp root:
+#   /var/lib/kubelet/seccomp/atli-reports/chromium.json
+# for example with your node provisioning, or by copying it onto each node. Without it the kubelet
+# cannot create the container ("cannot load seccomp profile"); under RuntimeDefault the browser
+# cannot start and /health/details says why. The file is already resolved for containers without
+# capabilities, because containerd reads Localhost profiles as plain OCI seccomp and ignores
+# Docker's conditional rules.
+#
+# Ubuntu 23.10+ and 24.04 nodes also restrict unprivileged user namespaces through AppArmor
+# (kernel.apparmor_restrict_unprivileged_userns=1). As far as the kernel and containerd sources
+# show, that restriction covers AppArmor-unconfined processes, not pods under containerd's default
+# AppArmor profile, which declares ABI 3.0 and so does not mediate user namespaces; this has not
+# been tested on Ubuntu nodes. Pods that run AppArmor-unconfined need the sysctl set to 0 on the
+# node; kind clusters are one case, because containerd inside a kind node applies no AppArmor
+# profile. Only for trusted HTML on nodes that cannot allow user namespaces, use RuntimeDefault and
+# set ReportsEngine__Browser__NoSandbox=true instead.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,8 +47,10 @@ spec:
         runAsUser: 1654
         runAsGroup: 1654
         fsGroup: 1654
+        # deploy/seccomp/chromium.json, installed on the node (see above).
         seccompProfile:
-          type: RuntimeDefault
+          type: Localhost
+          localhostProfile: atli-reports/chromium.json
       containers:
         - name: reports
           image: atli-reports-server:security

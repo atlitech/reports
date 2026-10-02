@@ -2,9 +2,12 @@ name: Server image
 
 # Builds the Atli.Reports.Server container image natively on amd64 and arm64, with the
 # chrome-headless-shell version the Dockerfile pins, checks that the image has that browser version,
-# and smoke-tests each build with .github/scripts/smoke-test-server-image.sh: the server becomes
-# ready, converts a small document to a PDF, runs as a non-root user under tini, and shuts down
-# cleanly. Nothing is pushed; release.yml publishes the image.
+# and smoke-tests each build with .github/scripts/smoke-test-server-image.sh: under the seccomp
+# profile deploy/seccomp/chromium.json the server becomes ready, converts a small document to a PDF,
+# runs as a non-root user under tini with Chromium's sandbox, and shuts down cleanly; under Docker's
+# default profile it fails closed. It also checks that the profile is still Docker's default at its
+# pinned moby/profiles commit plus Chromium's rules. Nothing is pushed; release.yml publishes the
+# image.
 #
 # This is not a required check: it only runs when something that goes into the image changes.
 
@@ -24,6 +27,8 @@ on:
       - ".github/scripts/validate-kubernetes-security.sh"
       - "scripts/create-reports-api-key.sh"
       - "deploy/kubernetes/**"
+      - "deploy/seccomp/**"
+      - ".github/scripts/chromium-seccomp-profile.py"
       - ".github/scripts/chrome-headless-shell.sh"
   push:
     branches: [ "main" ]
@@ -40,6 +45,8 @@ on:
       - ".github/scripts/validate-kubernetes-security.sh"
       - "scripts/create-reports-api-key.sh"
       - "deploy/kubernetes/**"
+      - "deploy/seccomp/**"
+      - ".github/scripts/chromium-seccomp-profile.py"
       - ".github/scripts/chrome-headless-shell.sh"
   workflow_dispatch:
 
@@ -68,6 +75,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The profile the smoke tests run with must be the pinned upstream profile plus Chromium's
+      # rules, nothing else. Architecture-independent, so once.
+      - name: Check the seccomp profile against moby/profiles
+        if: matrix.arch == 'amd64'
+        run: python3 .github/scripts/chromium-seccomp-profile.py check
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -103,9 +116,15 @@ jobs:
       - name: Verify JWT authentication in the NativeAOT image
         run: python3 .github/scripts/smoke-test-server-jwt.py reports-server:smoke-test
 
+      # kind runs pods without an AppArmor profile, so the runner's AppArmor restriction on
+      # unprivileged user namespaces (Ubuntu 24.04's default) would stop Chromium's sandbox in them.
+      # Real nodes apply containerd's default AppArmor profile; see deploy/kubernetes/reports.yaml.
       - name: Validate Kubernetes deployment in a disposable cluster
         if: matrix.arch == 'amd64'
         run: |
+          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           curl --fail --silent --show-error --location \
             https://github.com/kubernetes-sigs/kind/releases/download/v0.31.0/kind-linux-amd64 \
             --output "$RUNNER_TEMP/kind-linux-amd64"

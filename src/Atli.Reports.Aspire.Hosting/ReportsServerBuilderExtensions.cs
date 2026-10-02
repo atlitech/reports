@@ -80,6 +80,16 @@ public static partial class ReportsServerBuilderExtensions
   /// path, and Aspire rejects the duplicate.
   /// </para>
   /// <para>
+  /// The server's browser runs with Chromium's own sandbox. Locally, the container runs with the
+  /// seccomp profile the sandbox needs (Docker's default plus user namespaces), which the package
+  /// carries and passes to Docker or Podman as <c>--security-opt seccomp=&lt;file&gt;</c>. Deployment
+  /// targets do not get that argument: give the target the profile
+  /// (<c>deploy/seccomp/chromium.json</c> in the repository), or, for trusted HTML on a target that
+  /// cannot apply one, such as Azure Container Apps, opt out explicitly with
+  /// <c>.WithEnvironment("ReportsEngine__Browser__NoSandbox", "true")</c>. Without either, the server
+  /// stays unready and its health details say why.
+  /// </para>
+  /// <para>
   /// Select authentication explicitly: <c>WithDevelopmentApiKey()</c> for a local run,
   /// <c>WithApiKeyAuthentication</c> for secret deployment parameters, or configure the server's
   /// JWT bearer settings through <c>WithEnvironment</c>. The server refuses to start without an
@@ -133,6 +143,7 @@ public static partial class ReportsServerBuilderExtensions
       .WithOtlpExporter()
       .WithIconName("DocumentPdf")
       .WithConvertTestPageCommand()
+      .WithChromiumSeccompProfile()
       .WithHealthProbes();
   }
 

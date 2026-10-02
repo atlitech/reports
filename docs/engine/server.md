@@ -97,9 +97,10 @@ The development process backend checks only that its executable exists. Liveness
 - `GET /health/ready`: the server can take conversions. It answers `200` when both of its checks
   are healthy and `503` otherwise:
   - `browser`: whether the engine can launch its browser. Unhealthy while the most recent launch
-    has failed (the browser exited at once, for example because a shared library is missing, or did
-    not report its DevTools endpoint within `Browser:StartupTimeout`), with the reason, until a
-    launch succeeds. Healthy while the browser runs. Before the first launch (when
+    has failed (the browser exited at once, for example because a shared library is missing or
+    Chromium could not create its sandbox, or did not report its DevTools endpoint within
+    `Browser:StartupTimeout`), with the reason, until a launch succeeds. Healthy while the browser
+    runs. Before the first launch (when
     `Browser:WarmUpOnStartup` is off) and after the browser closed (idle, recycled, crashed), healthy
     as long as the executable the next launch would start exists.
   - `conversion_health`: unhealthy when recent conversions mostly failed (busy, canceled, and
@@ -132,6 +133,18 @@ The protected detailed response can quote browser output. The check reduces it t
 most 500 characters and masks URL credentials, DevTools target ids, and secret-looking parameters
 (`token=`, `--password=`, ...). Anonymous probes never include this description.
 
+When the container does not allow Chromium's sandbox (it runs without
+[`deploy/seccomp/chromium.json`](../../deploy/seccomp/README.md), for example), the description
+starts with what to do before the browser's own output, and the launch failure logged as event 301
+starts the same way:
+
+```text
+The browser failed to start (3 failed launch(es) in a row); retrying in the background. Chromium could not create its sandbox, which needs unprivileged user namespaces. Run the container with the seccomp profile deploy/seccomp/chromium.json, and on Ubuntu 23.10+ make sure AppArmor allows user namespaces; or, for trusted HTML only, set ReportsEngine:Browser:NoSandbox=true. See docs/security.md#chromiums-sandbox. The browser exited with code 133 before it reported its DevTools endpoint. Browser output: [...:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:129] No usable sandbox! ...
+```
+
+The server never falls back to running the browser without its sandbox. See
+[Chromium's sandbox](../security.md#chromiums-sandbox).
+
 ## Configuration
 
 Every engine option binds from the `ReportsEngine` section, so environment variables work as usual,
@@ -141,7 +154,12 @@ reference](architecture.md#configuration-reference). The server's `appsettings.j
 
 - `Browser:WarmUpOnStartup: true`, so the first request does not pay the browser's start-up time;
 - `ConversionTimeout: 00:01:00`, so overload ends in a clean `504` rather than a client timeout;
-- `Browser:NoSandbox: true` and `Browser:DisableDevShmUsage: true`, for containers.
+- `Browser:DisableDevShmUsage: true`, for containers.
+
+It leaves `Browser:NoSandbox` at its default, `false`: Chromium runs with its sandbox, which needs
+the seccomp profile [`deploy/seccomp/chromium.json`](../../deploy/seccomp/README.md). Images before
+this change set it to `true`. `ReportsEngine__Browser__NoSandbox=true` opts out, only for trusted HTML
+or on a platform that cannot permit unprivileged user namespaces.
 
 Authenticated admission defaults to 10 MiB per request and four in-flight requests per caller, with a 90-second whole-request deadline. See [caller limits](../security.md#admission-and-deadlines). A tighter Kestrel limit still applies; the `Kestrel:Limits` section binds as usual:
 
@@ -188,6 +206,7 @@ OTLP/gRPC on port 18889) or any OpenTelemetry Collector, and point the server at
 
 ```bash
 docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
+  --security-opt seccomp=deploy/seccomp/chromium.json \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:18889 \
   atli-reports-server
 ```
@@ -198,8 +217,11 @@ export already wired to the AppHost's dashboard.
 ## Container image
 
 ```bash
-# Once the image is released; until then build it from this checkout.
+# Once the image is released; until then build it from this checkout. The seccomp profile comes
+# from the same release.
+curl -fsSLO https://raw.githubusercontent.com/atlitech/reports/0.26.0/deploy/seccomp/chromium.json
 docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
+  --security-opt seccomp=chromium.json \
   ghcr.io/atlitech/reports-server:0.26.0
 ```
 
@@ -216,8 +238,11 @@ docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
   closes the browser cleanly, and it reaps the browser's exited child processes so none linger as
   zombies.
 - **The server runs as the non-root `app` user** (UID 1654, set by number so Kubernetes'
-  `runAsNonRoot` can verify it). The browser runs without its sandbox, which only suits trusted
-  HTML.
+  `runAsNonRoot` can verify it).
+- **The browser runs with Chromium's sandbox**, which needs the seccomp profile
+  [`deploy/seccomp/chromium.json`](../../deploy/seccomp/README.md): Docker's default profile plus the
+  user namespaces the sandbox creates. Without it the browser cannot start, and readiness stays
+  `503` with the reason in `/health/details`. See [Chromium's sandbox](../security.md#chromiums-sandbox).
 
 ### The Chrome version
 
@@ -285,7 +310,8 @@ resolves on one machine.
 ```bash
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server .
 scripts/create-reports-api-key.sh
-docker run -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env atli-reports-server
+docker run -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
+  --security-opt seccomp=deploy/seccomp/chromium.json atli-reports-server
 ```
 
 That builds the pinned Chrome version. To try another one, pass it as a build argument: a version
@@ -300,10 +326,12 @@ docker run --rm --entrypoint /opt/chrome-headless-shell/chrome-headless-shell at
 ```
 
 `.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
-image change: the server becomes ready, rejects anonymous conversions, accepts authenticated
-conversion and OpenAPI requests, runs as a non-root user under `tini` with a read-only root
-filesystem, omits the application-secret canary from readable browser environments, and shuts down
-cleanly. CI also validates JWT authentication in the NativeAOT image and exercises the Kubernetes
+image change: under the seccomp profile, the server becomes ready, rejects anonymous conversions,
+accepts authenticated conversion and OpenAPI requests, runs as a non-root user under `tini` with a
+read-only root filesystem, omits the application-secret canary from readable browser environments,
+runs Chromium with its sandbox (no `--no-sandbox`, renderers outside the browser's user namespace), and
+shuts down cleanly; under Docker's default profile, it fails closed with the remedy in
+`/health/details` and its log. CI also validates JWT authentication in the NativeAOT image and exercises the Kubernetes
 deployment in a disposable cluster. See [validation scope](../security.md#validation).
 
 ### Throughput
