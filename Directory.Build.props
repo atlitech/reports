@@ -20,10 +20,10 @@
   <PropertyGroup>
     <Version>0.25.1</Version>
     <PackageVersion>$(Version)</PackageVersion>
-    <Authors>Elvis Nieves Miranda</Authors>
+    <Authors>Atli</Authors>
     <RepositoryUrl>https://github.com/atlitech/reports</RepositoryUrl>
     <PackageProjectUrl>https://github.com/atlitech/reports</PackageProjectUrl>
-    <PackageIcon>blazor_reports_logo-128.png</PackageIcon>
+    <PackageIcon>atli-icon-128.png</PackageIcon>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <EnablePackageValidation>true</EnablePackageValidation>
     <IncludeSymbols>true</IncludeSymbols>
@@ -32,6 +32,10 @@
 
   <!-- Each packable project packs the README.md in its own directory; see its PackageReadmeFile. -->
   <ItemGroup>
-    <None Include="../../assets/blazor_reports_logo-128.png" Pack="true" PackagePath="" />
+    <None
+      Include="$(MSBuildThisFileDirectory)assets/atli-icon-128.png"
+      Pack="true"
+      PackagePath=""
+    />
   </ItemGroup>
 </Project>
