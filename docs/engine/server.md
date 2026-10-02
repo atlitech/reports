@@ -3,6 +3,10 @@
 `Atli.Reports.Server` is a small NativeAOT HTTP service over `Atli.Reports.Engine`. It ships as a
 container image. Configure authentication before starting it; see [Security and production deployment](../security.md). The default document network policy rejects external assets.
 
+The optional [isolated worker experiment](../isolated-workers.md) keeps this HTTP contract while
+moving conversion into a separately launched worker. The integrated engine remains the default;
+the deployment and browser configuration below describe that mode unless stated otherwise.
+
 ## `POST /convert`
 
 The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOptions`
@@ -81,6 +85,11 @@ Its `info.version` is the server's release. The `/health` endpoints are left out
 probes, not clients.
 
 ## Health
+
+In experimental worker mode, readiness uses `worker_execution` instead of the two engine checks.
+It checks the launcher and configured Docker runtime (cached for five seconds), and refuses work
+after uncertain cleanup. It does not pre-render a report or prove the configured image is usable.
+The development process backend checks only that its executable exists. Liveness remains status-only.
 
 - `GET /health/live`: the server is up and answering. It runs no engine check: restarting the
   process does not repair a browser that cannot start, and a browser that is slow to start under
@@ -167,6 +176,11 @@ Once the export is on, the other standard settings, such as `OTEL_BSP_SCHEDULE_D
   engine (`atli.reports.*`).
 - **Logs**: whatever the `Logging` configuration lets through, with formatted messages and scopes,
   correlated with the trace that wrote them.
+
+Worker mode retains HTTP telemetry in the API. The private worker does not inherit OTLP
+credentials or export engine telemetry through the gateway. Worker stderr is drained without
+logging document-controlled diagnostics. Full worker lifecycle telemetry is a production
+acceptance gate for the experiment.
 
 To look at it locally, start the [standalone Aspire
 dashboard](https://learn.microsoft.com/dotnet/aspire/fundamentals/dashboard/standalone) (it takes

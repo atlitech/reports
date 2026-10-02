@@ -15,6 +15,8 @@
     <Project Path="src/Atli.Reports.Aspire.Hosting/Atli.Reports.Aspire.Hosting.csproj" />
     <Project Path="src/Atli.Reports.Engine/Atli.Reports.Engine.csproj" />
     <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
+    <Project Path="src/Atli.Reports.Worker.Protocol/Atli.Reports.Worker.Protocol.csproj" />
+    <Project Path="src/Atli.Reports.Worker/Atli.Reports.Worker.csproj" />
     <Project Path="src/Atli.Reports.Blazor.Components/Atli.Reports.Blazor.Components.csproj" />
     <Project Path="src/Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
     <Project Path="src/Atli.Reports.Client/Atli.Reports.Client.csproj" />

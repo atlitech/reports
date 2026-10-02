@@ -1,13 +1,15 @@
-# The build context is the repository root; send only what the Server build needs.
+# Repository-root build context, restricted to worker build inputs.
 *
 !global.json
 !Directory.Build.props
 !Directory.Packages.props
 !src/Atli.Reports.Engine/
 !src/Atli.Reports.Worker.Protocol/
+!src/Atli.Reports.Worker/
 !src/Atli.Reports.Server/
 **/bin/
 **/obj/
 **/*.md
 **/Dockerfile*
 **/docker-compose*.yml
+!src/Atli.Reports.Server/Dockerfile
