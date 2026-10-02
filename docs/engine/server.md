@@ -75,7 +75,7 @@ unexpectedly) abort the connection. The client sees a broken response, never a t
 - the `200` response as binary `application/pdf` content;
 - a problem details response for each status in the table above except the bodiless `499`, with
   the `ConversionErrorKind` names as the values of `kind`, and the `Retry-After` header of the
-  `503`.
+  `429` and `503` responses.
 
 Its `info.version` is the server's release. The `/health` endpoints are left out: they serve
 probes, not clients.
@@ -119,9 +119,9 @@ The anonymous probes return only the overall status. `GET /health/details`, prot
 }
 ```
 
-The reason quotes the browser's output, and health endpoints are usually reachable without
-authentication, so the check reduces it to one line of at most 500 characters and masks URL
-credentials, DevTools target ids, and secret-looking parameters (`token=`, `--password=`, ...).
+The protected detailed response can quote browser output. The check reduces it to one line of at
+most 500 characters and masks URL credentials, DevTools target ids, and secret-looking parameters
+(`token=`, `--password=`, ...). Anonymous probes never include this description.
 
 ## Configuration
 
@@ -286,8 +286,11 @@ docker run --rm --entrypoint /opt/chrome-headless-shell/chrome-headless-shell at
 ```
 
 `.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
-image change: the server becomes ready, converts a document to a PDF, serves its OpenAPI document,
-runs as a non-root user under `tini`, and shuts down cleanly.
+image change: the server becomes ready, rejects anonymous conversions, accepts authenticated
+conversion and OpenAPI requests, runs as a non-root user under `tini` with a read-only root
+filesystem, omits the application-secret canary from readable browser environments, and shuts down
+cleanly. CI also validates JWT authentication in the NativeAOT image and exercises the Kubernetes
+deployment in a disposable cluster. See [validation scope](../security.md#validation).
 
 ### Throughput
 
