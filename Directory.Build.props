@@ -32,6 +32,10 @@
 
   <!-- Each packable project packs the README.md in its own directory; see its PackageReadmeFile. -->
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)assets/atli-icon-128.png" Pack="true" PackagePath="" />
+    <None
+      Include="$(MSBuildThisFileDirectory)assets/atli-icon-128.png"
+      Pack="true"
+      PackagePath=""
+    />
   </ItemGroup>
 </Project>
