@@ -167,6 +167,22 @@ three samples per fixture are a feasibility check, not a stable performance regr
 Run measurements on an otherwise idle host and retain the image identities, source revision,
 limits, sample counts, and measurement caveats with the results.
 
+## Initial measured outcome
+
+The [ARM64 exploratory run](../benchmarks/results/2026-10-02-5c500701-isolated-workers-arm64.md)
+completed all 96 conversions. With one CPU and 1 GiB per container, median time for the 49-page
+report was 1.57 seconds in the integrated engine, 16.63 seconds in a disposable gVisor worker,
+11.36 seconds in a warm gVisor worker, and 3.04 seconds in the equivalent warm runc control.
+The warm gVisor worker consumed 66.14 CPU seconds across 24 reports including warmups, compared
+with 18.03 seconds for the runc control; those observations exclude final teardown and the gateway.
+
+These results favor retaining the integrated default and treating runtime selection as an open
+performance decision. Browser reuse reduces startup cost, but it does not eliminate the observed
+gVisor overhead. Before selecting a managed-hosting runtime, compare warm isolated workers on the
+intended production storage/runtime and measure sustained concurrent load. The local nested daemon
+uses `vfs`, transports differ from the integrated API, and each fixture has only five measured
+samples; the reported p95 is a maximum observation, not a production SLO.
+
 ## Production acceptance gates
 
 Before enabling hostile documents in a hosted product:

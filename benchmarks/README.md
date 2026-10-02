@@ -20,6 +20,12 @@ arm64 and x86-64. `--micro` also needs Chrome or Edge installed on the host.
 [`results/2026-10-01-287f9bc.md`](results/2026-10-01-287f9bc.md) is the provisional baseline of the
 engine before it kept one long-lived browser.
 
+The separate [isolated-worker exploration](results/2026-10-02-5c500701-isolated-workers-arm64.md)
+compares integrated rendering, disposable gVisor workers, and warm workers under gVisor and runc.
+It records startup, sequential latency, and available CPU/memory measurements with explicit limits;
+it does not establish concurrent production capacity. See the [worker experiment](../docs/isolated-workers.md)
+for the trust boundary and reproduction commands.
+
 ## What runs
 
 | Suite | Project | Measures |
