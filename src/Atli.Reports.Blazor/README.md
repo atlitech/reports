@@ -5,8 +5,6 @@ render it from your own code. Reports are rendered to HTML and converted to PDF 
 [Atli.Reports.Engine](https://www.nuget.org/packages/Atli.Reports.Engine) in headless Chrome,
 Chromium, or Edge.
 
-Formerly **BlazorReports**. Coming from `BlazorReports`? See the
-[migration guide](https://github.com/atlitech/reports/blob/main/docs/migration/from-blazorreports.md).
 Part of [Atli Reports](https://github.com/atlitech/reports).
 
 ## Install
@@ -59,16 +57,23 @@ busy or the browser is unavailable, 504 for timeouts, and 500 for rendering fail
 ## Options
 
 ```csharp
+using Atli.Reports.Engine;
+
 builder.Services.AddBlazorReports(options =>
 {
   options.BaseStylesPath = "wwwroot/styles/base.css"; // inlined into every report
-  options.AssetsPath = "wwwroot/assets"; // data: URIs in BlazorReportsBase.GlobalAssets
-  options.PageSettings.Orientation = BlazorReportsPageOrientation.Landscape;
+  options.AssetsPath = "wwwroot/assets"; // data: URIs in BlazorReportBase.GlobalAssets
+  options.PdfOptions.Orientation = PageOrientation.Landscape;
+  options.PdfOptions.PaperSize = PaperSize.A4;
 });
 ```
 
 `MapBlazorReport` takes per-report options too: `ReportName` (the route), `OutputFormat` (`Pdf`
-or `Html`), `BaseStylesPath`, `AssetsPath`, `PageSettings`, and `JavaScriptSettings`.
+or `Html`), `BaseStylesPath`, `AssetsPath`, `PdfOptions`, and `JavaScriptSettings`.
+
+`PdfOptions` is the engine's type, including scale, header/footer templates, page ranges, CSS page
+sizing, and PDF tagging. Each mapped or registered report starts with its own copy of the global
+PDF options, so per-report changes do not affect other reports.
 
 ## Wait for a report's JavaScript
 
@@ -82,6 +87,10 @@ app.MapBlazorReport<SalesChart, SalesData>(options =>
 
 The report calls `blazorReport.completed()` from its script when its charts or data are ready,
 and the PDF is printed at that moment.
+
+Enabling `WaitForCompletedSignal` overrides `PdfOptions.WaitForSignal` and `WaitTimeout` for that
+conversion. Otherwise those engine options apply directly; when `WaitForSignal` is set, the
+template also forwards `blazorReport.completed()` to that function.
 
 ## Configure the engine
 
@@ -121,7 +130,7 @@ for PDF output, the engine's conversion span. Add both sources to see the whole 
 
 ```csharp
 builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
-  .AddSource(BlazorReportsTelemetry.ActivitySourceName)
+  .AddSource(BlazorReportTelemetry.ActivitySourceName)
   .AddSource(ReportsEngineTelemetry.ActivitySourceName));
 ```
 
@@ -130,4 +139,3 @@ builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
 - [Atli Reports README](https://github.com/atlitech/reports#readme): base styles, Tailwind CSS,
   assets, rendering from code, and benchmarks
 - [Examples](https://github.com/atlitech/reports/tree/main/examples)
-- [Migrating from BlazorReports](https://github.com/atlitech/reports/blob/main/docs/migration/from-blazorreports.md)

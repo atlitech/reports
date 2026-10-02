@@ -10,8 +10,11 @@ namespace Atli.Reports.Blazor.Models;
 /// does not call it within <see cref="CompletedSignalTimeout"/> fails with
 /// <see cref="Atli.Reports.Engine.ConversionErrorKind.SignalTimeout"/>, which report endpoints answer with
 /// 504 Gateway Timeout.
+/// These settings override <see cref="Atli.Reports.Engine.PdfOptions.WaitForSignal"/> and
+/// <see cref="Atli.Reports.Engine.PdfOptions.WaitTimeout"/> for the conversion without changing
+/// the configured PDF options. When disabled, the PDF options' own signal settings apply.
 /// </remarks>
-public class BlazorReportsJavaScriptSettings
+public class BlazorReportJavaScriptOptions
 {
   /// <summary>
   /// The default of <see cref="CompletedSignalTimeout"/>: 30 seconds.
@@ -20,7 +23,8 @@ public class BlazorReportsJavaScriptSettings
 
   /// <summary>
   /// Whether to wait for the report to call <c>blazorReport.completed()</c> before printing the PDF.
-  /// Defaults to <see langword="false"/>, which prints as soon as the HTML has loaded.
+  /// Defaults to <see langword="false"/>, which uses the PDF options' signal settings (by default,
+  /// print as soon as the HTML and fonts have loaded).
   /// </summary>
   public bool WaitForCompletedSignal { get; set; }
 
@@ -30,8 +34,8 @@ public class BlazorReportsJavaScriptSettings
   /// </summary>
   public TimeSpan CompletedSignalTimeout { get; set; } = DefaultCompletedSignalTimeout;
 
-  internal BlazorReportsJavaScriptSettings Clone() =>
-    (BlazorReportsJavaScriptSettings)MemberwiseClone();
+  internal BlazorReportJavaScriptOptions Clone() =>
+    (BlazorReportJavaScriptOptions)MemberwiseClone();
 
   /// <summary>
   /// Throws when the settings cannot be used, so a misconfigured report fails at registration instead of

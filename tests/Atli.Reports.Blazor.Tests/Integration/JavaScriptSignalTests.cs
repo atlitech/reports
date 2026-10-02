@@ -40,12 +40,24 @@ public class JavaScriptSignalTests
   }
 
   [Test]
-  public async Task A_report_that_signals_while_loading_succeeds()
+  [Arguments(false)]
+  [Arguments(true)]
+  public async Task A_report_that_signals_while_loading_succeeds(bool useNativeSignal)
   {
     await using var services = TestEngine.CreateServices();
+    var options = useNativeSignal
+      ? new BlazorReportRegistrationOptions
+      {
+        PdfOptions = new PdfOptions
+        {
+          WaitForSignal = "customReady",
+          WaitTimeout = TestEngine.GenerousTimeout,
+        },
+      }
+      : WaitingFor(TestEngine.GenerousTimeout);
     var report = services
       .GetRequiredService<BlazorReportRegistry>()
-      .AddReport<ImmediateScriptReport>(WaitingFor(TestEngine.GenerousTimeout));
+      .AddReport<ImmediateScriptReport>(options);
     using MemoryStream destination = new();
 
     var result = await services
@@ -133,7 +145,7 @@ public class JavaScriptSignalTests
   private static BlazorReportRegistrationOptions WaitingFor(TimeSpan timeout) =>
     new()
     {
-      JavaScriptSettings = new BlazorReportsJavaScriptSettings
+      JavaScriptSettings = new BlazorReportJavaScriptOptions
       {
         WaitForCompletedSignal = true,
         CompletedSignalTimeout = timeout,

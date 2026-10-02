@@ -34,7 +34,7 @@ public class TracingTests
     var generate = spans.Single("atli.reports.blazor.generate");
     await Assert
       .That(generate.Source.Version)
-      .IsEqualTo(typeof(BlazorReportsTelemetry).Assembly.GetName().Version?.ToString(3));
+      .IsEqualTo(typeof(BlazorReportTelemetry).Assembly.GetName().Version?.ToString(3));
     await Assert.That(generate.ParentSpanId).IsEqualTo(spans.Root.SpanId);
     await Assert.That(generate.GetTagItem("atli.reports.blazor.report")).IsEqualTo(report.Name);
     await Assert
@@ -85,7 +85,7 @@ public class TracingTests
       _listener = new ActivityListener
       {
         ShouldListenTo = source =>
-          source.Name == BlazorReportsTelemetry.ActivitySourceName || source == TestSource,
+          source.Name == BlazorReportTelemetry.ActivitySourceName || source == TestSource,
         Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
           ActivitySamplingResult.AllDataAndRecorded,
         ActivityStopped = activity =>

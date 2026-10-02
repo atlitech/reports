@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
     <Title>Atli Reports Blazor Components</Title>
-    <Description>Blazor components for Atli.Reports.Blazor report templates. Formerly BlazorReports.Components.</Description>
+    <Description>Blazor components for Atli.Reports.Blazor report templates.</Description>
     <PackageTags>Blazor;Reports;Component;convert;pdf;Components</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

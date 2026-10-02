@@ -46,7 +46,7 @@ public class JavaScriptSettingsTests
     var notWaitingOptions = converter.LastOptions!;
 
     await Assert.That(waiting.StatusCode).IsEqualTo(HttpStatusCode.OK);
-    await Assert.That(waitingOptions.WaitForSignal).IsEqualTo(PdfOptionsMapper.CompletedSignalName);
+    await Assert.That(waitingOptions.WaitForSignal).IsEqualTo(ReportService.CompletedSignalName);
     await Assert.That(waitingOptions.WaitTimeout).IsEqualTo(TimeSpan.FromSeconds(12));
     await Assert.That(notWaiting.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(notWaitingOptions.WaitForSignal).IsNull();
@@ -74,7 +74,7 @@ public class JavaScriptSettingsTests
     await Assert
       .That(waitingHtml)
       .Contains(
-        $"window.blazorReport={{completed:function(){{var signal=window[\"{PdfOptionsMapper.CompletedSignalName}\"];"
+        $"window.blazorReport={{completed:function(){{var signal=window[\"{ReportService.CompletedSignalName}\"];"
       );
     await Assert.That(waitingHtml).DoesNotContain("suppress-error");
     await Assert.That(notWaitingHtml).DoesNotContain("blazorReport");

@@ -1,4 +1,5 @@
 using Atli.Reports.Blazor.Helpers;
+using Atli.Reports.Engine;
 using Microsoft.Extensions.Options;
 
 namespace Atli.Reports.Blazor.Models;
@@ -23,8 +24,8 @@ public class BlazorReportRegistry
   /// <summary>
   /// The BlazorReportRegistry is a singleton that holds all of the BlazorReport objects.
   /// </summary>
-  /// <param name="options"> The BlazorReportsOptions object that contains the configuration for the BlazorReportRegistry. </param>
-  public BlazorReportRegistry(IOptions<BlazorReportsOptions> options)
+  /// <param name="options"> The BlazorReportOptions object that contains the configuration for the BlazorReportRegistry. </param>
+  public BlazorReportRegistry(IOptions<BlazorReportOptions> options)
   {
     if (!string.IsNullOrWhiteSpace(options.Value.BaseStylesPath))
     {
@@ -36,20 +37,20 @@ public class BlazorReportRegistry
       GlobalAssets = LoadAssets(options.Value.AssetsPath);
     }
 
-    DefaultPageSettings = options.Value.PageSettings;
+    DefaultPdfOptions = options.Value.PdfOptions;
     options.Value.JavaScriptSettings.Validate(nameof(options));
     DefaultJavaScriptSettings = options.Value.JavaScriptSettings;
   }
 
   /// <summary>
-  /// The default page settings for the BlazorReports
+  /// The default PDF conversion options for reports registered without their own.
   /// </summary>
-  public BlazorReportsPageSettings DefaultPageSettings { get; set; }
+  public PdfOptions DefaultPdfOptions { get; set; }
 
   /// <summary>
   /// The JavaScript settings for reports registered without their own.
   /// </summary>
-  public BlazorReportsJavaScriptSettings DefaultJavaScriptSettings { get; set; }
+  public BlazorReportJavaScriptOptions DefaultJavaScriptSettings { get; set; }
 
   /// <summary>
   /// The base styles for the BlazorReportRegistry.
@@ -75,27 +76,10 @@ public class BlazorReportRegistry
   /// <exception cref="InvalidOperationException"> Thrown when a report with the same name already exists. </exception>
   public BlazorReport AddReport<T>(BlazorReportRegistrationOptions? options = null)
   {
-    return AddReport(typeof(T), null, options);
+    return AddReport(typeof(T), options);
   }
 
-  /// <summary>
-  /// Adds a report to the BlazorReportRegistry.
-  /// </summary>
-  /// <param name="options"> The options to use when adding the report. </param>
-  /// <typeparam name="T"> The type of the report to add. </typeparam>
-  /// <typeparam name="TD"> The type of the data to use for the report. </typeparam>
-  /// <returns> The BlazorReport that was added. </returns>
-  /// <exception cref="InvalidOperationException"> Thrown when a report with the same name already exists. </exception>
-  public BlazorReport AddReport<T, TD>(BlazorReportRegistrationOptions? options = null)
-  {
-    return AddReport(typeof(T), typeof(TD), options);
-  }
-
-  private BlazorReport AddReport(
-    Type component,
-    Type? data,
-    BlazorReportRegistrationOptions? options
-  )
+  private BlazorReport AddReport(Type component, BlazorReportRegistrationOptions? options)
   {
     options?.JavaScriptSettings.Validate(nameof(options));
     var reportNameToUse = options?.ReportName ?? component.Name;
@@ -116,8 +100,7 @@ public class BlazorReportRegistry
         Name = reportNameToUse,
         NormalizedName = normalizedReportName,
         Component = component,
-        Data = data,
-        PageSettings = options?.PageSettings,
+        PdfOptions = options?.PdfOptions,
         JavaScriptSettings = options?.JavaScriptSettings,
       };
       if (!string.IsNullOrEmpty(options?.BaseStylesPath))

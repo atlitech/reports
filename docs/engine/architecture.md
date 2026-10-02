@@ -334,7 +334,7 @@ that hit the default queue timeout land just above the 30-second boundary.
 ### Blazor reports
 
 `Atli.Reports.Blazor` traces on its own source, `Atli.Reports.Blazor`
-(`BlazorReportsTelemetry.ActivitySourceName`): an `atli.reports.blazor.generate` span per report
+(`BlazorReportTelemetry.ActivitySourceName`): an `atli.reports.blazor.generate` span per report
 (attributes `atli.reports.blazor.report`, `atli.reports.blazor.component`,
 `atli.reports.blazor.output_format`, and `error.type` on failure), with an
 `atli.reports.blazor.render` child for rendering the component and, for PDF output, the engine's

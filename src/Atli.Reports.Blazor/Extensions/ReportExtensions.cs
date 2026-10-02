@@ -19,31 +19,6 @@ namespace Atli.Reports.Blazor.Extensions;
 public static partial class ReportExtensions
 {
   /// <summary>
-  /// Registers a Blazor report with data type <typeparamref name="TD" /> and component type <typeparamref name="T" />.
-  /// </summary>
-  /// <param name="app"> The <see cref="IApplicationBuilder" /> to register the report with. </param>
-  /// <param name="setupAction"> The <see cref="BlazorReportRegistrationOptions" /> to use. </param>
-  /// <typeparam name="T"></typeparam>
-  /// <typeparam name="TD"></typeparam>
-  /// <returns> The <see cref="IApplicationBuilder" />. </returns>
-  /// <exception cref="InvalidOperationException"></exception>
-  public static IApplicationBuilder RegisterBlazorReport<T, TD>(
-    this IApplicationBuilder app,
-    Action<BlazorReportRegistrationOptions>? setupAction = null
-  )
-    where T : ComponentBase
-    where TD : class
-  {
-    using var serviceScope = app.ApplicationServices.CreateScope();
-    var options = GetReportRegistrationOptions(serviceScope, setupAction);
-    var reportRegistry = serviceScope.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
-
-    reportRegistry.AddReport<T, TD>(options);
-
-    return app;
-  }
-
-  /// <summary>
   /// Registers a Blazor report with component type <typeparamref name="T" />.
   /// </summary>
   /// <param name="app"> The <see cref="IApplicationBuilder" /> to register the report with. </param>
@@ -136,7 +111,7 @@ public static partial class ReportExtensions
     var options = GetReportRegistrationOptions(serviceScope, setupAction);
 
     var reportRegistry = serviceScope.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
-    var blazorReport = reportRegistry.AddReport<T, TD>(options);
+    var blazorReport = reportRegistry.AddReport<T>(options);
 
     return endpoints
       .MapPost(
@@ -247,9 +222,9 @@ public static partial class ReportExtensions
   {
     BlazorReportRegistrationOptions options = new();
     var globalOptions = serviceScope
-      .ServiceProvider.GetRequiredService<IOptionsSnapshot<BlazorReportsOptions>>()
+      .ServiceProvider.GetRequiredService<IOptionsSnapshot<BlazorReportOptions>>()
       .Value;
-    options.PageSettings = globalOptions.PageSettings;
+    options.PdfOptions = globalOptions.PdfOptions.Clone();
     options.JavaScriptSettings = globalOptions.JavaScriptSettings.Clone();
     setupAction?.Invoke(options);
     return options;

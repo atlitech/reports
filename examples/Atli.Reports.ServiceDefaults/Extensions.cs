@@ -26,7 +26,7 @@ public static class Extensions
   /// <summary>
   /// The name of the Blazor reports activity source, which traces component rendering.
   /// </summary>
-  private const string BlazorReportsTelemetryName = "Atli.Reports.Blazor";
+  private const string BlazorReportTelemetryName = "Atli.Reports.Blazor";
 
   /// <summary>
   /// The .NET runtime's built-in meter (GC, thread pool, JIT, exceptions). Since .NET 9 the runtime
@@ -84,7 +84,7 @@ public static class Extensions
         tracing
           .AddSource(builder.Environment.ApplicationName)
           .AddSource(ReportsEngineTelemetryName)
-          .AddSource(BlazorReportsTelemetryName)
+          .AddSource(BlazorReportTelemetryName)
           .AddAspNetCoreInstrumentation(options =>
             // Health probes would drown out the requests worth looking at.
             options.Filter = context =>

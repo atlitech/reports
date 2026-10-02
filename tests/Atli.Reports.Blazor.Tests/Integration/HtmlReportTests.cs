@@ -6,6 +6,7 @@ using Atli.Reports.Blazor.Models;
 using Atli.Reports.Blazor.Services;
 using Atli.Reports.Blazor.Tests.Reports;
 using Atli.Reports.Blazor.Tests.Support;
+using Atli.Reports.Engine;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Atli.Reports.Blazor.Tests.Integration;
@@ -23,10 +24,10 @@ public class HtmlReportTests
   [Test]
   public async Task Renders_an_html_report_without_a_browser()
   {
-    await using var services = TestEngine.CreateServices(UseMissingBrowser);
+    await using var services = TestEngine.CreateServices(configureServices: UseMissingBrowser);
     var report = services
       .GetRequiredService<BlazorReportRegistry>()
-      .AddReport<GreetingReport, GreetingData>(
+      .AddReport<GreetingReport>(
         new BlazorReportRegistrationOptions { OutputFormat = ReportOutputFormat.Html }
       );
     using MemoryStream destination = new();
@@ -54,7 +55,7 @@ public class HtmlReportTests
         app.MapBlazorReport<GreetingReport, GreetingData>(options =>
           options.OutputFormat = ReportOutputFormat.Html
         ),
-      UseMissingBrowser
+      configureServices: UseMissingBrowser
     );
 
     using var response = await server.Client.PostAsJsonAsync(
@@ -76,7 +77,7 @@ public class HtmlReportTests
   {
     await using var server = await TestReportServer.StartAsync(
       app => app.MapBlazorReport<StaticReport>(),
-      UseMissingBrowser
+      configureServices: UseMissingBrowser
     );
 
     using var response = await server.Client.PostAsync(
@@ -92,6 +93,6 @@ public class HtmlReportTests
     await Assert.That(response.Content.Headers.ContentDisposition).IsNull();
   }
 
-  private static void UseMissingBrowser(BlazorReportsOptions options) =>
-    options.BrowserOptions.BrowserExecutableLocation = MissingBrowser;
+  private static void UseMissingBrowser(IServiceCollection services) =>
+    services.AddReportsEngine(options => options.Browser.ExecutablePath = MissingBrowser.FullName);
 }
