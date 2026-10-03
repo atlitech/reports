@@ -223,7 +223,7 @@ worker converts normally. amd64 was not tested. On arm64, the worker image's
 ## Method
 
 1. Build the server and worker images from their repository Dockerfiles, as in the
-   [reproduction steps](../../docs/isolated-workers.md#reproducing-the-experiment), and compare
+   [reproduction steps](https://github.com/atlitech/reports/blob/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd/docs/isolated-workers.md#reproducing-the-experiment), and compare
    the image IDs above.
 2. For gVisor, start a privileged `docker:29.8.2-dind` container and register the
    checksum-verified gVisor bundle as `validate-isolated-workers.py` does (`Lab.prepare`). For
