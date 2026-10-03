@@ -140,22 +140,15 @@ on `amd64` and `arm64` GitHub runners.
 
 - Ubuntu 23.10+ and 24.04 hosts restrict unprivileged user namespaces through AppArmor
   (`kernel.apparmor_restrict_unprivileged_userns=1`). The kernel applies that restriction to
-  processes AppArmor does not confine. For containers under the runtime's default AppArmor profile,
-  the outcome depends on the runtime version, and none of it has been tested here on such a host:
-  - Recent releases declare AppArmor ABI 3.0 in that profile, which does not mediate user
-    namespaces, so by the kernel and profile sources their containers are unaffected: Docker
-    Engine 29.4.3 and later (it vendors moby/profiles `apparmor/v0.2.1`, which declares the ABI
-    when the host has `/etc/apparmor.d/abi/3.0`), and containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, and
-    later releases of each line.
-  - Older releases, Docker Engine 27, 28, and 29 up to 29.4.2 and containerd before those
-    versions, declare no ABI. The parser may then compile the profile against a newer ABI that
-    mediates user namespaces, which the profile does not allow. The server may then fail closed
-    and need the sysctl set to `0`, an AppArmor profile that allows user namespaces, or the
-    opt-out.
-
-  The GitHub `ubuntu-24.04` runners that run the smoke test are the first check, for their Docker
-  version only. Containers that run AppArmor-unconfined (`--security-opt apparmor=unconfined`,
-  privileged containers, pods in kind) are affected.
+  processes AppArmor does not confine. Verified for Docker only: the smoke test passes on GitHub's
+  `ubuntu-24.04` runners (amd64 and arm64) with the sysctl at `1`, under Docker Engine 28.0.4 and
+  its `docker-default` profile, which declares no AppArmor ABI. A missing ABI declaration therefore
+  does not by itself stop the sandbox. Docker Engine 29.4.3 and later declare ABI 3.0 (moby/profiles
+  `apparmor/v0.2.1`, when the host has `/etc/apparmor.d/abi/3.0`), which does not mediate user
+  namespaces. Pods under containerd's default AppArmor profile on Ubuntu nodes were not tested.
+  Containers that run AppArmor-unconfined (`--security-opt apparmor=unconfined`, privileged
+  containers, pods in kind) are affected: they need the sysctl set to `0`, an AppArmor profile that
+  allows user namespaces, or the opt-out.
 - Podman, CRI-O, and Kubernetes nodes other than kind were not tested.
 - Under gVisor, Chromium's own seccomp-bpf filter crashes on arm64 (`seccomp-bpf failure in syscall
   nr=0x7b`) and the browser then hangs, so the

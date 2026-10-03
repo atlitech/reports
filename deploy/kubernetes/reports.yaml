@@ -16,11 +16,10 @@
 # to a compromised server; deploy/seccomp/README.md ("What the profile allows") explains the trade.
 #
 # Ubuntu 23.10+ and 24.04 nodes also restrict unprivileged user namespaces through AppArmor
-# (kernel.apparmor_restrict_unprivileged_userns=1), for AppArmor-unconfined processes. Pods under
-# containerd's default AppArmor profile are unaffected by the kernel and containerd sources only
-# with containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, or later in each line, whose profile declares ABI
-# 3.0 and so does not mediate user namespaces. Older containerd declares no ABI, and the browser
-# may then fail closed. Neither case has been tested on Ubuntu nodes. Pods that run
+# (kernel.apparmor_restrict_unprivileged_userns=1), for AppArmor-unconfined processes. Containers
+# under Docker's default AppArmor profile keep the sandbox there (verified in CI on Ubuntu 24.04
+# with Docker 28.0.4); pods under containerd's default profile on Ubuntu nodes were not tested. If
+# the browser fails closed on such a node, check its AppArmor profile first. Pods that run
 # AppArmor-unconfined need the sysctl set to 0 on the node; kind clusters are one case, because
 # containerd inside a kind node applies no AppArmor profile. Only for trusted HTML on nodes that
 # cannot allow user namespaces, use RuntimeDefault and set ReportsEngine__Browser__NoSandbox=true

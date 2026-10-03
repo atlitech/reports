@@ -118,8 +118,8 @@ jobs:
 
       # kind runs pods without an AppArmor profile, so the runner's AppArmor restriction on
       # unprivileged user namespaces (Ubuntu 24.04's default) would stop Chromium's sandbox in them.
-      # Nodes that apply containerd's default AppArmor profile are unaffected only with a containerd
-      # whose profile declares ABI 3.0; see deploy/kubernetes/reports.yaml.
+      # The smoke test above runs under Docker's default AppArmor profile with the restriction
+      # on; containerd's default profile on Ubuntu nodes is untested (see the Kubernetes example).
       - name: Validate Kubernetes deployment in a disposable cluster
         if: matrix.arch == 'amd64'
         run: |

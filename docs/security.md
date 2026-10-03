@@ -223,13 +223,11 @@ widens is what a compromised server or browser process can reach. Keep `--cap-dr
 
 **AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces
 through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`), for processes AppArmor does not
-confine. For containers under their runtime's default AppArmor profile, it depends on the runtime
-version, and neither case has been tested on such a host. Docker Engine 29.4.3 and later, and
-containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, and later releases of each line, declare AppArmor ABI 3.0 in
-that profile, which does not mediate user namespaces, so by the kernel and profile sources their
-containers are not affected. Older releases, Docker Engine 27 and 28 among them, declare no ABI; the
-profile may then be compiled against a newer ABI that mediates user namespaces, and the server may
-fail closed until the sysctl is `0`, an AppArmor profile allows user namespaces, or it opts out (see
+confine. Containers under Docker's default AppArmor profile are not affected: CI runs the smoke
+test on GitHub's `ubuntu-24.04` runners (amd64 and arm64) with the sysctl at `1` under Docker
+Engine 28.0.4, whose `docker-default` profile declares no AppArmor ABI, and Chromium's sandbox
+starts there. Docker Engine 29.4.3 and later declare ABI 3.0, which does not mediate user
+namespaces. Pods under containerd's default profile on Ubuntu nodes were not tested (see
 [Not verified](../deploy/seccomp/README.md#not-verified)). Containers that run AppArmor-unconfined
 (`--security-opt apparmor=unconfined`, privileged containers, pods in kind) are affected, as is
 Chromium run directly on such a host, outside a container: allow it user namespaces with an AppArmor
