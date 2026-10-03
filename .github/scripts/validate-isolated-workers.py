@@ -36,6 +36,7 @@ BUNDLE_HASHES = {
     "aarch64": "b7e11d27cbd69370ed7addb6c0d1c33e70e57a153cee57b5fdc5344bf303c7eb",
     "x86_64": "f3ed9131bc252259df150e270154180188f9df56b73a2312940325e1f522a2d6",
 }
+CHROMIUM_SECCOMP = REPO / "deploy/seccomp/chromium.json"
 BUSYBOX = "busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 LIMITS = ["--network=none", "--read-only", "--tmpfs=/tmp:rw,nosuid,nodev,size=512m,mode=1777",
           "--user=1654:1654", "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
@@ -488,8 +489,11 @@ def baseline(lab):
     environment["ReportsEngine__Concurrency__MaxConcurrentConversions"] = "1"
     envfile.write_text("\n".join(f"{name}={value}" for name, value in environment.items()) + "\n")
     lab.baseline = "atli-integrated-bench-" + uuid.uuid4().hex[:12]
-    # Same CPU/memory/read-only settings. HTTP requires its own loopback published port.
+    # Same CPU/memory/read-only settings. HTTP requires its own loopback published port. The
+    # server image runs Chromium's sandbox and fails closed without the seccomp profile it needs,
+    # so the baseline runs as the image ships, with that profile.
     baseline_limits = [item for item in LIMITS if item != "--network=none"]
+    baseline_limits.append("--security-opt=seccomp=" + str(CHROMIUM_SECCOMP))
     run(["docker", "run", "--detach", "--name", lab.baseline, *baseline_limits,
          "--publish", "127.0.0.1::8080", "--env-file", str(envfile), lab.args.server_image])
     address = run(["docker", "port", lab.baseline, "8080/tcp"]).stdout.decode().splitlines()[0]
@@ -569,7 +573,7 @@ def main():
     assert 1 <= args.samples <= 20
     result = {"limits": {"cpu": 1, "memory_bytes": 1073741824, "pids": 256, "tmp_bytes": 536870912},
               "scope": "Sequential exploratory microbenchmark, warm image cache, one trust domain. Not a capacity, cost, or cross-tenant safety claim.",
-              "metrics": "Worker CPU and peak memory come from trusted host cgroup v2, including gVisor sandbox/gofer; peak values cumulative and CPU deltas span fixture boundaries including the first warmup. Disposable cgroups vanish before reliable final reads; metrics are null. HTTP baseline and nested Docker stdio transports differ. The runc warm control uses the same stdio transport and image but has no gVisor isolation. First job per fixture is a separate warmup; only the first fixture starts a warm worker. Every disposable job includes startup and cleanup. Small-sample p95 is exploratory, not a capacity or concurrency measurement."}
+              "metrics": "Worker CPU and peak memory come from trusted host cgroup v2, including gVisor sandbox/gofer; peak values cumulative and CPU deltas span fixture boundaries including the first warmup. Disposable cgroups vanish before reliable final reads; metrics are null. HTTP baseline and nested Docker stdio transports differ. The integrated baseline runs Chromium's sandbox under deploy/seccomp/chromium.json, as the server image ships; workers run their browser without it inside the runtime boundary. The runc warm control uses the same stdio transport and image but has no gVisor isolation. First job per fixture is a separate warmup; only the first fixture starts a warm worker. Every disposable job includes startup and cleanup. Small-sample p95 is exploratory, not a capacity or concurrency measurement."}
     result["source"] = {"revision": run(["git", "rev-parse", "HEAD"], cwd=REPO).stdout.decode().strip(),
                         "dirty": bool(run(["git", "status", "--porcelain"], cwd=REPO).stdout.strip())}
     docker_info = json.loads(run(["docker", "info", "--format", "{{json .}}"]).stdout)
