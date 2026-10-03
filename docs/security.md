@@ -219,7 +219,7 @@ widens is what a compromised server or browser process can reach. Keep `--cap-dr
 | Aspire, local runs | `AddReportsServer` passes the profile to Docker or Podman |
 | Aspire deployment targets | Configure the profile on the target, or opt out explicitly; see [the Aspire guide](aspire.md#deploy) |
 | Azure Container Apps | No seccomp setting; [the template](../deploy/azure/reports.bicep) opts out explicitly. Whether its runtime permits user namespaces is unverified. |
-| gVisor | On arm64, Chromium's own seccomp filter crashed under gVisor in a probe of the worker image, and the browser then hung instead of exiting at startup, so the engine does not report it as a sandbox failure. The [experiment](isolated-workers.md) keeps the worker's browser unsandboxed inside the gVisor boundary. The server image under gVisor was not tested; on arm64, opt out there too. amd64 was not tested. |
+| gVisor | On arm64, Chromium's own seccomp filter crashed under gVisor in a probe of the worker image, and the browser then hung instead of exiting at startup, so the engine does not report it as a sandbox failure. The [experiment](isolated-workers.md) kept the worker's browser unsandboxed inside the gVisor boundary. The server image under gVisor was not tested; on arm64, opt out there too. amd64 was not tested. |
 
 **AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces
 through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`), for processes AppArmor does not

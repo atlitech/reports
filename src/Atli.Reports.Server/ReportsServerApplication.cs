@@ -1,6 +1,5 @@
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Endpoints;
-using Atli.Reports.Server.Execution;
 using Atli.Reports.Server.Health;
 using Atli.Reports.Server.OpenApi;
 using Atli.Reports.Server.Security;
@@ -42,14 +41,14 @@ public static class ReportsServerApplication
       )
       .ValidateOnStart();
 
-    // Register only option configuration here, preserving the public callback's override order.
-    // Worker mode never registers or resolves the browser/engine services using these options.
+    // These are server defaults, even if appsettings.json is absent or the content root changes.
+    // Configuration binding below can explicitly opt into a different network policy.
     builder.Services.Configure<ReportsEngineOptions>(options =>
       options.Network.Mode = ReportsEngineNetworkMode.Disabled
     );
-    builder
-      .Services.AddOptions<ReportsEngineOptions>()
-      .Bind(builder.Configuration.GetSection(ReportsEngineOptions.SectionName));
+    builder.Services.AddReportsEngine(
+      builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
+    );
 
     // Kestrel binds its endpoints from the Kestrel section but not its limits, so
     // Kestrel__Limits__MaxRequestBodySize and the other KestrelServerLimits need binding here.
@@ -81,12 +80,19 @@ public static class ReportsServerApplication
           : StatusCodes.Status500InternalServerError
     );
 
+    // Both checks gate readiness only. A browser that cannot start takes the server out of rotation
+    // while the engine retries the launch in the background; restarting the process would not repair
+    // it, so liveness asks no more than that the server answers.
+    builder
+      .Services.AddHealthChecks()
+      .AddReportsEngineBrowserCheck("browser", tags: ["ready"])
+      .AddReportsEngineConversionCheck("conversion_health", tags: ["ready"]);
+
     builder.AddServerTelemetry();
 
     builder.Services.AddServerOpenApi();
 
     configure?.Invoke(builder);
-    builder.AddReportsExecution();
     builder.AddReportsSecurity();
 
     var app = builder.Build();

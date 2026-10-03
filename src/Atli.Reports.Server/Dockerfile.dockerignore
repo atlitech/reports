@@ -4,7 +4,6 @@
 !Directory.Build.props
 !Directory.Packages.props
 !src/Atli.Reports.Engine/
-!src/Atli.Reports.Worker.Protocol/
 !src/Atli.Reports.Server/
 **/bin/
 **/obj/

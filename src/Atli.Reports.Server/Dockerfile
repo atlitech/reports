@@ -26,11 +26,9 @@ WORKDIR /src
 # and publish both target the build's own runtime: the stage runs on the image's architecture.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/Atli.Reports.Engine/Atli.Reports.Engine.csproj src/Atli.Reports.Engine/
-COPY src/Atli.Reports.Worker.Protocol/Atli.Reports.Worker.Protocol.csproj src/Atli.Reports.Worker.Protocol/
 COPY src/Atli.Reports.Server/Atli.Reports.Server.csproj src/Atli.Reports.Server/
 RUN dotnet restore src/Atli.Reports.Server --use-current-runtime
 COPY src/Atli.Reports.Engine/ src/Atli.Reports.Engine/
-COPY src/Atli.Reports.Worker.Protocol/ src/Atli.Reports.Worker.Protocol/
 COPY src/Atli.Reports.Server/ src/Atli.Reports.Server/
 RUN dotnet publish src/Atli.Reports.Server -c Release --use-current-runtime --no-restore -o /app
 # The native binary's debug symbols (.dbg, about 40 MB), the engine's symbols and XML docs: none

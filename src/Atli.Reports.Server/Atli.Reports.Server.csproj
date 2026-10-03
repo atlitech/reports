@@ -21,10 +21,5 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
-    <ProjectReference Include="..\Atli.Reports.Worker.Protocol\Atli.Reports.Worker.Protocol.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="Atli.Reports.Engine.Tests" />
   </ItemGroup>
 </Project>
