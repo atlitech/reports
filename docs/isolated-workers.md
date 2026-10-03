@@ -173,11 +173,11 @@ renderer platform must therefore permit the sandbox:
   On Kubernetes, install it as a `Localhost` profile on every renderer node, as the
   [Kubernetes example](../deploy/kubernetes/reports.yaml) does.
 - **AppArmor.** Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor.
-  By the kernel and containerd sources, pods under containerd's default AppArmor profile are
-  unaffected only with containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, or later in each line; with older
-  containerd the renderer may fail closed, and AppArmor-unconfined pods need the node's
-  `kernel.apparmor_restrict_unprivileged_userns` set to `0`. None of this was tested on Ubuntu
-  nodes.
+  Containers under Docker's default AppArmor profile keep Chromium's sandbox there: the
+  server-image smoke test passes on GitHub's `ubuntu-24.04` runners with the restriction on, under
+  Docker Engine 28.0.4. Pods under containerd's default AppArmor profile were not tested on Ubuntu
+  nodes. AppArmor-unconfined pods need the node's `kernel.apparmor_restrict_unprivileged_userns`
+  set to `0`.
 - **Azure Container Apps** cannot apply a seccomp profile. The
   [Bicep template](../deploy/azure/reports.bicep) and the [Aspire guide](aspire.md#deploy) opt out
   of the sandbox there, and whether Container Apps permits it without the profile is unverified,
