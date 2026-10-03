@@ -208,14 +208,16 @@ namespaces. The sandbox still makes this the better trade for HTML that is not f
 renderer, where an exploit is likeliest to land, is denied these calls by Chromium's own filter, so
 an exploit there needs a second bug that escapes the sandbox to reach that surface. What the profile
 widens is what a compromised server or browser process can reach. Keep `--cap-drop ALL`,
-`no-new-privileges`, the non-root user, and a host kernel with current security fixes.
+`no-new-privileges`, the non-root user, and a host kernel with current security fixes. On
+Kubernetes, also run the pod in its own user namespace (`hostUsers: false`), so the capabilities
+the profile lets processes hold belong to an unprivileged range of host user IDs.
 [What the profile allows](../deploy/seccomp/README.md#what-the-profile-allows) records the probe.
 
 | Where | How |
 | --- | --- |
 | Docker | `docker run --security-opt seccomp=deploy/seccomp/chromium.json ...` |
 | Docker Compose | `security_opt: ["seccomp=<path to deploy/seccomp/chromium.json>"]`, as in [`docker-compose.yml`](../src/Atli.Reports.Server/docker-compose.yml) |
-| Kubernetes | A `Localhost` profile installed on every node; see [the example](../deploy/kubernetes/reports.yaml) |
+| Kubernetes | A `Localhost` profile installed on every node, and `hostUsers: false` (Kubernetes 1.33+, containerd 2.0+ or CRI-O 1.25+, Linux 6.3+); see [the example](../deploy/kubernetes/reports.yaml) |
 | Aspire, local runs | `AddReportsServer` passes the profile to Docker or Podman |
 | Aspire deployment targets | Configure the profile on the target, or opt out explicitly; see [the Aspire guide](aspire.md#deploy) |
 | Azure Container Apps | No seccomp setting; [the template](../deploy/azure/reports.bicep) opts out explicitly. Whether its runtime permits user namespaces is unverified. |
@@ -287,7 +289,8 @@ For teams deploying the ordinary container without Aspire, checked-in examples a
 - [Kubernetes](../deploy/kubernetes/reports.yaml): two replicas, private ClusterIP service, explicit
   uppercase HTTP startup/readiness/liveness probes, disruption budget, read-only root, writable
   bounded `/tmp`, non-root execution, no capabilities, no service-account token, denied egress, and
-  the `Localhost` seccomp profile Chromium's sandbox needs, which you install on every node first.
+  the `Localhost` seccomp profile Chromium's sandbox needs, which you install on every node first,
+  and a user namespace of the pod's own (`hostUsers: false`).
   Label authorized calling pods `reports-client=true` in the same namespace and supply the API key.
   The cluster CNI must actually enforce NetworkPolicy. The optional [HPA](../deploy/kubernetes/hpa.yaml)
   requires metrics-server and representative load testing.
@@ -373,12 +376,15 @@ NativeAOT image with authentication, a read-only filesystem, minimal capabilitie
 probe privacy, and a browser environment canary. Under `deploy/seccomp/chromium.json` it checks that
 no browser process runs with `--no-sandbox` and that renderers run outside the browser's user namespace;
 under Docker's default profile, that the server fails closed with the remedy in its health details
-and log. `chromium-seccomp-profile.py check` verifies the profile against its pinned upstream.
+and log. Under both, `seccomp-probe.pl` checks from inside the container which namespace syscalls
+the profile allows, and that it answers `clone3` with `ENOSYS`. `chromium-seccomp-profile.py check`
+verifies the profile against its pinned upstream and refuses one that allows `clone3` or unfiltered
+namespace syscalls.
 `smoke-test-server-jwt.py` validates real HTTPS
 discovery, RSA signatures, token lifetime, audience/issuer, and permissions in the NativeAOT image.
 `validate-kubernetes-security.sh` creates and removes a disposable kind cluster to exercise
-authenticated conversions, Chromium's sandbox under the `Localhost` profile, probes, blocked
-external assets, and rolling restarts. The default
+authenticated conversions, Chromium's sandbox under the `Localhost` profile inside the pod's own
+user namespace, the seccomp probe in each pod, probes, blocked external assets, and rolling restarts. The default
 kind CNI does not establish NetworkPolicy enforcement, and the HPA is validated as a resource
 without a load/scaling test. These checks do not prove hostile-browser containment or validate a
 customer's cloud network policy. The Azure template is compile-validated; it has not been deployed

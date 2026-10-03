@@ -2,8 +2,9 @@
 # Validates the native Kubernetes example in its own disposable kind cluster. Requires Docker,
 # kubectl, kind (or KIND_BIN), curl, Python 3, and OpenSSL. Never reads the active kubeconfig.
 # The default kind CNI does NOT enforce NetworkPolicy: this validates API schema, probes,
-# authentication, conversion, Chromium's sandbox under the Localhost seccomp profile, and rolling
-# deployment, not cluster network isolation or HPA scaling.
+# authentication, conversion, Chromium's sandbox under the Localhost seccomp profile inside the pod's
+# own user namespace (hostUsers: false), the profile's syscall results in the pod
+# (seccomp-probe.pl), and rolling deployment, not cluster network isolation or HPA scaling.
 #
 # kind runs pods without an AppArmor profile, so on a host that restricts unprivileged user
 # namespaces through AppArmor (Ubuntu 23.10+, kernel.apparmor_restrict_unprivileged_userns=1)
@@ -13,7 +14,9 @@ umask 077
 
 image="${1:-atli-reports-server:security}"
 kind_bin="${KIND_BIN:-kind}"
-node_image="kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f"
+# Kubernetes 1.36, where user namespaces are GA, from kind v0.33.0. kind before v0.32.0 cannot run
+# hostUsers: false pods (kubernetes-sigs/kind#4178).
+node_image="kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/atli-kubernetes-validation.XXXXXX")"
 cluster="atli-reports-security-$(date +%s)-$$"
@@ -65,6 +68,11 @@ cluster_owned=true
 for node in $("$kind_bin" get nodes --name "$cluster"); do
   docker exec "$node" mkdir -p /var/lib/kubelet/seccomp/atli-reports
   docker cp "$seccomp_profile" "$node:/var/lib/kubelet/seccomp/atli-reports/chromium.json"
+  # On a host with DMI (GitHub's runners), kind binds fake product_name and product_uuid files over
+  # the node's sysfs. The kernel then refuses runc's fresh sysfs mount in a hostUsers: false pod
+  # ("error mounting "sysfs" ... operation not permitted"), because no sysfs mount in the node is
+  # fully visible. A second, unobstructed one is (kubernetes-sigs/kind#3436).
+  docker exec "$node" sh -c 'mkdir -p /mnt/sysfs && mount -t sysfs sysfs /mnt/sysfs'
 done
 kube create namespace reports-validation
 
@@ -153,6 +161,25 @@ for pod in $(kube get pods --selector app=reports --output name); do
   ' || fail "Chromium does not run with its sandbox in $pod."
 done
 echo "Chromium runs with its sandbox in every pod"
+
+# The pod's own user namespace (hostUsers: false): the API server kept the field, and the pod's
+# user IDs map to an unprivileged range on the node rather than one-to-one to the node's own.
+for pod in $(kube get pods --selector app=reports --output name); do
+  [ "$(kube get "$pod" --output jsonpath='{.spec.hostUsers}')" = false ] ||
+    fail "$pod does not have hostUsers: false; the API server dropped the field or it was removed."
+  read -r inside outside length <<<"$(kube exec "$pod" -- cat /proc/self/uid_map)"
+  echo "$pod maps user IDs $inside-$((inside + length - 1)) to $outside-$((outside + length - 1)) on the node"
+  [ "$inside" = 0 ] && [ "$outside" -gt 0 ] && [ "$length" -le 65536 ] ||
+    fail "$pod runs with the node's user IDs (uid_map: $inside $outside $length)."
+done
+
+# The Localhost profile as containerd applies it, inside the pod's user namespace: the same results
+# as under Docker (seccomp-probe.pl), so containerd did not reinterpret any rule.
+for pod in $(kube get pods --selector app=reports --output name); do
+  echo "Seccomp probe in $pod:"
+  kube exec -i "$pod" -- perl - chromium < "$repo/.github/scripts/seccomp-probe.pl" ||
+    fail "The Localhost seccomp profile in $pod does not allow exactly what Chromium's sandbox needs."
+done
 status="$(curl --config "$work/credentials/client.curl" --silent --show-error --max-time 30 \
   --output "$work/blocked.json" --write-out '%{http_code}' --header 'Content-Type: application/json' \
   --data '{"html":"<img src=\"http://127.0.0.1:8080/health/live\">"}' "$base_url/convert")"
@@ -164,5 +191,5 @@ kube rollout restart deployment/reports
 kube rollout status deployment/reports --timeout=180s
 start_forward
 convert
-echo "Kubernetes validation passed: schema, two ready replicas, probes, auth, PDF, Chromium's sandbox, network policy error, and rollout."
+echo "Kubernetes validation passed: schema, two ready replicas, probes, auth, PDF, Chromium's sandbox, the pod's user namespace, the seccomp probe, network policy error, and rollout."
 echo "NetworkPolicy enforcement and HPA scaling were not validated by this kind test."
