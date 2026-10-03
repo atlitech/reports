@@ -324,26 +324,44 @@ the actual probes rather than relying on Aspire's local readiness check.
 
 ## Managed hosting boundary
 
-The [isolated renderer experiment](isolated-workers.md) documents the optional worker boundary,
-its launcher authority, performance comparisons, and the gates for a future hosted service.
-
 The self-hosted implementation supplies portable caller identity, permissions, local admission,
 and rendering policy. It deliberately has no accounts database, token issuer, billing system, or
-shared cloud worker pool. A managed service must add those components before accepting hostile
+shared cloud renderer fleet. A managed service must add those components before accepting hostile
 customer documents; adding an API key to the current shared browser is insufficient.
 
-Keep a public API outside renderer workers. It resolves authenticated tenant membership, applies
-deployment-wide quotas, and passes a bounded document job to a worker without reusable customer
-credentials. Run workers in a separately validated OS sandbox or stronger isolation boundary with
-restricted egress, limited storage, and no access to the control plane's secrets. Browser contexts
-remain useful storage separation within the supported trust domain but are not that boundary.
-For durable jobs, add a durable queue and private PDF storage with tenant authorization, expiry,
-and ownership checks on every retrieval. Do not derive tenancy from a caller-provided header.
+The [isolated renderer experiment](isolated-workers.md) records why per-request sandboxes launched
+by the API are not that design, and describes the [hosted renderer
+design](isolated-workers.md#hosted-renderer-design). A shared public API authenticates callers,
+resolves product-tenant membership, applies deployment-wide quotas, and relays the streamed PDF.
+It never parses or executes document HTML, and it holds no rights to create, scale, or reassign
+renderers. Each customer gets its own renderer deployment: this server image in integrated mode
+with Chromium's sandbox on, internal-only ingress, denied egress and renderer-to-renderer traffic,
+a read-only filesystem, resource limits, and no application secrets, service identity, or
+service-account token. The image runs Chromium's sandbox by default and fails closed where the
+platform does not allow it, so renderers need the seccomp profile in
+[`deploy/seccomp`](../deploy/seccomp/README.md) and nodes that allow unprivileged user namespaces
+(see [Chromium's sandbox](#chromiums-sandbox)). Azure Container Apps cannot apply that profile,
+and the [Container Apps template](../deploy/azure/reports.bicep) opts out of the sandbox, so a
+renderer there does not meet this requirement until Container Apps is shown to permit the sandbox
+without the profile. A renderer accepts only the API, which presents a credential unique to that
+renderer so that a compromised renderer cannot replay it against another. The API treats renderer
+responses as untrusted. Renderers run on a node pool separate from the API. The API derives the
+renderer from the authenticated product tenant, never from a caller-provided header.
+
+Chromium's sandbox is one layer, not the boundary between customers. A hostile customer can submit
+exploits repeatedly and read the exact browser build from its own PDF. Browser contexts remain
+useful storage separation within one trust domain but are not that boundary either. If a customer
+accepts raw HTML from end users who distrust each other, the trust domain is the end user, and the
+platform must provide per-user or per-job isolation, which the hosted design does not yet provide.
+
+For durable jobs, add a durable queue and private PDF storage with product-tenant authorization,
+expiry, and ownership checks on every retrieval.
 
 Audit identity, policy outcome, status, and duration; never record document content, credentials,
 or sensitive asset URLs. A hosted release additionally needs adversarial containment and
-cross-tenant tests against its actual runtime, fair global admission, isolation-aware scheduling,
-rotation/revocation across replicas, and incident-response procedures.
+cross-customer tests against its actual runtime and network, fair global admission, product-tenant
+routing, rotation and revocation across replicas, patch targets for the browser, renderer nodes,
+and container and sandbox runtimes, and incident-response procedures.
 
 ## Validation
 
