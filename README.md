@@ -307,8 +307,10 @@ against 0.16 to 0.19 s), and about 2.5 times less on the image-heavy page. At 64
 measured at that level after failing at 16.
 
 These numbers come from one run on one machine, so read them as indicative. The image then ran
-Chromium without its sandbox; turning it on measured about 30 ms on a cold start and no difference
-beyond noise on warm conversions (see [Chromium's sandbox](docs/security.md#chromiums-sandbox)). The
+Chromium without its sandbox, and these load results have not been measured again with it on. A
+separate exploratory comparison, sequential conversions with the isolated worker image, found the
+sandbox cost about 30 ms on a cold start and no difference beyond noise on warm conversions (see
+[Chromium's sandbox](docs/security.md#chromiums-sandbox)). The
 [full results](benchmarks/results/2026-10-01-3829bfd.md) include every concurrency level, memory,
 errors, and the environment. The [methodology](benchmarks/README.md#methodology) explains how to
 reproduce them with `benchmarks/run.sh`. They measure the server image with

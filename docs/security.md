@@ -198,6 +198,19 @@ is Docker's default profile, pinned to a moby/profiles commit, plus exactly thos
 to user, PID, and network namespaces. Its README records the delta and how each part was found
 necessary.
 
+**What the profile opens.** Seccomp cannot limit the allowance to Chromium. Under the profile, every
+process in the container, the .NET server and Chromium's browser process included, can create a
+user namespace with new PID and network namespaces and hold every capability inside them,
+`CAP_NET_ADMIN` and `CAP_NET_RAW` included. That exposes netfilter (`nf_tables`), packet sockets,
+and other kernel code that Docker's default profile keeps away from a container without
+capabilities, and which has been a common route to privilege escalation from unprivileged user
+namespaces. The sandbox still makes this the better trade for HTML that is not fully trusted: a
+renderer, where an exploit is likeliest to land, is denied these calls by Chromium's own filter, so
+an exploit there needs a second bug that escapes the sandbox to reach that surface. What the profile
+widens is what a compromised server or browser process can reach. Keep `--cap-drop ALL`,
+`no-new-privileges`, the non-root user, and a host kernel with current security fixes.
+[What the profile allows](../deploy/seccomp/README.md#what-the-profile-allows) records the probe.
+
 | Where | How |
 | --- | --- |
 | Docker | `docker run --security-opt seccomp=deploy/seccomp/chromium.json ...` |
@@ -210,9 +223,14 @@ necessary.
 
 **AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces
 through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`), for processes AppArmor does not
-confine. Docker's and containerd's default AppArmor profiles declare AppArmor ABI 3.0, which does
-not mediate user namespaces, so by the kernel and profile sources, containers under them are not
-affected; this has not been tested on such a host. Containers that run AppArmor-unconfined
+confine. For containers under their runtime's default AppArmor profile, it depends on the runtime
+version, and neither case has been tested on such a host. Docker Engine 29.4.3 and later, and
+containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, and later releases of each line, declare AppArmor ABI 3.0 in
+that profile, which does not mediate user namespaces, so by the kernel and profile sources their
+containers are not affected. Older releases, Docker Engine 27 and 28 among them, declare no ABI; the
+profile may then be compiled against a newer ABI that mediates user namespaces, and the server may
+fail closed until the sysctl is `0`, an AppArmor profile allows user namespaces, or it opts out (see
+[Not verified](../deploy/seccomp/README.md#not-verified)). Containers that run AppArmor-unconfined
 (`--security-opt apparmor=unconfined`, privileged containers, pods in kind) are affected, as is
 Chromium run directly on such a host, outside a container: allow it user namespaces with an AppArmor
 profile, as [Chromium describes](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md),

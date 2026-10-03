@@ -11,16 +11,20 @@
 # cannot create the container ("cannot load seccomp profile"); under RuntimeDefault the browser
 # cannot start and /health/details says why. The file is already resolved for containers without
 # capabilities, because containerd reads Localhost profiles as plain OCI seccomp and ignores
-# Docker's conditional rules.
+# Docker's conditional rules. The profile lets every process in the pod, not only Chromium, create
+# user and network namespaces with capabilities inside them, which widens the kernel surface open
+# to a compromised server; deploy/seccomp/README.md ("What the profile allows") explains the trade.
 #
 # Ubuntu 23.10+ and 24.04 nodes also restrict unprivileged user namespaces through AppArmor
-# (kernel.apparmor_restrict_unprivileged_userns=1). As far as the kernel and containerd sources
-# show, that restriction covers AppArmor-unconfined processes, not pods under containerd's default
-# AppArmor profile, which declares ABI 3.0 and so does not mediate user namespaces; this has not
-# been tested on Ubuntu nodes. Pods that run AppArmor-unconfined need the sysctl set to 0 on the
-# node; kind clusters are one case, because containerd inside a kind node applies no AppArmor
-# profile. Only for trusted HTML on nodes that cannot allow user namespaces, use RuntimeDefault and
-# set ReportsEngine__Browser__NoSandbox=true instead.
+# (kernel.apparmor_restrict_unprivileged_userns=1), for AppArmor-unconfined processes. Pods under
+# containerd's default AppArmor profile are unaffected by the kernel and containerd sources only
+# with containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, or later in each line, whose profile declares ABI
+# 3.0 and so does not mediate user namespaces. Older containerd declares no ABI, and the browser
+# may then fail closed. Neither case has been tested on Ubuntu nodes. Pods that run
+# AppArmor-unconfined need the sysctl set to 0 on the node; kind clusters are one case, because
+# containerd inside a kind node applies no AppArmor profile. Only for trusted HTML on nodes that
+# cannot allow user namespaces, use RuntimeDefault and set ReportsEngine__Browser__NoSandbox=true
+# instead.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

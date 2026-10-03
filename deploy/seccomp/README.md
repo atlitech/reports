@@ -84,6 +84,32 @@ Nothing else changes. Inside the new user namespace the process holds capabiliti
 argument filters matter: mount, cgroup, UTS, and IPC namespaces stay denied there too, which keeps
 `mount` and its relatives out of reach.
 
+### What the profile allows
+
+Seccomp filters every process in the container, so the allowance is not Chromium's alone. Any
+process there can `clone` itself into a new user namespace together with new PID and network
+namespaces, and holds every capability inside them, `CAP_NET_ADMIN` and `CAP_NET_RAW` included.
+That covers the .NET server, Chromium's browser process (which runs outside the sandbox), and
+whatever code an attacker runs through a bug in either or through an escape from Chromium's sandbox.
+It opens kernel code that Docker's default profile keeps away from a container without
+capabilities: netfilter (`nf_tables`), packet sockets (`AF_PACKET`), and the rest of the networking
+code that checks those capabilities against the network namespace's owner. Unprivileged user
+namespaces have been a common route to kernel privilege escalations through that code, and they
+are why Docker's default denies these calls. On the host described below, a probe in a container
+with `--cap-drop ALL`, `no-new-privileges`, and a non-root user called
+`clone(CLONE_NEWUSER | CLONE_NEWNET)`: under `chromium.json` the child had a full effective
+capability set in a new network namespace and opened an `AF_PACKET` socket; under Docker's default
+profile the call failed with `EPERM`.
+
+The trade is still the recommended one for HTML that is not fully trusted. The renderer, which
+parses the HTML and runs its JavaScript, is where an exploit is likeliest to land, and Chromium's
+own seccomp filter denies these calls to renderers: to reach the wider kernel surface, an exploit
+there needs a second bug that escapes the sandbox. Without the sandbox (`NoSandbox` under Docker's
+default profile), the same renderer bug runs code as the server's user in the container. What the
+profile widens is what a compromise of the server or of the browser process can reach. Keep the rest
+of the baseline: `--cap-drop ALL`, `no-new-privileges`, a non-root user, and a host kernel with
+current security fixes.
+
 ## How the allowance was established
 
 On 2026-10-02, with chrome-headless-shell 154.0.8037.92 in this image, on Docker 29.4.0 (OrbStack,
@@ -99,8 +125,12 @@ Linux 7.0.14, arm64), each container started with `--cap-drop ALL`, `--read-only
   [benchmark fixtures](../../benchmarks/fixtures) (invoice, inlined assets, 49-page table, and the
   chart with `waitForSignal`), no browser process had `--no-sandbox`, and renderers ran in their
   own PID namespaces and outside the browser's user namespace, with a second seccomp filter
-  (Chromium's). In a container with the same settings, `unshare --user` succeeded and
-  `unshare --user` with `--mount`, `--uts`, `--ipc`, `--cgroup`, `--pid`, or `--net` failed.
+  (Chromium's).
+- In a container with the same settings, `unshare --user` succeeded and `unshare --user` with
+  `--mount`, `--uts`, `--ipc`, `--cgroup`, `--pid`, or `--net` failed: the `unshare` rule allows a
+  user namespace alone. `clone` with `CLONE_NEWUSER` and `CLONE_NEWPID`, `CLONE_NEWNET`, or both
+  succeeded, by design (see [What the profile allows](#what-the-profile-allows)); with
+  `CLONE_NEWNS`, `CLONE_NEWUTS`, `CLONE_NEWIPC`, or `CLONE_NEWCGROUP` it failed.
 
 The same profile passed [the Kubernetes validation](../../.github/scripts/validate-kubernetes-security.sh)
 in kind as a `Localhost` profile. CI runs the server image's smoke test, which checks the sandbox,
@@ -110,12 +140,22 @@ on `amd64` and `arm64` GitHub runners.
 
 - Ubuntu 23.10+ and 24.04 hosts restrict unprivileged user namespaces through AppArmor
   (`kernel.apparmor_restrict_unprivileged_userns=1`). The kernel applies that restriction to
-  processes AppArmor does not confine. Docker's `docker-default` and containerd's default AppArmor
-  profiles declare AppArmor ABI 3.0, which does not mediate user namespaces, so by the kernel and
-  profile sources containers under them are unaffected. That has not been tested here on such a
-  host; the GitHub `ubuntu-24.04` runners that run the smoke test are the first check. Containers
-  that run AppArmor-unconfined (`--security-opt apparmor=unconfined`, privileged containers, pods in
-  kind) are affected.
+  processes AppArmor does not confine. For containers under the runtime's default AppArmor profile,
+  the outcome depends on the runtime version, and none of it has been tested here on such a host:
+  - Recent releases declare AppArmor ABI 3.0 in that profile, which does not mediate user
+    namespaces, so by the kernel and profile sources their containers are unaffected: Docker
+    Engine 29.4.3 and later (it vendors moby/profiles `apparmor/v0.2.1`, which declares the ABI
+    when the host has `/etc/apparmor.d/abi/3.0`), and containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, and
+    later releases of each line.
+  - Older releases, Docker Engine 27, 28, and 29 up to 29.4.2 and containerd before those
+    versions, declare no ABI. The parser may then compile the profile against a newer ABI that
+    mediates user namespaces, which the profile does not allow. The server may then fail closed
+    and need the sysctl set to `0`, an AppArmor profile that allows user namespaces, or the
+    opt-out.
+
+  The GitHub `ubuntu-24.04` runners that run the smoke test are the first check, for their Docker
+  version only. Containers that run AppArmor-unconfined (`--security-opt apparmor=unconfined`,
+  privileged containers, pods in kind) are affected.
 - Podman, CRI-O, and Kubernetes nodes other than kind were not tested.
 - Under gVisor, Chromium's own seccomp-bpf filter crashes on arm64 (`seccomp-bpf failure in syscall
   nr=0x7b`), so the [isolated worker experiment](../../docs/isolated-workers.md) keeps its browser
