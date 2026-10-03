@@ -486,6 +486,7 @@ builder.Services.AddReportsEngine(
   `Atli.Reports.Client`, locally and deployed
 - [JavaScript completion signals](docs/engine/reactive-signal-approach.md)
 - [Benchmarks](benchmarks/README.md)
+- [Hosted renderer design](docs/hosted-renderers.md)
 - [Isolated renderer experiment](docs/isolated-workers.md)
 - [`examples/SimpleReportServer`](examples/SimpleReportServer): reports with and without data,
   HTML output, and a report that waits for its JavaScript

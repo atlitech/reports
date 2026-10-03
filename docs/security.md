@@ -330,9 +330,9 @@ shared cloud renderer fleet. A managed service must add those components before 
 customer documents; adding an API key to the current shared browser is insufficient.
 
 The [isolated renderer experiment](isolated-workers.md) records why per-request sandboxes launched
-by the API are not that design, and describes the [hosted renderer
-design](isolated-workers.md#hosted-renderer-design). A shared public API authenticates callers,
-resolves product-tenant membership, applies deployment-wide quotas, and relays the streamed PDF.
+by the API are not that design; the [hosted renderer design](hosted-renderers.md) is. A shared
+public API authenticates callers, resolves product-tenant membership, applies deployment-wide
+quotas, and relays the streamed PDF.
 It never parses or executes document HTML, and it holds no rights to create, scale, or reassign
 renderers. Each customer gets its own renderer deployment: this server image in integrated mode
 with Chromium's sandbox on, internal-only ingress, denied egress and renderer-to-renderer traffic,

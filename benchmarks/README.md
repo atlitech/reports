@@ -24,8 +24,8 @@ The separate [isolated-worker exploration](results/2026-10-02-5c500701-isolated-
 compares integrated rendering, disposable gVisor workers, and warm workers under gVisor and runc.
 It records startup, sequential latency, and available CPU/memory measurements with explicit limits;
 it does not establish concurrent production capacity. See the [worker experiment](../docs/isolated-workers.md)
-for the trust boundary, the decision to remove its code, and how to reproduce it from the last
-commit that has it. The
+for the decision, what the results change, and how to reproduce them from the last commit that has
+the code. The
 [isolation follow-up](results/2026-10-02-b88e5b5-isolation-followup-arm64.md) splits sandbox
 startup and teardown from rendering, compares the `vfs` and `overlay2` storage drivers, prices
 tagged PDFs, and tests Chromium's own sandbox under runc and gVisor. Its probes were ad hoc and
