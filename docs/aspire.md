@@ -49,6 +49,7 @@ builder.Build().Run();
 | Endpoint | `http`, to the server's port 8080 in the container. `port` fixes the host port; by default Aspire picks one. The endpoint is not external. |
 | Health | Healthy once `GET /health/ready` answers `200`: the server's browser can launch and recent conversions mostly succeed. The image launches the browser at startup. While a launch fails, the status-only probe answers `503` and the server retries in the background. `WaitFor(reports)` keeps waiting until a launch succeeds. Authorized operators can inspect `/health/details` for the reason. See [the server's health endpoints](engine/server.md#health). |
 | Probes | When the app deploys, a readiness probe on `/health/ready` and a liveness probe on `/health/live`, for the targets that run probes, such as Azure Container Apps. Not on Kubernetes yet; see [Deploy](#deploy). |
+| Seccomp | When the AppHost runs, `--security-opt seccomp=<file>` with the profile Chromium's sandbox needs ([`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md), which the package carries and copies to the local application data directory). Deployment targets need it configured; see [Deploy](#deploy). |
 | Telemetry | Logs, metrics, and traces go to the dashboard over OTLP, including the engine's `atli.reports.convert` spans below each `POST /convert`. |
 | OpenAPI | The dashboard links `/openapi/v1.json`, which requires `reports.diagnostics`. The link does not attach credentials. Development and production API-key helpers grant conversion permission only; use an operator credential for diagnostics. |
 | Command | `Convert a test page` converts a one-page document and logs its PDF size and duration. It is enabled while the server is healthy and an API-key helper or explicit anonymous access is configured. From a terminal: `aspire resource reports convert-test-page`. JWT-only deployments use the calling application's token flow. |
@@ -284,9 +285,52 @@ services:
 ```
 
 - **The server stays internal.** Its endpoint is not external, so only the app reaches it, at the
-  container network's address (`http://reports:8080` above). Keep it that way: the server's browser
-  runs without its sandbox and only suits trusted HTML. `WithExternalHttpEndpoints()` would publish
-  it.
+  container network's address (`http://reports:8080` above). Keep it that way: the server renders
+  the application's own HTML, and Chromium's sandbox narrows the damage of a browser bug without
+  making it a boundary for hostile HTML. `WithExternalHttpEndpoints()` would publish it.
+- **Chromium's sandbox needs a seccomp profile on the target.** The server's browser runs with
+  Chromium's sandbox, which needs unprivileged user namespaces that container runtimes deny by
+  default. When the AppHost runs, `AddReportsServer` passes the profile it carries to Docker or
+  Podman (`--security-opt seccomp=<file>`); publishing does not, because deployment targets do not
+  take container runtime arguments. Without the profile the server stays unready and its health
+  details say why (see [Chromium's sandbox](security.md#chromiums-sandbox)). Per target, with
+  [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md):
+
+  ```csharp
+  // Docker Compose: copy chromium.json next to the published docker-compose.yaml.
+  reports.PublishAsDockerComposeService((_, service) => service.SecurityOpt.Add("seccomp=./chromium.json"));
+
+  // Kubernetes: install chromium.json on every node, at
+  // /var/lib/kubelet/seccomp/atli-reports/chromium.json (see deploy/kubernetes/reports.yaml).
+  reports.PublishAsKubernetesService(service =>
+  {
+    var pod = service.Workload!.PodTemplate.Spec;
+    pod.SecurityContext ??= new();
+    pod.SecurityContext.SeccompProfile = new()
+    {
+      Type = "Localhost",
+      LocalhostProfile = "atli-reports/chromium.json",
+    };
+  });
+
+  // Azure Container Apps cannot apply a seccomp profile: opt out explicitly, for trusted HTML only.
+  // Needs `using Azure.Provisioning.AppContainers;`. Only the Container App gets the setting.
+  reports.PublishAsAzureContainerApp((_, app) =>
+    app.Template.Containers.Single().Value!.Env.Add(new ContainerAppEnvironmentVariable
+    {
+      Name = "ReportsEngine__Browser__NoSandbox",
+      Value = "true",
+    }));
+  ```
+
+  Use the one for the AppHost's target; Aspire 13.6 refuses to publish the Docker Compose or
+  Container Apps customization without that target's environment in the AppHost. These compile
+  against Aspire 13.6, and `aspire publish` was checked to write each setting: the `security_opt`
+  line, the pod's `seccompProfile`, and the Container App's environment variable. In an AppHost with
+  both a Container Apps and a Docker Compose environment that publishes `reports` to Docker Compose,
+  the Compose service does not get the opt-out; `WithEnvironment` would set it for every target and
+  for local runs. The Kubernetes and Container Apps deployments were not run. Whether Container Apps
+  permits user namespaces without the opt-out is unverified.
 - **Telemetry** goes wherever the target sends OTLP; the Docker Compose environment adds an Aspire
   dashboard for it.
 - **Health in production.** Aspire's health check only drives the local dashboard and `WaitFor`; in

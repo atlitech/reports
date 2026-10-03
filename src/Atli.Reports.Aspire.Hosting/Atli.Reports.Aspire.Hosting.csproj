@@ -16,6 +16,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The seccomp profile Chromium's sandbox needs in the server image, from deploy/seccomp; local runs
+      pass it to the container runtime (ReportsServerSeccompProfile.cs).
+    -->
+    <EmbeddedResource
+      Include="../../deploy/seccomp/chromium.json"
+      LogicalName="Atli.Reports.Aspire.Hosting.chromium-seccomp.json"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
     <!--
       Aspire.Hosting before 13.6 brings MessagePack 2.5.192 (through StreamJsonRpc), which has known

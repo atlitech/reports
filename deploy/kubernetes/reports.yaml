@@ -1,6 +1,29 @@
 # Private, self-hosted deployment for application-owned templates. This is not a hostile-HTML
 # sandbox. Before applying, create reports-auth from scripts/create-reports-api-key.sh's server.env,
 # select the namespace, and replace the image with a tested immutable image from your registry.
+#
+# Chromium runs with its own sandbox, which needs unprivileged user namespaces. The pod therefore
+# uses the seccomp profile deploy/seccomp/chromium.json (Docker's default plus those namespaces; see
+# deploy/seccomp/README.md) instead of RuntimeDefault, which denies them. Install the file on every
+# node that can run the pod, under the kubelet's seccomp root:
+#   /var/lib/kubelet/seccomp/atli-reports/chromium.json
+# for example with your node provisioning, or by copying it onto each node. Without it the kubelet
+# cannot create the container ("cannot load seccomp profile"); under RuntimeDefault the browser
+# cannot start and /health/details says why. The file is already resolved for containers without
+# capabilities, because containerd reads Localhost profiles as plain OCI seccomp and ignores
+# Docker's conditional rules. The profile lets every process in the pod, not only Chromium, create
+# user and network namespaces with capabilities inside them, which widens the kernel surface open
+# to a compromised server; deploy/seccomp/README.md ("What the profile allows") explains the trade.
+#
+# Ubuntu 23.10+ and 24.04 nodes also restrict unprivileged user namespaces through AppArmor
+# (kernel.apparmor_restrict_unprivileged_userns=1), for AppArmor-unconfined processes. Containers
+# under Docker's default AppArmor profile keep the sandbox there (verified in CI on Ubuntu 24.04
+# with Docker 28.0.4); pods under containerd's default profile on Ubuntu nodes were not tested. If
+# the browser fails closed on such a node, check its AppArmor profile first. Pods that run
+# AppArmor-unconfined need the sysctl set to 0 on the node; kind clusters are one case, because
+# containerd inside a kind node applies no AppArmor profile. Only for trusted HTML on nodes that
+# cannot allow user namespaces, use RuntimeDefault and set ReportsEngine__Browser__NoSandbox=true
+# instead.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,8 +50,10 @@ spec:
         runAsUser: 1654
         runAsGroup: 1654
         fsGroup: 1654
+        # deploy/seccomp/chromium.json, installed on the node (see above).
         seccompProfile:
-          type: RuntimeDefault
+          type: Localhost
+          localhostProfile: atli-reports/chromium.json
       containers:
         - name: reports
           image: atli-reports-server:security

@@ -49,6 +49,25 @@ internal static class AppModel
   }
 
   /// <summary>
+  /// The arguments the resource adds to the container runtime's <c>run</c> command when the app runs.
+  /// </summary>
+  internal static async Task<IReadOnlyList<string>> ContainerRuntimeArgumentsAsync(
+    IResource resource
+  )
+  {
+    List<object> arguments = [];
+    ContainerRuntimeArgsCallbackContext context = new(arguments, TestToken);
+    foreach (
+      var annotation in resource.Annotations.OfType<ContainerRuntimeArgsCallbackAnnotation>()
+    )
+    {
+      await annotation.Callback(context);
+    }
+
+    return [.. arguments.Select(argument => (string)argument)];
+  }
+
+  /// <summary>
   /// Gives an endpoint the address a running app would, so expressions over it resolve.
   /// </summary>
   internal static void Allocate(IResource resource, string endpointName, int port)

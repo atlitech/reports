@@ -3,8 +3,10 @@
 Atli Reports is a self-hosted conversion service for application-owned templates and controlled
 assets. The server authenticates calling applications, authorizes conversions, limits admitted
 work, and restricts document networking. These controls do not make the shared browser a sandbox
-for arbitrary hostile HTML. The shipped container still disables Chromium's sandbox for container
-compatibility. Run it without application secrets, cloud permissions, or access to sensitive services.
+for arbitrary hostile HTML. The shipped container runs Chromium with its own sandbox, which needs
+the seccomp profile in [`deploy/seccomp`](../deploy/seccomp/README.md); see
+[Chromium's sandbox](#chromiums-sandbox). Run it without application secrets, cloud permissions, or
+access to sensitive services.
 
 The customer application authorizes the end user's access to business records before generating
 HTML. Atli authorizes that application's conversion request. Bearer tokens, API keys, and tenant
@@ -22,6 +24,16 @@ Update monitoring to read the anonymous status-only probe endpoints. Detailed he
 now require a diagnostics credential. Clients should handle `401` and `403` without retrying,
 `429` with bounded backoff, and `422` with the `PolicyDenied` kind by correcting document policy.
 Readiness, scaling, and caller limits remain local to each replica.
+
+The server image now runs Chromium with its sandbox; earlier images set
+`ReportsEngine:Browser:NoSandbox=true`. Run the container with
+[`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md):
+`docker run --security-opt seccomp=deploy/seccomp/chromium.json`, Compose `security_opt`, or a
+Kubernetes `Localhost` profile. Without it the browser cannot start: `/health/ready` stays `503`,
+conversions fail with `BrowserUnavailable`, and `/health/details` and log event 301 say what to do.
+The server never falls back to running without the sandbox. Opt out explicitly with
+`ReportsEngine__Browser__NoSandbox=true` only for trusted HTML, or on a platform that cannot permit
+unprivileged user namespaces.
 
 ## Authentication
 
@@ -167,6 +179,76 @@ configuration, proxy credentials, tokens, or cloud identity variables. Host-cont
 Clearing environment variables does not revoke filesystem permissions or credentials accessible
 through the surrounding container's identity endpoint.
 
+## Chromium's sandbox
+
+Chromium runs its renderers, the processes that parse HTML and run JavaScript, in user and network
+namespaces apart from the browser's and each in a PID namespace of its own, confined to an empty
+directory, under Chromium's own seccomp-bpf filter. A V8 or Blink exploit then lands in a process with no file system, no network, and a narrow
+set of syscalls; to reach the server process, its DevTools connection, other conversions'
+documents, or the container, it needs a second bug that escapes the sandbox. Without the sandbox,
+one renderer bug runs code as the server's user in the container. The sandbox narrows the damage of
+a browser bug; it still does not make the shared browser a boundary between hostile tenants (see
+[Managed hosting boundary](#managed-hosting-boundary)).
+
+The engine runs the sandbox unless `Browser:NoSandbox` is set, and the server image no longer sets
+it. Creating the namespaces needs unprivileged user namespaces, which container runtimes deny by
+default: Docker's default seccomp profile and containerd's `RuntimeDefault` deny the `clone`,
+`unshare`, and `chroot` calls Chromium makes. [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md)
+is Docker's default profile, pinned to a moby/profiles commit, plus exactly those calls, restricted
+to user, PID, and network namespaces. Its README records the delta and how each part was found
+necessary.
+
+**What the profile opens.** Seccomp cannot limit the allowance to Chromium. Under the profile, every
+process in the container, the .NET server and Chromium's browser process included, can create a
+user namespace with new PID and network namespaces and hold every capability inside them,
+`CAP_NET_ADMIN` and `CAP_NET_RAW` included. That exposes netfilter (`nf_tables`), packet sockets,
+and other kernel code that Docker's default profile keeps away from a container without
+capabilities, and which has been a common route to privilege escalation from unprivileged user
+namespaces. The sandbox still makes this the better trade for HTML that is not fully trusted: a
+renderer, where an exploit is likeliest to land, is denied these calls by Chromium's own filter, so
+an exploit there needs a second bug that escapes the sandbox to reach that surface. What the profile
+widens is what a compromised server or browser process can reach. Keep `--cap-drop ALL`,
+`no-new-privileges`, the non-root user, and a host kernel with current security fixes.
+[What the profile allows](../deploy/seccomp/README.md#what-the-profile-allows) records the probe.
+
+| Where | How |
+| --- | --- |
+| Docker | `docker run --security-opt seccomp=deploy/seccomp/chromium.json ...` |
+| Docker Compose | `security_opt: ["seccomp=<path to deploy/seccomp/chromium.json>"]`, as in [`docker-compose.yml`](../src/Atli.Reports.Server/docker-compose.yml) |
+| Kubernetes | A `Localhost` profile installed on every node; see [the example](../deploy/kubernetes/reports.yaml) |
+| Aspire, local runs | `AddReportsServer` passes the profile to Docker or Podman |
+| Aspire deployment targets | Configure the profile on the target, or opt out explicitly; see [the Aspire guide](aspire.md#deploy) |
+| Azure Container Apps | No seccomp setting; [the template](../deploy/azure/reports.bicep) opts out explicitly. Whether its runtime permits user namespaces is unverified. |
+| gVisor | On arm64, Chromium's own seccomp filter crashed under gVisor in a probe of the worker image, and the browser then hung instead of exiting at startup, so the engine does not report it as a sandbox failure. The [experiment](isolated-workers.md) keeps the worker's browser unsandboxed inside the gVisor boundary. The server image under gVisor was not tested; on arm64, opt out there too. amd64 was not tested. |
+
+**AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces
+through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`), for processes AppArmor does not
+confine. Containers under Docker's default AppArmor profile are not affected: CI runs the smoke
+test on GitHub's `ubuntu-24.04` runners (amd64 and arm64) with the sysctl at `1` under Docker
+Engine 28.0.4, whose `docker-default` profile declares no AppArmor ABI, and Chromium's sandbox
+starts there. Docker Engine 29.4.3 and later declare ABI 3.0, which does not mediate user
+namespaces. Pods under containerd's default profile on Ubuntu nodes were not tested (see
+[Not verified](../deploy/seccomp/README.md#not-verified)). Containers that run AppArmor-unconfined
+(`--security-opt apparmor=unconfined`, privileged containers, pods in kind) are affected, as is
+Chromium run directly on such a host, outside a container: allow it user namespaces with an AppArmor
+profile, as [Chromium describes](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md),
+or set the sysctl to `0`.
+
+**When the sandbox cannot start, the server fails closed.** The browser exits at once, the engine
+retries the launch in the background, and nothing converts. `/health/ready` answers `503`.
+`/health/details` and the launch failure (log event 301, a `BrowserSandboxUnavailableException`)
+start with what to do, before Chromium's own output ("No usable sandbox!"): use the seccomp profile,
+check AppArmor, or opt out. Conversions fail with `BrowserUnavailable` and the same message.
+
+**Opting out.** `ReportsEngine__Browser__NoSandbox=true` runs Chromium with `--no-sandbox`. Use it
+only for trusted HTML, or on a platform that cannot permit unprivileged user namespaces, and keep the
+rest of this page's containment.
+
+**Cost.** In an exploratory comparison on 2026-10-02, with the isolated worker image (which ships the
+same chrome-headless-shell) on OrbStack, arm64, one CPU per container, and five interleaved rounds,
+a cold single-use conversion took about 30 ms longer with the sandbox (0.405 s against 0.376 s);
+warm conversions differed within noise in both directions.
+
 ## Admission and deadlines
 
 Authentication and authorization run before JSON body binding and conversion admission. Settings
@@ -204,13 +286,16 @@ For teams deploying the ordinary container without Aspire, checked-in examples a
 
 - [Kubernetes](../deploy/kubernetes/reports.yaml): two replicas, private ClusterIP service, explicit
   uppercase HTTP startup/readiness/liveness probes, disruption budget, read-only root, writable
-  bounded `/tmp`, non-root execution, no capabilities, no service-account token, and denied egress.
+  bounded `/tmp`, non-root execution, no capabilities, no service-account token, denied egress, and
+  the `Localhost` seccomp profile Chromium's sandbox needs, which you install on every node first.
   Label authorized calling pods `reports-client=true` in the same namespace and supply the API key.
   The cluster CNI must actually enforce NetworkPolicy. The optional [HPA](../deploy/kubernetes/hpa.yaml)
   requires metrics-server and representative load testing.
 - [Azure Container Apps](../deploy/azure/reports.bicep): an existing environment, internal ingress,
   API-key verifier secret, two minimum replicas, HTTP scaling, and explicit probes/deadlines. Image,
   environment, caller, and verifier are parameters. It provisions no broad managed identity.
+  Container Apps cannot apply a seccomp profile, so the template opts out of Chromium's sandbox
+  explicitly, which suits trusted HTML only.
   Add registry authentication and environment/network egress restrictions in your infrastructure;
   app-internal ingress is not itself an egress firewall.
 
@@ -219,8 +304,11 @@ digest. The root README records package/image release availability; examples do 
 a particular public tag has shipped. The 2 CPU / 4 GiB resource limits are starting configurations,
 not a throughput guarantee. Load-test actual reports and monitor queue wait, failures, CPU, and memory.
 
-For Kubernetes, generate credentials, then create `reports-auth` in your selected namespace from
-the server file. Remove diagnostics permission for an ordinary application key first:
+For Kubernetes, install the seccomp profile on every node that can run the pod, at
+`/var/lib/kubelet/seccomp/atli-reports/chromium.json` (the manifest's header explains why it is a
+`Localhost` profile and what it means for Ubuntu 23.10+ nodes). Generate credentials, then create
+`reports-auth` in your selected namespace from the server file. Remove diagnostics permission for an
+ordinary application key first:
 
 ```bash
 kubectl --namespace <namespace> create secret generic reports-auth \
@@ -282,10 +370,15 @@ checks, forged identity claims, admission/cancellation/deadlines, client credent
 network policy/address validation, asset limits and redirects, browser environment reduction, and
 real Chromium network sentinels. `.github/scripts/smoke-test-server-image.sh` checks the actual
 NativeAOT image with authentication, a read-only filesystem, minimal capabilities, anonymous
-probe privacy, and a browser environment canary. `smoke-test-server-jwt.py` validates real HTTPS
+probe privacy, and a browser environment canary. Under `deploy/seccomp/chromium.json` it checks that
+no browser process runs with `--no-sandbox` and that renderers run outside the browser's user namespace;
+under Docker's default profile, that the server fails closed with the remedy in its health details
+and log. `chromium-seccomp-profile.py check` verifies the profile against its pinned upstream.
+`smoke-test-server-jwt.py` validates real HTTPS
 discovery, RSA signatures, token lifetime, audience/issuer, and permissions in the NativeAOT image.
 `validate-kubernetes-security.sh` creates and removes a disposable kind cluster to exercise
-authenticated conversions, probes, blocked external assets, and rolling restarts. The default
+authenticated conversions, Chromium's sandbox under the `Localhost` profile, probes, blocked
+external assets, and rolling restarts. The default
 kind CNI does not establish NetworkPolicy enforcement, and the HPA is validated as a resource
 without a load/scaling test. These checks do not prove hostile-browser containment or validate a
 customer's cloud network policy. The Azure template is compile-validated; it has not been deployed

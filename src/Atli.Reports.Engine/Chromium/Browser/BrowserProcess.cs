@@ -259,15 +259,32 @@ internal sealed class BrowserProcess : IAsyncDisposable
     }
     catch (TimeoutException) { }
 
+    var detail = string.Create(
+      CultureInfo.InvariantCulture,
+      $"The browser exited with code {exitCode} before it reported its DevTools endpoint.{DescribeOutput()}"
+    );
+    bool sandboxFailed;
+    lock (_outputTailLock)
+    {
+      sandboxFailed = _outputTail.Any(IsSandboxFailure);
+    }
+
     _endpoint.TrySetException(
-      new BrowserUnavailableException(
-        string.Create(
-          CultureInfo.InvariantCulture,
-          $"The browser exited with code {exitCode} before it reported its DevTools endpoint.{DescribeOutput()}"
-        )
-      )
+      sandboxFailed
+        ? new BrowserSandboxUnavailableException(detail)
+        : new BrowserUnavailableException(detail)
     );
   }
+
+  /// <summary>
+  /// Whether a line of the browser's output is Chromium reporting that it could not create its
+  /// sandbox: neither its namespace sandbox nor its setuid sandbox is usable (seccomp, AppArmor, or
+  /// the kernel denies the user namespaces), or the namespace sandbox could not confine its
+  /// processes to an empty directory (chroot denied).
+  /// </summary>
+  internal static bool IsSandboxFailure(string line) =>
+    line.Contains("No usable sandbox!", StringComparison.Ordinal)
+    || line.Contains("sys_chroot(\"/proc/self/fdinfo/\")", StringComparison.Ordinal);
 
   private async Task PumpAsync(StreamReader reader, bool isError)
   {

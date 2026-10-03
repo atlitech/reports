@@ -89,6 +89,36 @@ public class AddReportsServerTests
   }
 
   [Test]
+  public async Task Runs_the_container_with_the_seccomp_profile_Chromiums_sandbox_needs()
+  {
+    var server = AppModel.CreateBuilder().AddReportsServer("reports-server");
+
+    var arguments = await AppModel.ContainerRuntimeArgumentsAsync(server.Resource);
+
+    await Assert.That(arguments.Count).IsEqualTo(2);
+    await Assert.That(arguments[0]).IsEqualTo("--security-opt");
+    await Assert.That(arguments[1]).StartsWith("seccomp=");
+    var path = arguments[1]["seccomp=".Length..];
+    await Assert.That(Path.IsPathRooted(path)).IsTrue();
+    var passed = await File.ReadAllBytesAsync(path);
+    var repository = await RepositoryProfileAsync();
+    await Assert.That(passed.SequenceEqual(repository)).IsTrue();
+  }
+
+  [Test]
+  public async Task Each_start_passes_the_same_profile_file()
+  {
+    var server = AppModel.CreateBuilder().AddReportsServer("reports-server");
+
+    var first = await AppModel.ContainerRuntimeArgumentsAsync(server.Resource);
+    var second = await AppModel.ContainerRuntimeArgumentsAsync(server.Resource);
+
+    // Named by its content, so a later package's profile gets a file of its own.
+    await Assert.That(second).IsEquivalentTo(first);
+    await Assert.That(Path.GetFileName(first[1])).Matches("^chromium-seccomp-[0-9a-f]{16}\\.json$");
+  }
+
+  [Test]
   public async Task Links_the_openapi_document_in_the_dashboard()
   {
     var server = AppModel.CreateBuilder().AddReportsServer("reports-server");
@@ -186,4 +216,10 @@ public class AddReportsServerTests
       },
       ServiceProvider = services,
     };
+
+  /// <summary>
+  /// The repository's deploy/seccomp/chromium.json, which the package must embed unchanged.
+  /// </summary>
+  private static Task<byte[]> RepositoryProfileAsync() =>
+    File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "seccomp", "chromium.json"));
 }

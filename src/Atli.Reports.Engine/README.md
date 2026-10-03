@@ -117,8 +117,12 @@ The engine finds Chrome, Chromium, or Edge in the standard install locations, or
 `Browser:ExecutablePath`. For throughput, use
 [`chrome-headless-shell`](https://googlechromelabs.github.io/chrome-for-testing/). With the full
 desktop browser, creating a browser context per conversion caps throughput at about 7
-conversions a second. In Linux containers, set `Browser:NoSandbox` (trusted HTML only) and
-`Browser:DisableDevShmUsage`.
+conversions a second. In Linux containers, set `Browser:DisableDevShmUsage`, and give Chromium's
+sandbox the user namespaces it needs with the seccomp profile
+[`deploy/seccomp/chromium.json`](https://github.com/atlitech/reports/blob/main/deploy/seccomp/README.md);
+set `Browser:NoSandbox` only for trusted HTML where that is not possible. A browser that cannot
+create its sandbox fails to launch with an error that says so; see
+[Chromium's sandbox](https://github.com/atlitech/reports/blob/main/docs/security.md#chromiums-sandbox).
 
 ## Learn more
 

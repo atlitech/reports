@@ -51,6 +51,12 @@ resource reports 'Microsoft.App/containerApps@2025-07-01' = {
             { name: 'ReportsEngine__Concurrency__MaxConcurrentConversions', value: '2' }
             { name: 'ReportsEngine__Concurrency__MaxQueueLength', value: '8' }
             { name: 'ReportsEngine__Browser__ShutdownTimeout', value: '00:01:10' }
+            // Explicit opt-out of Chromium's sandbox, which suits trusted HTML only. Container Apps
+            // cannot apply a seccomp profile (deploy/seccomp/chromium.json), and whether its runtime
+            // allows the unprivileged user namespaces the sandbox needs has not been verified. To
+            // try the sandbox, remove this line: if the browser cannot create it, /health/ready
+            // stays 503 and /health/details says why.
+            { name: 'ReportsEngine__Browser__NoSandbox', value: 'true' }
           ]
           probes: [
             {

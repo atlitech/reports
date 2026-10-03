@@ -62,7 +62,21 @@ an explicit choice for trusted development or a separately enforced authenticati
 - sends the server's logs, metrics, and traces to the dashboard over OTLP;
 - links the server's OpenAPI document, `/openapi/v1.json`, which requires `reports.diagnostics`;
 - adds a `Convert a test page` dashboard command, which converts a one-page document and logs the
-  PDF's size and the time it took.
+  PDF's size and the time it took;
+- runs the container with the seccomp profile Chromium's sandbox needs (Docker's default plus user
+  namespaces; see
+  [deploy/seccomp](https://github.com/atlitech/reports/blob/main/deploy/seccomp/README.md)). The
+  package carries the profile and passes it to Docker or Podman as `--security-opt seccomp=<file>`,
+  from a copy in your local application data directory. Deployment targets do not get it; see
+  [Deploy](https://github.com/atlitech/reports/blob/main/docs/aspire.md#deploy) for Docker Compose,
+  Kubernetes, and the explicit opt-out Azure Container Apps needs.
+
+Server images newer than 0.25.1 run Chromium with its sandbox; 0.25.1 and earlier did not. Where
+the runtime cannot apply the profile, the server stays unready and its health details say why; the
+package never turns the sandbox off. `.WithEnvironment("ReportsEngine__Browser__NoSandbox", "true")`
+opts out explicitly, for trusted HTML only, in local runs and on every deployment target;
+[Deploy](https://github.com/atlitech/reports/blob/main/docs/aspire.md#deploy) shows how to opt out
+on Azure Container Apps alone.
 
 `WithReference` passes the connection string `Endpoint=<url>;ApiKey=<credential>` when API-key
 authentication is configured (otherwise only `Endpoint=<url>`) as `ConnectionStrings__reports`, and

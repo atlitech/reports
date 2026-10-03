@@ -32,6 +32,10 @@ services:
       dockerfile: src/Atli.Reports.Server/Dockerfile
     ports:
       - "127.0.0.1:${ATLI_PORT:-18080}:8080"
+    # Chromium's sandbox needs this profile: Docker's default plus user namespaces
+    # (deploy/seccomp/README.md). Without it the browser cannot start.
+    security_opt:
+      - seccomp=../../deploy/seccomp/chromium.json
     # Optional, git-ignored: put ReportsEngine__* tuning here instead of editing this file. The
     # results record every ReportsEngine__* variable the container ran with.
     env_file:
@@ -44,9 +48,10 @@ services:
       ReportsServer__Authentication__Mode: None
       ReportsServer__Limits__MaxConcurrentRequestsPerCaller: "128"
       # Engine knobs bind from ReportsEngine__* (see src/Atli.Reports.Server/appsettings.json, which
-      # already sets WarmUpOnStartup, Headless, NoSandbox, DisableDevShmUsage, a 30 s CommandTimeout,
-      # a 60 s ConversionTimeout, and a queue of 100 with a 30 s QueueTimeout; the Dockerfile sets
-      # the chrome-headless-shell ExecutablePath). None are changed for the benchmark. Examples:
+      # already sets WarmUpOnStartup, Headless, DisableDevShmUsage, a 30 s CommandTimeout, a 60 s
+      # ConversionTimeout, and a queue of 100 with a 30 s QueueTimeout; the Dockerfile sets the
+      # chrome-headless-shell ExecutablePath). Chromium's sandbox stays on. None are changed for the
+      # benchmark. Examples:
       # ReportsEngine__Browser__CommandTimeout: "00:00:30"
       # ReportsEngine__Browser__ExtraArguments__0: "--disable-pdf-tagging"
 
