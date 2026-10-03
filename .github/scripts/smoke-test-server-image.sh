@@ -3,10 +3,11 @@
 # deploy/seccomp/chromium.json, waits for /health/ready, converts a small HTML document and checks
 # that the response is a PDF, checks that the OpenAPI document is served, checks that tini is PID 1
 # and that no process in the container runs as root, checks that Chromium runs with its sandbox (no
-# --no-sandbox, renderers outside the browser's user namespace), then stops the container and checks
-# that the server shut down cleanly. Last, it starts the image under Docker's default seccomp profile
-# and checks that it fails closed: not ready, with the remedy in its health details and its log. The
-# containers' logs are printed when any check fails.
+# --no-sandbox, renderers outside the browser's user namespace) and probes the profile from inside
+# the container (seccomp-probe.pl), then stops the container and checks that the server shut down
+# cleanly. Last, it starts the image under Docker's default seccomp profile and checks that it fails
+# closed: not ready, with the remedy in its health details and its log, and that the probe sees
+# Docker's default profile there. The containers' logs are printed when any check fails.
 #
 # Used by .github/workflows/server-image.yml (every image change) and server-image-publish.yml (each
 # architecture's pushed image, before any tag points at it, for a release or a Chrome refresh). Run
@@ -28,6 +29,7 @@ image="$1"
 ready_timeout_seconds="${READY_TIMEOUT_SECONDS:-90}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 seccomp_profile="${SECCOMP_PROFILE:-$repo/deploy/seccomp/chromium.json}"
+probe="$repo/.github/scripts/seccomp-probe.pl"
 container="reports-server-smoke-$$-$RANDOM"
 unprofiled_container="$container-default-seccomp"
 holder_pid=""
@@ -281,6 +283,13 @@ wait "$holder_pid" 2>/dev/null || true
 holder_pid=""
 echo "Chromium runs with its sandbox: no --no-sandbox, and renderers outside the browser's user namespace"
 
+# The profile from inside the container, with the raw syscalls Chromium's sandbox makes: user, PID
+# and network namespaces allowed, every other namespace type denied, and clone3 answered with ENOSYS
+# (seccomp cannot filter its flags; see deploy/seccomp/README.md).
+echo "Seccomp probe under $(basename "$seccomp_profile"):"
+docker exec -i "$container" perl - chromium < "$probe" ||
+  fail "The container's seccomp profile does not allow exactly the namespaces Chromium's sandbox needs."
+
 # tini forwards SIGTERM to the server, which drains and closes the browser; a clean shutdown exits 0.
 docker stop --time 30 "$container" >/dev/null
 exit_code="$(docker container inspect --format '{{.State.ExitCode}}' "$container")"
@@ -313,6 +322,10 @@ if inspect_browser "$unprofiled_container" | grep -q ' yes$'; then
   fail "Without the seccomp profile, a browser runs with --no-sandbox."
 fi
 echo "Without the seccomp profile the server fails closed: /health/ready 503, the remedy in /health/details and the log"
+# The probe's control: under Docker's default profile it sees every namespace denied.
+echo "Seccomp probe under Docker's default profile:"
+docker exec -i "$unprofiled_container" perl - default < "$probe" ||
+  fail "Docker's default seccomp profile did not deny what the probe expects; the probe is unreliable."
 docker rm --force "$unprofiled_container" >/dev/null
 
 echo "Smoke test passed: $image"

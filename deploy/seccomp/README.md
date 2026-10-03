@@ -84,6 +84,22 @@ Nothing else changes. Inside the new user namespace the process holds capabiliti
 argument filters matter: mount, cgroup, UTS, and IPC namespaces stay denied there too, which keeps
 `mount` and its relatives out of reach.
 
+### Why `clone3` must stay `ENOSYS`
+
+The narrowing works only because seccomp can read `clone`'s and `unshare`'s flags: they are passed
+in a register. `clone3` takes its flags in a `struct clone_args` in the caller's memory, which a
+seccomp filter cannot read, so a profile can only allow or deny `clone3` as a whole. Allowing it
+would allow every namespace type, mount namespaces included, to every process in the container.
+The profile keeps Docker's answer, `ENOSYS` ("no such syscall"): glibc (2.34 and later) and
+Chromium then fall back to `clone`, whose flags the profile filters. `EPERM` would not do; glibc
+treats it as a failure instead of falling back.
+
+If a Chromium or glibc update ever stops falling back, the sandbox fails closed and the smoke test
+fails. Do not fix that by allowing `clone3`: confine user namespaces another way (an LSM policy)
+or isolate at the infrastructure layer. `chromium-seccomp-profile.py` refuses to generate a profile
+that allows `clone3`, answers it with anything but `ENOSYS`, allows `clone` or `unshare` without
+filtering their flags, or allows `setns`, `mount` and its relatives, `pivot_root`, or `bpf`.
+
 ### What the profile allows
 
 Seccomp filters every process in the container, so the allowance is not Chromium's alone. Any
@@ -110,6 +126,12 @@ profile widens is what a compromise of the server or of the browser process can 
 of the baseline: `--cap-drop ALL`, `no-new-privileges`, a non-root user, and a host kernel with
 current security fixes.
 
+On Kubernetes, run the pod in a user namespace of its own (`hostUsers: false`, as the
+[Kubernetes example](../kubernetes/reports.yaml) does). The capabilities a process holds in the
+namespaces it creates then belong to the pod's unprivileged range of host user IDs rather than to
+the node's own, which narrows what they are worth to an attacker. The kernel code they reach stays
+exposed, so this narrows the trade without removing it.
+
 ## How the allowance was established
 
 On 2026-10-02, with chrome-headless-shell 154.0.8037.92 in this image, on Docker 29.4.0 (OrbStack,
@@ -135,6 +157,16 @@ Linux 7.0.14, arm64), each container started with `--cap-drop ALL`, `--read-only
 The same profile passed [the Kubernetes validation](../../.github/scripts/validate-kubernetes-security.sh)
 in kind as a `Localhost` profile. CI runs the server image's smoke test, which checks the sandbox,
 on `amd64` and `arm64` GitHub runners.
+
+[`seccomp-probe.pl`](../../.github/scripts/seccomp-probe.pl) now repeats these probes on every run,
+with raw syscalls from inside the server image: `clone3` answers `ENOSYS`; `clone` with user, PID,
+and network namespaces, `unshare` of a user namespace, and `chroot` inside it are allowed; every
+other namespace combination is denied with `EPERM`. Without seccomp the kernel allows those
+combinations to an unprivileged process, so each `EPERM` comes from the profile. The smoke test runs
+it under `chromium.json` and, as a control, under Docker's default profile; the Kubernetes
+validation runs it in each pod. On 2026-10-03 the Kubernetes validation passed with kind v0.33.0
+(Kubernetes 1.36.4) and `hostUsers: false`: Chromium's sandbox nested inside the pod's user
+namespace, and the probe matched its results under Docker.
 
 ## Not verified
 

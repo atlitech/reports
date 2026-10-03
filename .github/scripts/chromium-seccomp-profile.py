@@ -11,6 +11,9 @@ way Docker resolves it for this container, plus three rules for Chromium's names
      4.8 or later: rules that need a capability are dropped, rules for other architectures are
      dropped, and archMap becomes the plain architectures list of amd64 and arm64.
   3. Append CHROMIUM_RULES.
+  4. Check the invariants the sandbox's narrowing depends on (check_invariants): clone3 answered
+     with ENOSYS, clone and unshare allowed only with their flags filtered, and no allowance for
+     setns, mount and its relatives, pivot_root or bpf.
 
 Resolving the conditions makes one file that Docker, Podman, containerd and CRI-O all read the same
 way. containerd (Kubernetes Localhost profiles) decodes a profile as the OCI runtime-spec's
@@ -108,6 +111,55 @@ CHROMIUM_RULES = [
 ]
 
 
+ENOSYS = 38
+
+# Syscalls that create, enter or change namespaces and mounts, which no rule may allow outright.
+# clone and unshare are allowed only with their flags filtered. clone3 must be answered with
+# ENOSYS: seccomp cannot read its flags (they live in a struct, not a register), so allowing it would
+# allow every namespace type, and ENOSYS (unlike EPERM) makes glibc and Chromium fall back to clone.
+FILTERED_SYSCALLS = {"clone", "unshare"}
+DENIED_SYSCALLS = {
+    "bpf",
+    "fsconfig",
+    "fsmount",
+    "fsopen",
+    "fspick",
+    "mount",
+    "mount_setattr",
+    "move_mount",
+    "open_tree",
+    "pivot_root",
+    "setns",
+    "umount",
+    "umount2",
+}
+
+
+def check_invariants(profile):
+    """Fails when the generated profile breaks a rule the sandbox's narrowing depends on."""
+    clone3_rules = 0
+    for rule in profile["syscalls"]:
+        names = set(rule["names"])
+        allows = rule["action"] != "SCMP_ACT_ERRNO"
+        if "clone3" in names:
+            clone3_rules += 1
+            if allows or rule.get("errnoRet") != ENOSYS:
+                fail(
+                    f"A rule answers clone3 with {rule['action']} (errno {rule.get('errnoRet')}); it "
+                    "must stay SCMP_ACT_ERRNO with ENOSYS, because seccomp cannot filter clone3's "
+                    "flags (deploy/seccomp/README.md)."
+                )
+        if allows and names & FILTERED_SYSCALLS and not rule.get("args"):
+            fail(f"A rule allows {sorted(names & FILTERED_SYSCALLS)} without filtering its flags.")
+        if allows and names & DENIED_SYSCALLS:
+            fail(f"A rule allows {sorted(names & DENIED_SYSCALLS)}, which the profile must deny.")
+    if clone3_rules == 0:
+        fail(
+            "No rule answers clone3 with ENOSYS; the default action (EPERM) would stop glibc and "
+            "Chromium from falling back to clone."
+        )
+
+
 def fail(message):
     print(f"::error::{message}", file=sys.stderr)
     sys.exit(1)
@@ -179,6 +231,7 @@ def generate():
         "architectures": architectures,
         "syscalls": syscalls + CHROMIUM_RULES,
     }
+    check_invariants(profile)
     return json.dumps(profile, indent=2) + "\n"
 
 

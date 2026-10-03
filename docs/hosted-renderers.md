@@ -41,8 +41,9 @@ renderer platform must therefore permit the sandbox:
 - **Seccomp.** The container needs [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md):
   Docker's default profile plus `clone`, `unshare`, and `chroot`, restricted to user, PID, and
   network namespaces. Docker's default profile and containerd's `RuntimeDefault` deny those calls.
-  On Kubernetes, install it as a `Localhost` profile on every renderer node, as the
-  [Kubernetes example](../deploy/kubernetes/reports.yaml) does.
+  On Kubernetes, install it as a `Localhost` profile on every renderer node, and run renderer pods
+  with `hostUsers: false`, as the [Kubernetes example](../deploy/kubernetes/reports.yaml) does.
+  Renderer nodes are a pool of their own, so the profile can ship in the node image.
 - **AppArmor.** Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor.
   Containers under Docker's default AppArmor profile keep Chromium's sandbox there: the
   server-image smoke test passes on GitHub's `ubuntu-24.04` runners with the restriction on, under

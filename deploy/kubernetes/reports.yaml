@@ -15,6 +15,17 @@
 # user and network namespaces with capabilities inside them, which widens the kernel surface open
 # to a compromised server; deploy/seccomp/README.md ("What the profile allows") explains the trade.
 #
+# The pod also runs in a user namespace of its own (hostUsers: false): its user IDs map to an
+# unprivileged range on the node, not to the node's own. The capabilities the profile lets a process
+# hold in the namespaces it creates then belong to that range, which narrows what a compromised
+# server or browser process could do with them; kernel code they reach stays exposed. Chromium nests
+# its sandbox's namespaces inside the pod's. This needs Kubernetes 1.33 or later (on by default;
+# GA in 1.36), containerd 2.0+ or CRI-O 1.25+, and Linux 6.3+ on the node for the idmapped mounts
+# volumes need. A node that cannot run it fails to start the pod (validated only in kind); remove
+# the line on such clusters. Where the UserNamespacesSupport feature is off (before 1.33, unless
+# enabled), the API server drops the field and the pod runs with the node's users, so check that
+# `kubectl get pod -o jsonpath='{.spec.hostUsers}'` prints false.
+#
 # Ubuntu 23.10+ and 24.04 nodes also restrict unprivileged user namespaces through AppArmor
 # (kernel.apparmor_restrict_unprivileged_userns=1), for AppArmor-unconfined processes. Containers
 # under Docker's default AppArmor profile keep the sandbox there (verified in CI on Ubuntu 24.04
@@ -45,6 +56,8 @@ spec:
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 90
+      # The pod runs in a user namespace of its own (see above).
+      hostUsers: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1654

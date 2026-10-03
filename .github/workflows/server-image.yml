@@ -5,9 +5,11 @@ name: Server image
 # and smoke-tests each build with .github/scripts/smoke-test-server-image.sh: under the seccomp
 # profile deploy/seccomp/chromium.json the server becomes ready, converts a small document to a PDF,
 # runs as a non-root user under tini with Chromium's sandbox, and shuts down cleanly; under Docker's
-# default profile it fails closed. It also checks that the profile is still Docker's default at its
-# pinned moby/profiles commit plus Chromium's rules. Nothing is pushed; release.yml publishes the
-# image.
+# default profile it fails closed. Under both, .github/scripts/seccomp-probe.pl checks the profile's
+# syscall results from inside the container. The Kubernetes validation runs the pods with
+# hostUsers: false and the same probe. It also checks that the profile is still Docker's default at
+# its pinned moby/profiles commit plus Chromium's rules. Nothing is pushed; release.yml publishes
+# the image.
 #
 # This is not a required check: it only runs when something that goes into the image changes.
 
@@ -22,6 +24,7 @@ on:
       - "global.json"
       - ".github/workflows/server-image.yml"
       - ".github/scripts/smoke-test-server-image.sh"
+      - ".github/scripts/seccomp-probe.pl"
       - ".github/scripts/smoke-test-server-jwt.py"
       - ".github/scripts/validate-kubernetes-security.sh"
       - "scripts/create-reports-api-key.sh"
@@ -39,6 +42,7 @@ on:
       - "global.json"
       - ".github/workflows/server-image.yml"
       - ".github/scripts/smoke-test-server-image.sh"
+      - ".github/scripts/seccomp-probe.pl"
       - ".github/scripts/smoke-test-server-jwt.py"
       - ".github/scripts/validate-kubernetes-security.sh"
       - "scripts/create-reports-api-key.sh"
@@ -125,10 +129,10 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           curl --fail --silent --show-error --location \
-            https://github.com/kubernetes-sigs/kind/releases/download/v0.31.0/kind-linux-amd64 \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 \
             --output "$RUNNER_TEMP/kind-linux-amd64"
           printf '%s  %s\n' \
-            eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa \
+            aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d \
             "$RUNNER_TEMP/kind-linux-amd64" | sha256sum --check
           chmod 700 "$RUNNER_TEMP/kind-linux-amd64"
           KIND_BIN="$RUNNER_TEMP/kind-linux-amd64" \
