@@ -68,6 +68,11 @@ cluster_owned=true
 for node in $("$kind_bin" get nodes --name "$cluster"); do
   docker exec "$node" mkdir -p /var/lib/kubelet/seccomp/atli-reports
   docker cp "$seccomp_profile" "$node:/var/lib/kubelet/seccomp/atli-reports/chromium.json"
+  # On a host with DMI (GitHub's runners), kind binds fake product_name and product_uuid files over
+  # the node's sysfs. The kernel then refuses runc's fresh sysfs mount in a hostUsers: false pod
+  # ("error mounting "sysfs" ... operation not permitted"), because no sysfs mount in the node is
+  # fully visible. A second, unobstructed one is (kubernetes-sigs/kind#3436).
+  docker exec "$node" sh -c 'mkdir -p /mnt/sysfs && mount -t sysfs sysfs /mnt/sysfs'
 done
 kube create namespace reports-validation
 
