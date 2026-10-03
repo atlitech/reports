@@ -113,7 +113,7 @@ Compare four cases with identical reports, PDF settings, and resource budgets:
 
 | Case | What it measures |
 | --- | --- |
-| Warm integrated engine | The server image as it ships, with fresh browser contexts and Chromium's sandbox under [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md) |
+| Warm integrated engine | The server image as it ships, with fresh browser contexts and Chromium's sandbox under [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md). Runs recorded before the image enabled the sandbox, such as the [ARM64 run](../benchmarks/results/2026-10-02-5c500701-isolated-workers-arm64.md), ran it with `--no-sandbox` |
 | Disposable sandboxed worker | Runtime, process, browser startup, and rendering per job |
 | Sequential warm sandboxed worker | Rendering with browser reuse inside one explicit trust domain |
 | Sequential warm ordinary Docker worker | Same private transport and image, to compare runtime overhead |
@@ -175,10 +175,6 @@ report was 1.57 seconds in the integrated engine, 16.63 seconds in a disposable 
 11.36 seconds in a warm gVisor worker, and 3.04 seconds in the equivalent warm runc control.
 The warm gVisor worker consumed 66.14 CPU seconds across 24 reports including warmups, compared
 with 18.03 seconds for the runc control; those observations exclude final teardown and the gateway.
-That run predates Chromium's sandbox in the server image: its integrated engine ran the browser
-with `--no-sandbox`, as the workers still do inside gVisor. The harness now runs the integrated
-engine with the sandbox and its seccomp profile, as the image ships
-([Chromium's sandbox](security.md#chromiums-sandbox) records its exploratory cost).
 
 These results favor retaining the integrated default and treating runtime selection as an open
 performance decision. Browser reuse reduces startup cost, but it does not eliminate the observed

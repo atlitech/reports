@@ -158,5 +158,7 @@ on `amd64` and `arm64` GitHub runners.
   privileged containers, pods in kind) are affected.
 - Podman, CRI-O, and Kubernetes nodes other than kind were not tested.
 - Under gVisor, Chromium's own seccomp-bpf filter crashes on arm64 (`seccomp-bpf failure in syscall
-  nr=0x7b`), so the [isolated worker experiment](../../docs/isolated-workers.md) keeps its browser
-  unsandboxed inside the gVisor boundary.
+  nr=0x7b`) and the browser then hangs, so the
+  [isolated worker experiment](../../docs/isolated-workers.md) keeps its browser unsandboxed inside
+  the gVisor boundary. That was seen with the worker image; the server image under gVisor, and
+  gVisor on amd64, were not tested.
