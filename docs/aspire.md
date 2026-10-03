@@ -314,15 +314,23 @@ services:
   });
 
   // Azure Container Apps cannot apply a seccomp profile: opt out explicitly, for trusted HTML only.
-  if (builder.ExecutionContext.IsPublishMode)
-  {
-    reports.WithEnvironment("ReportsEngine__Browser__NoSandbox", "true");
-  }
+  // Needs `using Azure.Provisioning.AppContainers;`. Only the Container App gets the setting.
+  reports.PublishAsAzureContainerApp((_, app) =>
+    app.Template.Containers.Single().Value!.Env.Add(new ContainerAppEnvironmentVariable
+    {
+      Name = "ReportsEngine__Browser__NoSandbox",
+      Value = "true",
+    }));
   ```
 
-  These compile against Aspire 13.6. The Docker Compose snippet was checked to publish the
-  `security_opt` line; the Kubernetes and Container Apps deployments were not run. Whether Container
-  Apps permits user namespaces without the opt-out is unverified.
+  Use the one for the AppHost's target; Aspire 13.6 refuses to publish the Docker Compose or
+  Container Apps customization without that target's environment in the AppHost. These compile
+  against Aspire 13.6, and `aspire publish` was checked to write each setting: the `security_opt`
+  line, the pod's `seccompProfile`, and the Container App's environment variable. In an AppHost with
+  both a Container Apps and a Docker Compose environment that publishes `reports` to Docker Compose,
+  the Compose service does not get the opt-out; `WithEnvironment` would set it for every target and
+  for local runs. The Kubernetes and Container Apps deployments were not run. Whether Container Apps
+  permits user namespaces without the opt-out is unverified.
 - **Telemetry** goes wherever the target sends OTLP; the Docker Compose environment adds an Aspire
   dashboard for it.
 - **Health in production.** Aspire's health check only drives the local dashboard and `WaitFor`; in

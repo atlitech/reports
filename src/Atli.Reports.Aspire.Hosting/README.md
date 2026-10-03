@@ -74,7 +74,9 @@ an explicit choice for trusted development or a separately enforced authenticati
 Server images newer than 0.25.1 run Chromium with its sandbox; 0.25.1 and earlier did not. Where
 the runtime cannot apply the profile, the server stays unready and its health details say why; the
 package never turns the sandbox off. `.WithEnvironment("ReportsEngine__Browser__NoSandbox", "true")`
-opts out explicitly, for trusted HTML only.
+opts out explicitly, for trusted HTML only, in local runs and on every deployment target;
+[Deploy](https://github.com/atlitech/reports/blob/main/docs/aspire.md#deploy) shows how to opt out
+on Azure Container Apps alone.
 
 `WithReference` passes the connection string `Endpoint=<url>;ApiKey=<credential>` when API-key
 authentication is configured (otherwise only `Endpoint=<url>`) as `ConnectionStrings__reports`, and
