@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Atli.Reports.Engine.Chromium;
 using Atli.Reports.Engine.Chromium.Browser;
 using Atli.Reports.Engine.Chromium.Discovery;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -9,7 +10,8 @@ namespace Atli.Reports.Engine.Health;
 
 /// <summary>
 /// Reports whether the engine can launch its browser. Unhealthy while the engine shuts down, and
-/// while the most recent launch has failed (with the reason, until a launch succeeds). Otherwise
+/// while the most recent launch has failed (with the reason, until a launch succeeds, and with what
+/// to do about it when Chromium could not create its sandbox). Otherwise
 /// healthy while a browser runs; when none runs (before the first launch, or after an idle close,
 /// a recycle, or a crash), healthy as long as the executable the next launch would start exists.
 /// </summary>
@@ -45,11 +47,15 @@ internal sealed partial class BrowserHealthCheck(
     if (status.LaunchFailure is { } failure)
     {
       var retrying = status.Retrying ? "; retrying in the background" : string.Empty;
+      // The remedy is the engine's own text, so it is neither masked nor shortened.
+      var remedy = status.SandboxUnavailable
+        ? BrowserSandboxUnavailableException.Remedy + " "
+        : string.Empty;
       return Unhealthy(
         context,
         string.Create(
           CultureInfo.InvariantCulture,
-          $"The browser failed to start ({status.FailedLaunches} failed launch(es) in a row){retrying}. {SanitizeReason(failure)}"
+          $"The browser failed to start ({status.FailedLaunches} failed launch(es) in a row){retrying}. {remedy}{SanitizeReason(failure)}"
         )
       );
     }

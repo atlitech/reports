@@ -119,8 +119,11 @@ ENV ReportsEngine__Browser__ExecutablePath=/opt/chrome-headless-shell/chrome-hea
 WORKDIR /app
 COPY --from=build /app .
 # The non-root user the .NET images provide, app (UID 1654), by number so that Kubernetes'
-# runAsNonRoot can verify it. The browser runs without its sandbox
-# (ReportsEngine:Browser:NoSandbox in appsettings.json), which only suits trusted HTML.
+# runAsNonRoot can verify it. The browser runs with Chromium's own sandbox, which needs user
+# namespaces that Docker's default seccomp profile denies: run the container with
+# deploy/seccomp/chromium.json (docker run --security-opt seccomp=deploy/seccomp/chromium.json ...).
+# Without it the browser cannot start and readiness reports why. Only for trusted HTML on a
+# platform that cannot allow user namespaces, opt out with ReportsEngine__Browser__NoSandbox=true.
 USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--", "./Atli.Reports.Server"]

@@ -7,6 +7,8 @@ issuer serves only discovery metadata and public signing keys on an ephemeral ho
 container trusts its temporary CA through SSL_CERT_FILE. Production HTTPS/issuer/signature
 validation remains enabled. Signing keys stay in a private temporary directory; tokens stay
 in memory, never in command arguments or logs. All fixture resources are removed on exit.
+The container runs with the seccomp profile deploy/seccomp/chromium.json (or SECCOMP_PROFILE), which
+Chromium's sandbox needs.
 """
 
 import argparse
@@ -26,6 +28,11 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+SECCOMP_PROFILE = pathlib.Path(
+    os.environ.get("SECCOMP_PROFILE")
+    or pathlib.Path(__file__).resolve().parents[2] / "deploy" / "seccomp" / "chromium.json"
+)
 
 
 def run(*arguments, data=None, timeout=30):
@@ -213,7 +220,8 @@ def main():
                                 "--publish", "127.0.0.1::8080", "--env-file", str(settings),
                                 "--mount", f"type=bind,source={ca_cert},target=/test-ca.pem,readonly",
                                 "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
-                                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true"]
+                                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                                "--security-opt", f"seccomp={SECCOMP_PROFILE}"]
             if sys.platform.startswith("linux"):
                 docker_arguments += ["--add-host", "host.docker.internal:host-gateway"]
             requested_container = True

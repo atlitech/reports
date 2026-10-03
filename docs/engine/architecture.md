@@ -77,7 +77,11 @@ from the browser's standard error (`DevTools listening on ws://…`) instead of 
 a chatty browser never blocks on a full pipe. Arguments go through `ProcessStartInfo.ArgumentList`,
 so paths with spaces need no quoting. If the browser exits before it reports its endpoint, the error
 includes its last lines of output (for example "Running as root without --no-sandbox is not
-supported").
+supported"). When that output shows that Chromium could not create its sandbox ("No usable
+sandbox!", or a denied `chroot`), the error is a `BrowserSandboxUnavailableException` whose message
+starts with what to do: the seccomp profile in `deploy/seccomp`, AppArmor on Ubuntu 23.10+, or the
+`Browser:NoSandbox` opt-out. The health check shows that remedy whole, ahead of the shortened
+browser output. The engine never retries without the sandbox.
 
 **Crash recovery.** The engine watches the process (`Process.Exited`, with `EnableRaisingEvents`) and
 the DevTools connection. When either ends unexpectedly, the browser is retired: conversions running
@@ -350,7 +354,7 @@ All keys live under the `ReportsEngine` section (environment variables use `__`,
 | `Browser:Kind` | `Chrome` | Browser to look for when no path is set |
 | `Browser:ExecutablePath` | found automatically | Browser executable; `chrome-headless-shell` recommended |
 | `Browser:Headless` | `true` | Run without a window |
-| `Browser:NoSandbox` | `false` | `--no-sandbox`; only for trusted HTML |
+| `Browser:NoSandbox` | `false` | `--no-sandbox`; only for trusted HTML where user namespaces cannot be allowed ([security.md](../security.md#chromiums-sandbox)) |
 | `Browser:DisableDevShmUsage` | `false` | `--disable-dev-shm-usage`, for small `/dev/shm` in containers |
 | `Browser:ExtraArguments:N` | none | Extra command-line switches, after the engine's own |
 | `Browser:StartupTimeout` | `00:00:30` | Time for the browser to report its endpoint |

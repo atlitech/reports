@@ -10,6 +10,7 @@ on:
       - "src/Atli.Reports.Worker/**"
       - "src/Atli.Reports.Worker.Protocol/**"
       - "benchmarks/fixtures/**"
+      - "deploy/seccomp/**"
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "global.json"

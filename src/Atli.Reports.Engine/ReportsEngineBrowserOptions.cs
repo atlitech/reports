@@ -25,8 +25,12 @@ public sealed class ReportsEngineBrowserOptions
   /// Whether to disable the browser's sandbox (<c>--no-sandbox</c>). Defaults to <see langword="false"/>.
   /// </summary>
   /// <remarks>
-  /// Containers and hosts that block the user namespaces Chromium's sandbox needs (for example Ubuntu 24.04
-  /// with its default AppArmor policy) require this. Only disable the sandbox when the HTML is trusted.
+  /// Chromium's sandbox needs unprivileged user namespaces. In a container, allow them with the seccomp
+  /// profile <c>deploy/seccomp/chromium.json</c> from the repository rather than disabling the sandbox;
+  /// Ubuntu 23.10 and later also restrict them through AppArmor for processes it does not confine.
+  /// A browser that cannot create its sandbox fails to launch, with an error that says what to do; the
+  /// engine never disables the sandbox on its own. Only disable it when the HTML is trusted and user
+  /// namespaces cannot be allowed.
   /// </remarks>
   public bool NoSandbox { get; set; }
 
