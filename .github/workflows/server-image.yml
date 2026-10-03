@@ -17,7 +17,6 @@ on:
     paths:
       - "src/Atli.Reports.Engine/**"
       - "src/Atli.Reports.Server/**"
-      - "src/Atli.Reports.Worker.Protocol/**"
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "global.json"
@@ -35,7 +34,6 @@ on:
     paths:
       - "src/Atli.Reports.Engine/**"
       - "src/Atli.Reports.Server/**"
-      - "src/Atli.Reports.Worker.Protocol/**"
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "global.json"

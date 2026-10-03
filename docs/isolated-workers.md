@@ -1,16 +1,18 @@
 # Isolated renderer experiment
 
-Status: research, frozen. The experiment merged in #152 has the public API launch a fresh gVisor
-container for every conversion. It priced the strongest boundary available to it. It is not the
-production architecture. The default server remains the integrated engine for self-hosted,
-application-owned reports. This page records the decision, the measurements behind it, the hosted
-design that replaces the experiment's shape, and how to reproduce the experiment.
+Status: research, closed; the code is removed. The experiment merged in #152 had the public API
+launch a fresh gVisor container for every conversion. It priced the strongest boundary available
+to it. It is not the production architecture. The default server remains the integrated engine for
+self-hosted, application-owned reports. This page records the decision, the measurements behind
+it, the hosted design that replaces the experiment's shape, and how to reproduce the experiment
+from commit [`6f30bff`](https://github.com/atlitech/reports/tree/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd),
+the last one that has its code.
 
 ## Status and decision
 
-In the experiment, the API process runs `docker run --runtime=runsc` once per request
-([`WorkerLauncher.cs`](../src/Atli.Reports.Server/Execution/WorkerLauncher.cs)). That shape is
-wrong for production in two ways, and the self-hosted product does not need it:
+In the experiment, the API process ran `docker run --runtime=runsc` once per request
+([`WorkerLauncher.cs`](https://github.com/atlitech/reports/blob/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd/src/Atli.Reports.Server/Execution/WorkerLauncher.cs)).
+That shape is wrong for production in two ways, and the self-hosted product does not need it:
 
 - **Wrong layer.** Launching containers requires authority over a Docker daemon, which is
   root-equivalent on its host. Compromising the API compromises the daemon's workload domain, so
@@ -36,8 +38,9 @@ Decisions:
    tested.
 2. A managed service, if one is built, puts a shared API in front of per-customer renderer
    deployments. See [Hosted renderer design](#hosted-renderer-design).
-3. Keep the private protocol, the worker binary, the tests, and the benchmark harness from #152.
-   Freeze the Docker launcher backend as research; do not extend it.
+3. Remove the experiment's code: the API's worker mode and Docker launcher, the worker, its private
+   protocol, their tests, the benchmark harness, and its workflow. The hosted design calls the
+   server image's `POST /convert` and uses none of it. See [What remains of #152](#what-remains-of-152).
 
 ## What the measurements show
 
@@ -88,8 +91,9 @@ or p95 figures were measured.
   would use.
 - **Tagged PDFs cost time on long reports.** Under runc, tagging made the 49-page report 7.19 MB
   instead of 0.54 MB and took 1.899 s instead of 1.076 s. Under gVisor it took 4.37 s instead of
-  3.36 s. One-page fixtures showed no material difference. The harness and the load benchmark
-  always tag, and the integrated engine tags unless a request sets `generateTaggedPdf` to false.
+  3.36 s. One-page fixtures showed no material difference. The harness always tagged, the load
+  benchmark always tags, and the integrated engine tags unless a request sets `generateTaggedPdf`
+  to false.
 - **gVisor still costs render time on long reports.** In one follow-up run, the 49-page report took
   2.3 times as long under gVisor as under runc tagged, and 3.1 times untagged. The runc probes used
   the host daemon and the gVisor probes a nested one. A later run of the same untagged gVisor
@@ -113,8 +117,8 @@ or p95 figures were measured.
   23.10 and later, were not tested.
 - **Chromium's sandbox crashes inside gVisor on arm64.** Chrome's own seccomp-bpf SIGSYS
   handler crashes on arm64 syscall 123 (`sched_getaffinity`), and the process hangs until killed.
-  The worker image's `ATLI_WORKER_NO_SANDBOX=true` is therefore currently required under gVisor on
-  arm64, not merely convenient. amd64 was not tested.
+  The worker image's `ATLI_WORKER_NO_SANDBOX=true` was therefore required under gVisor on arm64,
+  not merely convenient. amd64 was not tested.
 - **gVisor's KVM platform was not tested.** OrbStack exposes no `/dev/kvm`; every gVisor number
   here uses systrap.
 
@@ -196,9 +200,9 @@ That is not the #152 private protocol, which runs over a worker process's standa
 output; the server streams a plain chunked HTTP PDF. The hosted API therefore needs its own checks
 on every renderer response: a size cap, a deadline, the `%PDF-` prefix, a complete response, and an
 aborted client response if the renderer resets or truncates the stream. The #152 gateway
-(`WorkerConverter`) is the model to follow for the output cap, the prefix check, and aborting after
-the response has started; its stdio framing does not apply. Exposing the private protocol over the
-network instead would be new work.
+([`WorkerConverter`](https://github.com/atlitech/reports/blob/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd/src/Atli.Reports.Server/Execution/WorkerConverter.cs))
+is the model to follow for the output cap, the prefix check, and aborting after the response has
+started; its stdio framing does not apply.
 
 ### Provisioning and scaling authority
 
@@ -311,21 +315,19 @@ shelling out to Docker. This design does not provide it, so it does not cover su
 how the hosted service handles them is an
 [open question](#open-questions-and-next-measurements).
 
-### What to keep from #152
+### What remains of #152
 
-- The private protocol: bounded framing, worker output treated as untrusted, and streaming
-  ([`src/Atli.Reports.Worker.Protocol`](../src/Atli.Reports.Worker.Protocol)). The hosted design
-  does not carry it over the network; its checks are the model for the API's renderer-response
-  checks.
-- The worker binary ([`src/Atli.Reports.Worker`](../src/Atli.Reports.Worker)).
-- The tests
-  ([`tests/Atli.Reports.Engine.Tests/Workers`](../tests/Atli.Reports.Engine.Tests/Workers)).
-- The benchmark harness
-  ([`validate-isolated-workers.py`](../.github/scripts/validate-isolated-workers.py)) and the
-  [isolated worker workflow](../.github/workflows/isolated-workers.yml).
+The hosted design reaches renderers over HTTPS `POST /convert`, so it uses none of the experiment's
+code, and that code was removed: the API's worker mode (`ReportsServer:Execution`), the Docker
+launcher, the worker, its private protocol, their tests, the benchmark harness, and its workflow.
+No release shipped them. What remains:
 
-The Docker launcher backend is frozen as research. It remains for reproducing these measurements;
-do not extend it or deploy it as a hosting backend.
+- This page, the [recorded run](../benchmarks/results/2026-10-02-5c500701-isolated-workers-arm64.md),
+  and the [follow-up probes](../benchmarks/results/2026-10-02-b88e5b5-isolation-followup-arm64.md).
+- The code at commit [`6f30bff`](https://github.com/atlitech/reports/tree/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd),
+  for reproducing the measurements (see [The experiment as built](#the-experiment-as-built)). The
+  gateway's response checks there are the model for the API's renderer-response checks (see
+  [API-to-renderer transport](#api-to-renderer-transport)).
 
 ## Production acceptance gates
 
@@ -394,7 +396,9 @@ renderer template.
 
 ## The experiment as built
 
-The rest of this page describes the research code merged in #152.
+The rest of this page describes the research code merged in #152, as it stood at commit
+[`6f30bff`](https://github.com/atlitech/reports/tree/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd)
+before it was removed. Settings, paths, and commands below exist only there.
 
 ### Trust boundary
 
@@ -440,7 +444,7 @@ containing an API exploit.
 
 ### Selecting the execution backend
 
-The Docker backend is frozen as research. These settings remain for reproducing the measurements.
+These settings were for reproducing the measurements; the current server does not read them.
 
 Authentication is configured exactly as described in the [security guide](security.md). Execution
 settings bind from `ReportsServer:Execution`; environment variables use `__` separators. The mode
@@ -542,6 +546,7 @@ socket into workers, or expose a Docker API port. Privileged DinD is a test cont
 worker security boundary.
 
 ```bash
+git switch --detach 6f30bffc354394d1866bc68b9f4733f8c3e9cdcd
 dotnet build src/Atli.Reports.Server
 docker build -f src/Atli.Reports.Worker/Dockerfile -t atli-reports-worker:security .
 docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server:security .
@@ -562,9 +567,10 @@ The harness's nested daemon uses the `vfs` storage driver, and the harness reque
 The first lengthens every sandbox lifecycle and the second lengthens long reports; see the
 follow-up findings above.
 
-The [isolated worker workflow](../.github/workflows/isolated-workers.yml) runs native amd64 and
-arm64 image builds and these checks. It publishes no image and deploys no cloud resources. CI's
-three samples per fixture are a feasibility check, not a stable performance regression threshold.
+The [isolated worker workflow](https://github.com/atlitech/reports/blob/6f30bffc354394d1866bc68b9f4733f8c3e9cdcd/.github/workflows/isolated-workers.yml)
+ran native amd64 and arm64 image builds and these checks on pull requests until the code was
+removed. It published no image and deployed no cloud resources. CI's three samples per fixture
+were a feasibility check, not a stable performance regression threshold.
 Run measurements on an otherwise idle host and retain the image identities, source revision,
 limits, sample counts, and measurement caveats with the results.
 

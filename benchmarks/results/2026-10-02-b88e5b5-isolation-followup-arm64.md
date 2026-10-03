@@ -45,7 +45,7 @@ worker, protocol, engine, and server sources are identical.
 ## 1. Tagged PDF cost (warm worker)
 
 The committed harness sets `generateTaggedPdf: true` (`options()` in
-[`validate-isolated-workers.py`](../../.github/scripts/validate-isolated-workers.py)), and the
+[`validate-isolated-workers.py`](https://github.com/atlitech/reports/blob/b88e5b5da076f1aa3d27cc98808032c95d52ff6d/.github/scripts/validate-isolated-workers.py)), and the
 [load benchmark](../README.md#fixtures) prints every fixture tagged. Without the option, the
 integrated engine leaves the choice to Chromium, which tags by default.
 
