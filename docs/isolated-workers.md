@@ -24,13 +24,16 @@ wrong for production in two ways, and the self-hosted product does not need it:
 
 Decisions:
 
-1. Self-hosted deployments use the integrated engine; it is the supported mode. A planned separate
-   change will turn Chromium's sandbox on by default in the server image, which disables it today.
-   Operators who want defense in depth can run the same image under a sandboxed runtime, such as a
-   gVisor or Kata RuntimeClass. Under gVisor on arm64, Chromium's sandbox currently crashes and
-   then hangs the browser instead of failing at startup, so operators there must disable it
-   explicitly (`ReportsEngine:Browser:NoSandbox=true`) and trade one layer for the other. amd64 was
-   not tested.
+1. Self-hosted deployments use the integrated engine; it is the supported mode. The server image
+   runs Chromium's sandbox by default. It needs the seccomp profile
+   [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md) and fails closed without it; see
+   [Chromium's sandbox](security.md#chromiums-sandbox). Operators who want defense in depth can
+   run the same image under a sandboxed runtime, such as a gVisor or Kata RuntimeClass. Under
+   gVisor on arm64, Chromium's sandbox crashed in the follow-up probes and the browser then hung
+   instead of exiting at startup, which the engine does not report as a sandbox failure. Operators
+   there must opt out explicitly (`ReportsEngine__Browser__NoSandbox=true`) and trade one layer for
+   the other. The probes used the worker image; the server image under gVisor, and amd64, were not
+   tested.
 2. A managed service, if one is built, puts a shared API in front of per-customer renderer
    deployments. See [Hosted renderer design](#hosted-renderer-design).
 3. Keep the private protocol, the worker binary, the tests, and the benchmark harness from #152.
@@ -46,6 +49,8 @@ report was 1.57 seconds in the integrated engine, 16.63 seconds in a disposable 
 11.36 seconds in a warm gVisor worker, and 3.04 seconds in the equivalent warm runc control.
 The warm gVisor worker consumed 66.14 CPU seconds across 24 reports including warmups, compared
 with 18.03 seconds for the runc control; those observations exclude final teardown and the gateway.
+That run predates the server image's sandbox: its integrated engine ran Chromium with
+`--no-sandbox`.
 
 These results favor retaining the integrated default and treating runtime selection as an open
 performance decision. Browser reuse reduces startup cost, but it does not eliminate the observed
@@ -96,13 +101,16 @@ or p95 figures were measured.
   cold one-page command-line print from 1.79 s to as little as 1.34 s. They did not materially
   change the long report (7.25 to 7.84 s), and they weaken Chromium's own isolation.
 - **Chromium's sandbox is cheap under runc.** Docker's default seccomp profile makes Chrome abort
-  with "No usable sandbox!". The server image disables Chromium's sandbox for container
-  compatibility; the worker image relies on the outer runtime instead. With a probe profile that
-  added `clone`, `unshare`, and `chroot` to Docker's default, Chrome started with its sandbox and
-  the worker converted every fixture, with all other container hardening kept. Five interleaved
-  rounds showed about 30 ms extra at cold start and warm differences within noise in both
-  directions. OrbStack's kernel permits unprivileged user namespaces; hosts that restrict them,
-  such as Ubuntu 23.10 and later through AppArmor, were not tested.
+  with "No usable sandbox!". At the probed revision the server image disabled Chromium's sandbox
+  for container compatibility; the worker image relies on the outer runtime instead. With a probe
+  profile that allowed `clone`, `unshare`, and `chroot` on top of Docker's default, without
+  argument filters, Chrome started with its sandbox and the worker converted every fixture, with
+  all other container hardening kept. Five interleaved rounds showed about 30 ms extra at cold
+  start and warm differences within noise in both directions. The server image now runs the
+  sandbox under [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md), which limits `clone`
+  to user, PID, and network namespaces and `unshare` to a user namespace alone. OrbStack's kernel
+  permits unprivileged user namespaces; hosts that restrict them through AppArmor, such as Ubuntu
+  23.10 and later, were not tested.
 - **Chromium's sandbox crashes inside gVisor on arm64.** Chrome's own seccomp-bpf SIGSYS
   handler crashes on arm64 syscall 123 (`sched_getaffinity`), and the process hangs until killed.
   The worker image's `ATLI_WORKER_NO_SANDBOX=true` is therefore currently required under gVisor on
@@ -154,13 +162,32 @@ A renderer runs the existing server image in integrated mode: a warm browser, a 
 context per conversion, and Chromium's sandbox on. It accepts conversions only from the API. It
 receives document HTML and PDF options, never customer credentials.
 
-Chromium's sandbox is a requirement the shipped image does not meet yet: the image sets
-`ReportsEngine:Browser:NoSandbox=true`, and turning the sandbox on is a planned separate change.
-The renderer platform must also permit it. It needs a seccomp profile that allows the namespace
-system calls Docker's default profile blocks. On Kubernetes that means a `Localhost` profile
-distributed to renderer nodes, because `RuntimeDefault` derives from the same default and is
-expected to block them too (untested). It also needs nodes that allow unprivileged user
-namespaces, which Ubuntu 23.10 and later restrict through AppArmor.
+The server image runs Chromium's sandbox by default and fails closed where the platform denies the
+user namespaces it needs: the browser cannot start, `/health/ready` stays `503`, and the server
+never falls back to `--no-sandbox` (see [Chromium's sandbox](security.md#chromiums-sandbox)). The
+renderer platform must therefore permit the sandbox:
+
+- **Seccomp.** The container needs [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md):
+  Docker's default profile plus `clone`, `unshare`, and `chroot`, restricted to user, PID, and
+  network namespaces. Docker's default profile and containerd's `RuntimeDefault` deny those calls.
+  On Kubernetes, install it as a `Localhost` profile on every renderer node, as the
+  [Kubernetes example](../deploy/kubernetes/reports.yaml) does.
+- **AppArmor.** Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor.
+  By the kernel and containerd sources, pods under containerd's default AppArmor profile are
+  unaffected only with containerd 1.7.31, 2.1.7, 2.2.2, 2.3.0, or later in each line; with older
+  containerd the renderer may fail closed, and AppArmor-unconfined pods need the node's
+  `kernel.apparmor_restrict_unprivileged_userns` set to `0`. None of this was tested on Ubuntu
+  nodes.
+- **Azure Container Apps** cannot apply a seccomp profile. The
+  [Bicep template](../deploy/azure/reports.bicep) and the [Aspire guide](aspire.md#deploy) opt out
+  of the sandbox there, and whether Container Apps permits it without the profile is unverified,
+  so a Container Apps renderer does not meet this requirement yet.
+
+Seccomp filters the whole container, so the profile is not Chromium's alone: the server and the
+browser process can also create user and network namespaces with every capability inside them.
+That exposes more of the node's kernel to code that has compromised the server or escaped
+Chromium's sandbox. Under runc, renderers of different customers share that kernel; see the patch
+targets in the [production acceptance gates](#production-acceptance-gates).
 
 ### API-to-renderer transport
 
@@ -253,7 +280,7 @@ measured.
 
 | Runtime | Boundary between customers | Speed in these probes | Chromium's sandbox |
 | --- | --- | --- | --- |
-| Plain containers (runc) with Chromium's sandbox | Customers on a node share its kernel. Crossing customers needs a renderer exploit, a sandbox escape, and a kernel or container escape. | Near native; the sandbox added about 30 ms at cold start | Worked in the probe with a seccomp profile that permits it; AppArmor-restricted hosts untested |
+| Plain containers (runc) with Chromium's sandbox | Customers on a node share its kernel. Crossing customers needs a renderer exploit, a sandbox escape, and a kernel or container escape. | Near native; the sandbox added about 30 ms at cold start | On by default in the server image, under [`deploy/seccomp/chromium.json`](../deploy/seccomp/README.md); Ubuntu 23.10+ nodes untested |
 | gVisor | Stronger: the renderer's system calls go to gVisor's user-space kernel, not the host's | The long report took 2.3 to 3.1 times as long as under runc in one follow-up run (runc on the host daemon, gVisor nested) and 3.7 times in the recorded run; systrap only | Crashes and then hangs on arm64; amd64 untested |
 | MicroVMs: Kata, Firecracker, or Hyper-V-backed Azure Container Apps dynamic sessions | Stronger: each sandbox runs its own guest kernel | Not measured | A normal guest kernel should support it; untested |
 
@@ -308,9 +335,10 @@ Before accepting hostile documents in a hosted service:
    compromised renderer, test direct network access (other renderers, the API's other endpoints,
    metadata endpoints, the internet), filesystem, identity, process, and control-plane access, in
    addition to normal document policy tests. Verify that Chromium's sandbox is active on the
-   actual node image wherever the runtime supports it. Verify resource exhaustion, cancellation,
-   and crash recovery. Runtime canaries establish specific controls, not the absence of sandbox
-   vulnerabilities.
+   actual node image wherever the runtime supports it: no browser process with `--no-sandbox`, and
+   renderers outside the browser's user namespace, as the server image's smoke test and Kubernetes
+   validation check. Verify resource exhaustion, cancellation, and crash recovery. Runtime canaries
+   establish specific controls, not the absence of sandbox vulnerabilities.
 2. Introduce authoritative product-tenant membership and routing. Derive the renderer from
    authenticated entitlements, never a request header or caller-supplied renderer ID. Enforce fair
    admission and quotas across API replicas. Authenticate the API-to-renderer channel in both
@@ -338,7 +366,8 @@ Kubernetes renderer deployments need enforcing network policy on their actual no
 RuntimeClass if a sandboxed runtime is selected. Azure Container Apps' ordinary container profile
 is not interchangeable with a dedicated sandbox service; an Azure-specific deployment needs its own
 lifecycle and boundary tests. The existing Kubernetes and ACA deployment examples continue to
-describe integrated self-hosting.
+describe integrated self-hosting; the ACA example opts out of Chromium's sandbox, so it is not a
+renderer template.
 
 ## Open questions and next measurements
 
@@ -349,8 +378,10 @@ describe integrated self-hosting.
 - Add per-phase worker timings: sandbox start, browser launch, load, print, and stream.
 - Test gVisor's KVM platform where `/dev/kvm` exists.
 - Test Chromium's sandbox inside gVisor on amd64, and inside a microVM runtime.
-- Verify whether Azure Container Apps supports the user namespaces Chromium's sandbox needs, and
-  whether it lets a deployment set a seccomp profile that permits the sandbox.
+- Verify whether Azure Container Apps permits Chromium's sandbox without a custom seccomp profile,
+  which it cannot apply; until then its template opts out.
+- Test Chromium's sandbox on Ubuntu 23.10 and later renderer nodes, with the containerd versions
+  the platform runs.
 - Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a
   renderer service identity, and the API's credential must be unique to each renderer so that a
   compromised renderer cannot replay it against another. Per-renderer API-key verifiers need

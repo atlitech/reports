@@ -165,12 +165,15 @@ without `--no-sandbox`:
 The full message continues: "If you are running on Ubuntu 23.10+ or another Linux distro that has
 disabled unprivileged user namespaces with AppArmor, see
 https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
-...". Docker's default profile blocks the sandbox. The server image disables Chromium's sandbox
-for container compatibility; the worker image relies on the outer runtime instead (and, under
-gVisor on arm64, has to; see section 7). The base profile was `seccomp/default.json` from the
-`main` branch of `moby/profiles`, fetched on 2026-10-02 and not pinned. The added rule was
-`{"names": ["clone", "unshare", "chroot"], "action": "SCMP_ACT_ALLOW"}`. Whether that set is
-minimal was not tested. This is the probe's profile, not a profile shipped by the repository.
+...". Docker's default profile blocks the sandbox. At `b88e5b5` the server image disabled
+Chromium's sandbox for container compatibility; the worker image relies on the outer runtime
+instead (and, under gVisor on arm64, has to; see section 7). The base profile was
+`seccomp/default.json` from the `main` branch of `moby/profiles`, fetched on 2026-10-02 and not
+pinned. The added rule was `{"names": ["clone", "unshare", "chroot"], "action": "SCMP_ACT_ALLOW"}`,
+without argument filters. Whether that set is minimal was not tested in these probes. This is the
+probe's profile, not [`deploy/seccomp/chromium.json`](../../deploy/seccomp/README.md), the profile
+the server image's sandbox needs. That one pins Docker's default to a moby/profiles release and
+limits `clone` and `unshare` by their flags; its README records how each rule was found necessary.
 
 Cost of the sandbox, five interleaved rounds, untagged:
 
@@ -187,7 +190,9 @@ complete* or at *gone*, and this series was untagged and run separately, so do n
 section 2.
 
 OrbStack's kernel permits unprivileged user namespaces. Ubuntu 23.10 and later, including 24.04,
-restrict them through AppArmor (`kernel.apparmor_restrict_unprivileged_userns`); no such host was
+restrict them through AppArmor (`kernel.apparmor_restrict_unprivileged_userns`) for processes
+AppArmor does not confine; whether a container is affected depends on its runtime's AppArmor
+profile (see [Chromium's sandbox](../../docs/security.md#chromiums-sandbox)). No such host was
 tested.
 
 ## 7. Chromium's sandbox under gVisor

@@ -249,10 +249,14 @@ It never parses or executes document HTML, and it holds no rights to create, sca
 renderers. Each customer gets its own renderer deployment: this server image in integrated mode
 with Chromium's sandbox on, internal-only ingress, denied egress and renderer-to-renderer traffic,
 a read-only filesystem, resource limits, and no application secrets, service identity, or
-service-account token. The shipped image does not enable Chromium's sandbox yet, and the renderer
-platform must allow it: a seccomp profile that permits it and nodes that allow unprivileged user
-namespaces. A renderer accepts only the API, which presents a credential unique to that renderer
-so that a compromised renderer cannot replay it against another. The API treats renderer
+service-account token. The image runs Chromium's sandbox by default and fails closed where the
+platform does not allow it, so renderers need the seccomp profile in
+[`deploy/seccomp`](../deploy/seccomp/README.md) and nodes that allow unprivileged user namespaces
+(see [Chromium's sandbox](#chromiums-sandbox)). Azure Container Apps cannot apply that profile,
+and the [Container Apps template](../deploy/azure/reports.bicep) opts out of the sandbox, so a
+renderer there does not meet this requirement until Container Apps is shown to permit the sandbox
+without the profile. A renderer accepts only the API, which presents a credential unique to that
+renderer so that a compromised renderer cannot replay it against another. The API treats renderer
 responses as untrusted. Renderers run on a node pool separate from the API. The API derives the
 renderer from the authenticated product tenant, never from a caller-provided header.
 
