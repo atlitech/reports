@@ -45,6 +45,15 @@ public sealed class SandboxesClient : ISandboxesClient
   /// <summary>How much of the data plane's error description an exception message carries.</summary>
   internal const int MaxErrorLength = 500;
 
+  /// <summary>Sandboxes per page of a listing: the most the data plane allows.</summary>
+  internal const int ListPageSize = 100;
+
+  /// <summary>
+  /// The most pages a listing follows, 100,000 sandboxes: a bound on a data plane whose next links
+  /// never end.
+  /// </summary>
+  internal const int MaxListPages = 1000;
+
   /// <summary>
   /// How long a call the data plane refused with <c>409</c> waits for the sandbox to settle before
   /// deciding; see <see cref="SettleConflictAsync"/>. Suspending took 7 to 15 seconds in the measured
@@ -133,19 +142,140 @@ public sealed class SandboxesClient : ISandboxesClient
   }
 
   /// <inheritdoc />
-  /// <remarks>The data plane answers with every sandbox in one JSON array, unpaged.</remarks>
+  /// <remarks>
+  /// <para>
+  /// The data plane lists a group a page at a time. On <see cref="SandboxesOptions.ApiVersion"/> it
+  /// answers with the first page alone, 25 sandboxes, and no way to the rest, so the client lists on
+  /// <see cref="SandboxesOptions.ListApiVersion"/>, in pages of <see cref="ListPageSize"/>, and
+  /// follows each page's <c>nextLink</c>. Each page is retried as any other call.
+  /// </para>
+  /// <para>
+  /// The token goes with every page, so a next link must name the first page's address (the same
+  /// scheme, host, port, and path); any other link fails the listing, and so does one already
+  /// followed, or more than <see cref="MaxListPages"/> pages. A sandbox on two pages, which a group
+  /// that changes while it is listed can cause, is listed once, as the later page has it. An answer
+  /// that is a bare array, without a next link, is taken whole only when it is shorter than a page:
+  /// a full one may be the first page of more.
+  /// </para>
+  /// </remarks>
   public async Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken)
   {
     Call call = new(HttpMethod.Get, "sandboxes");
-    using var response = await SendAsync(call, cancellationToken);
-    await EnsureSuccessAsync(call, response, cancellationToken);
-    var sandboxes = await ReadAsync(
-      call,
-      response,
-      SandboxesJsonContext.Default.ListSandboxResponse,
-      cancellationToken
+    Uri first = new(
+      _groupUri,
+      "sandboxes?api-version="
+        + SandboxesOptions.ListApiVersion
+        + "&pageSize="
+        + ListPageSize.ToString(CultureInfo.InvariantCulture)
     );
-    return [.. sandboxes.Select(sandbox => ToView(call, sandbox))];
+    Dictionary<string, SandboxView> sandboxes = new(StringComparer.Ordinal);
+    List<string> order = [];
+    HashSet<string> followed = new(StringComparer.Ordinal) { first.AbsoluteUri };
+    Uri? page = first;
+    for (var pages = 1; page is not null; pages++)
+    {
+      if (pages > MaxListPages)
+      {
+        throw new SandboxesException(
+          $"{call} answered with more than {MaxListPages} pages; the listing is not read whole."
+        );
+      }
+
+      using var response = await SendAsync(call, page, cancellationToken);
+      await EnsureSuccessAsync(call, response, cancellationToken);
+      var (items, nextLink) = await ReadPageAsync(call, response, cancellationToken);
+      foreach (var item in items)
+      {
+        var view = ToView(call, item);
+        if (!sandboxes.ContainsKey(view.Id))
+        {
+          order.Add(view.Id);
+        }
+
+        sandboxes[view.Id] = view;
+      }
+
+      page = nextLink is null ? null : NextPage(call, first, nextLink, followed);
+    }
+
+    return [.. order.Select(id => sandboxes[id])];
+  }
+
+  /// <summary>One page of the listing: its sandboxes, and the next page's link if there is one.</summary>
+  private static async Task<(List<SandboxResponse> Items, string? NextLink)> ReadPageAsync(
+    Call call,
+    HttpResponseMessage response,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+      using var document = await JsonDocument.ParseAsync(
+        stream,
+        cancellationToken: cancellationToken
+      );
+      var root = document.RootElement;
+      if (root.ValueKind == JsonValueKind.Array)
+      {
+        var items =
+          root.Deserialize(SandboxesJsonContext.Default.ListSandboxResponse)
+          ?? throw Unexpected(call);
+        if (items.Count >= ListPageSize)
+        {
+          throw new SandboxesException(
+            $"{call} answered with a full page of {items.Count} sandboxes and no link to the next; "
+              + "the listing is not read whole."
+          );
+        }
+
+        return (items, null);
+      }
+
+      var page =
+        root.Deserialize(SandboxesJsonContext.Default.SandboxPageResponse)
+        ?? throw Unexpected(call);
+      return (
+        page.Value ?? throw Unexpected(call),
+        string.IsNullOrEmpty(page.NextLink) ? null : page.NextLink
+      );
+    }
+    catch (JsonException exception)
+    {
+      throw Unexpected(call, exception);
+    }
+  }
+
+  /// <summary>
+  /// The next page's address, checked to be the first page's (scheme, host, port, and path), so the
+  /// token is never sent elsewhere, and not followed before.
+  /// </summary>
+  private static Uri NextPage(Call call, Uri first, string nextLink, HashSet<string> followed)
+  {
+    if (
+      !Uri.TryCreate(nextLink, UriKind.Absolute, out var next)
+      || Uri.Compare(
+        next,
+        first,
+        UriComponents.SchemeAndServer | UriComponents.Path,
+        UriFormat.UriEscaped,
+        StringComparison.OrdinalIgnoreCase
+      ) != 0
+    )
+    {
+      throw new SandboxesException(
+        $"{call} answered with a next page at another address; the listing is not read whole."
+      );
+    }
+
+    if (!followed.Add(next.AbsoluteUri))
+    {
+      throw new SandboxesException(
+        $"{call} answered with a next page it had already given; the listing is not read whole."
+      );
+    }
+
+    return next;
   }
 
   /// <inheritdoc />
@@ -603,9 +733,20 @@ public sealed class SandboxesClient : ISandboxesClient
     );
 
   /// <summary>Sends <paramref name="call"/>, retrying it as the remarks on the class describe.</summary>
-  private async Task<HttpResponseMessage> SendAsync(Call call, CancellationToken cancellationToken)
+  private Task<HttpResponseMessage> SendAsync(Call call, CancellationToken cancellationToken) =>
+    SendAsync(
+      call,
+      new Uri(_groupUri, call.Path + "?api-version=" + SandboxesOptions.ApiVersion),
+      cancellationToken
+    );
+
+  /// <summary>Sends <paramref name="call"/> to <paramref name="uri"/>, retrying it.</summary>
+  private async Task<HttpResponseMessage> SendAsync(
+    Call call,
+    Uri uri,
+    CancellationToken cancellationToken
+  )
   {
-    Uri uri = new(_groupUri, call.Path + "?api-version=" + SandboxesOptions.ApiVersion);
     for (var attempt = 0; ; attempt++)
     {
       var mayRetry = call.Retry && attempt < MaxRetries;
@@ -925,18 +1066,26 @@ public sealed class SandboxesClient : ISandboxesClient
       Id = sandbox.Id,
       State = sandbox.State,
       StoppedReason = sandbox.StateDetails?.StoppedReason,
+      StoppedAt = ParseTime(sandbox.StateDetails?.StoppedAt),
       Labels = sandbox.Labels ?? [],
       Ports = ports,
-      CreatedAt = DateTimeOffset.TryParse(
-        sandbox.CreatedAt,
-        CultureInfo.InvariantCulture,
-        DateTimeStyles.AssumeUniversal,
-        out var createdAt
-      )
-        ? createdAt
-        : null,
+      CreatedAt = ParseTime(sandbox.CreatedAt),
     };
   }
+
+  /// <summary>
+  /// A time the data plane sent, or <see langword="null"/> when it sent none or one this client
+  /// cannot parse: an unknown time, not a sandbox that cannot be read.
+  /// </summary>
+  private static DateTimeOffset? ParseTime(string? value) =>
+    DateTimeOffset.TryParse(
+      value,
+      CultureInfo.InvariantCulture,
+      DateTimeStyles.AssumeUniversal,
+      out var time
+    )
+      ? time
+      : null;
 
   private static SandboxesException Unexpected(Call call) =>
     new($"{call} answered with a sandbox this client cannot read.");

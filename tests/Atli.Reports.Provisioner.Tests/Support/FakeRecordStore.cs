@@ -24,6 +24,9 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
   /// <summary>Fails every get with this exception, when set.</summary>
   public Exception? FailGet { get; set; }
 
+  /// <summary>Fails the next get with this exception; cleared once thrown.</summary>
+  public Exception? FailNextGet { get; set; }
+
   /// <summary>Runs before each put, when set.</summary>
   public Action? BeforePut { get; set; }
 
@@ -48,6 +51,12 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
       return Task.FromException<RendererRecord?>(failure);
     }
 
+    if (FailNextGet is { } once)
+    {
+      FailNextGet = null;
+      return Task.FromException<RendererRecord?>(once);
+    }
+
     return _unreadable.TryGetValue(tenantId, out var reason)
       ? Task.FromException<RendererRecord?>(new InvalidDataException(reason))
       : Task.FromResult(this[tenantId]);
@@ -55,6 +64,12 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
 
   public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
     Task.FromResult<IReadOnlyList<RendererRecord>>([.. _records.Values]);
+
+  /// <summary>Every tenant with a record, unreadable ones included, as the real stores list them.</summary>
+  public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken) =>
+    Task.FromResult<IReadOnlyList<string>>([
+      .. _records.Keys.Union(_unreadable.Keys).Order(StringComparer.Ordinal),
+    ]);
 
   public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken) =>
     Task.FromResult(

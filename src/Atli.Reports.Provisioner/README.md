@@ -3,7 +3,9 @@
 Creates, rolls out, and deletes the per-customer renderers of the
 [hosted renderer service](../../docs/hosted-renderers.md) on Azure Container Apps Sandboxes, and
 maintains the renderer records the gateway routes by. It runs off the request path, from an
-operator's shell or a release pipeline, with rights the gateway never holds.
+operator's shell or a release pipeline, or as the
+[provisioning service](#the-provisioning-service) that creates renderers on demand, with rights the
+gateway never holds.
 
 Each renderer is one sandbox that serves one tenant for its whole lifetime. The sandbox runs the
 unmodified server image with Chromium's sandbox on, denies egress, admits only a credential that
@@ -31,6 +33,7 @@ address, so its `/32` is the gateway's entry.
 | --- | --- | --- |
 | Provisioner | Container Apps SandboxGroup Data Owner | The renderer sandbox group |
 | Provisioner, with `Records:Store` set to `KeyVault` | Key Vault Secrets Officer | The record vault |
+| [Provisioning service](#the-provisioning-service) (`serve`), an identity of its own | The provisioner's two roles: Container Apps SandboxGroup Data Owner, and Key Vault Secrets Officer with a `KeyVault` store | The renderer sandbox group, and the record vault |
 | Gateway | Key Vault Secrets User | The record vault |
 | Gateway, only with `Wake:Mode=Sandboxes` (renderers with `Manual` ports) | A custom role with only `Microsoft.App/sandboxGroups/sandboxes/read` and `Microsoft.App/sandboxGroups/sandboxes/resume/action` | The renderer sandbox group |
 
@@ -40,7 +43,8 @@ reconfigure renderers, run commands in them, or read their files. In the
 [production-shaped run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md),
 the gateway's user-assigned identity, holding only that role, the vault role, and `AcrPull` on its
 registry, resumed every `Manual` renderer it was asked to. The renderer sandbox group itself has no
-managed identity.
+managed identity. `aca sandboxgroup create` grants Data Owner on the new group to whoever created
+it; remove that assignment once setup is done, so that only the provisioner's identities hold it.
 
 The provisioner authenticates as the user-assigned managed identity named by
 `Sandboxes:ManagedIdentityClientId` (and `Records:ManagedIdentityClientId` for the vault), or
@@ -65,11 +69,16 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | `Provisioner:DiskImageId` | | The disk image new renderers start from; `--disk-image` overrides it |
 | `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, one), or `L` (2 vCPU, 4 GiB, two) |
 | `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
-| `Provisioner:AllowedSourceCidrs` | Empty | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
+| `Provisioner:AllowedSourceCidrs` | Empty; required for `serve` | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
 | `Provisioner:NetworkConnection` | Empty | The renderer group's virtual network connection (`aca sandboxgroup network create --name`) new renderers start in; empty for none. A network whose security group denies the `AzurePlatformDNS` service tag leaves renderers without DNS; see the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes). Renderers in such a network were ready 1.4 to 3.5 s after the create call started, against 1.2 to 1.3 s without one |
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
 | `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
 | `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
+| `Provisioner:Service:TenantPrefixes` | Required for `serve`, `retire`, and `rollout --stopped retire` | The prefixes whose tenants' renderers the [provisioning service](#the-provisioning-service) creates on demand and retires when idle. Each has a `Prefix`, such as `myapp-` (2 to 27 lowercase letters, digits, and hyphens, ending with a hyphen; no prefix may start with another, nor own `readiness-probe`, which the gateway's readiness reserves); `MaxTenants`, the most renderers under it (`1000` by default, at most 100000); `MaxCreatesPerMinute`, the most renderers `serve` creates under it per minute (`20` by default, 1 to 10000); and `Size`, `S`, `M`, or `L`, or empty for `Provisioner:Size`. Do not give a prefix to another application while tenants remain under it, since the new owner would use them: `list` shows them, and `delete` removes them |
+| `Provisioner:Service:ApiKeys` | Required for `serve` | The gateway's keys for the service: each an `Id`, the part of the key before the dot, and a `Hash`, the base64 SHA-256 of the whole key. Two allow rotation |
+| `Provisioner:Service:MaxCreatesPerMinute` | `60` | Renderers `serve` creates per minute at most across all prefixes, failed creates included: a ceiling over each prefix's own `MaxCreatesPerMinute`, so size it above the busiest prefixes' together. 1 to 10000 |
+| `Provisioner:Service:RetireAfterIdle` | `7.00:00:00` | How long a managed tenant's renderer may stay stopped before it is retired; `00:00:00` never retires, and otherwise at least a minute and at most 365 days |
+| `Provisioner:Service:RetireCheckInterval` | `01:00:00` | How long `serve` waits after each retirement run ends before the next; the first runs a minute after it starts. A minute to a day |
 
 ```json
 {
@@ -102,7 +111,10 @@ gateway, the rest waiting in its queue, and its record says so, so the gateway s
 
 `AllowedSourceCidrs` applies to every request to the port, the provisioner's own included: it asks
 each new renderer whether it is ready through the port, so the address it runs from must be in the
-list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. A changed list
+list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. Run those commands
+from where the gateway's outbound address already covers them, such as a Container Apps job in the
+gateway's environment behind its NAT gateway, rather than adding an operator's address to every
+renderer's list. A changed list
 applies to renderers created from then on; `rollout` does not replace renderers on the current disk
 image, so recreate them (`delete`, then `create`) to apply it to existing ones. The same holds for
 `PortActivation` and `NetworkConnection`, and a rollout's replacements take the settings it runs with, not their
@@ -124,6 +136,12 @@ exclusive lock). Commands that overlap are still kept from corrupting records: j
 writes a tenant's record, it reads the record again, and if another command created, replaced, or
 deleted it meanwhile, it discards its own new renderer and reports the tenant as failed. What can
 remain is a sandbox no record points to, which `prune` deletes.
+
+The [provisioning service](#the-provisioning-service) counts as a command too. It keeps its own
+creations, deletes, and retirements of a tenant from overlapping, but not those of commands run
+from the command line, or of another replica: a `delete` or `retire` run while the service creates
+the same tenant's renderer is kept apart only by the record check above. Run such commands as this
+section says, or while no application uses the tenants concerned.
 
 ### create
 
@@ -165,6 +183,7 @@ renderers. Tenant IDs are 1 to 63 lowercase letters, digits, and hyphens.
 
 ```bash
 atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel 4] [--drain 00:02:30]
+                                 [--stopped replace|retire]
 ```
 
 Replaces every renderer whose record names another disk image or a sandbox that no longer exists,
@@ -186,6 +205,15 @@ that names another tenant's sandbox is reported, and that sandbox is left alone.
 - Last, it prunes, as `prune` does (for the given tenant only, with `--tenant`): renderer sandboxes
   that an earlier, canceled or killed command left behind are deleted after one more drain. A
   canceled rollout skips this; its old sandboxes still draining are left to the next run.
+- `--stopped retire` retires, instead of replacing, the stopped renderers of tenants under
+  `Provisioner:Service:TenantPrefixes`, however long they have been stopped: each is deleted with
+  its record, as `retire` does, and the tenant's next conversion has the provisioning service
+  create a renderer from its disk image. Running and disabled renderers, records whose sandbox is
+  gone, and tenants outside the prefixes are replaced as without it; with `--tenant`, the same rule
+  applies to that tenant. Just before retiring a renderer, the rollout reads its record and sandbox
+  again: a renderer that has started meanwhile is replaced instead, and a record another command
+  changed is a failure. It needs valid `TenantPrefixes`, or it is a configuration error. The
+  default, `--stopped replace`, replaces stopped renderers like the others.
 
 ### delete
 
@@ -195,11 +223,14 @@ atli-reports-provisioner delete --tenant contoso [--drain 00:02:30]
 
 Deletes the tenant's record first, so the gateway stops routing to the renderer, then the sandbox.
 A record that cannot be read, or that the vault holds disabled, is deleted all the same, so a
-compromised renderer can always be cut off. Without `--drain` the sandbox goes at once, as it should
-for a compromised renderer; with it, the command waits that long in between so conversions in
-flight can finish. It deletes every sandbox labeled for the tenant, such as one an earlier,
-interrupted delete left behind, so running it again is always safe. A sandbox the record names that
-is labeled for another tenant is not deleted, and the command exits with `1`.
+compromised renderer can always be cut off; so is the record when the sandboxes cannot be listed,
+and the command then exits with `1`. Without `--drain` the sandbox goes at once, as it should for a
+compromised renderer; with it, the command waits that long in between so conversions in flight can
+finish. It deletes every sandbox labeled for the tenant when it began, disabled ones included, such
+as one an earlier, interrupted delete left behind, so running it again is always safe; a sandbox
+created after that, such as by a creation that starts once the record is gone, is left alone. A
+sandbox the record names that is labeled for another tenant is not deleted, and the command exits
+with `1`.
 
 With the Key Vault store, deleting a record disables its current secret version before deleting the
 secret. Creating the tenant again recovers the soft-deleted secret, which stays disabled, so no
@@ -240,6 +271,53 @@ The others are deleted after the drain, in case the gateway still sends them wor
 have moved away from one moments ago), and only if no record points to them by then. A sandbox
 that cannot be deleted is reported, and the command exits with `1`.
 
+### retire
+
+```bash
+atli-reports-provisioner retire
+```
+
+Retires, once, the renderers of tenants under `Provisioner:Service:TenantPrefixes` that have been
+stopped for longer than `Provisioner:Service:RetireAfterIdle`; `serve` does the same on a
+schedule. Retiring a renderer deletes its record, then the tenant's sandboxes, as `delete` does,
+and with the sandbox its memory snapshot. The tenant's next conversion has the provisioning
+service create a renderer from its `DiskImageId`, so a workspace nobody uses costs nothing, and
+comes back on the current release.
+
+A run lists the sandbox group once. A tenant's renderer is retired when one of the tenant's
+sandboxes is stopped, not disabled, and stopped more than `RetireAfterIdle` ago by the data
+plane's account, and the tenant's record names that sandbox. Only those tenants' records are read,
+and only sandboxes in the run's listing are deleted. It keeps:
+
+- running renderers, and disabled ones, with every renderer of a tenant that has a disabled
+  sandbox (`disable` keeps a renderer's disk for investigation);
+- a stopped renderer whose stop time the data plane does not report;
+- every sandbox of a tenant whose record cannot be read;
+- a stopped sandbox that the tenant's record does not name: a leftover, which `prune` deletes;
+- a record whose sandbox no longer exists: the provisioning service replaces the sandbox on the
+  tenant's next conversion, and `delete` removes the tenant;
+- every tenant outside the prefixes.
+
+A tenant under the prefixes is retired by the same rule whoever created it, with `create` too:
+everything under a managed prefix is its application's, and the gateway refuses to list a tenant
+under any prefix. Keep the operator's own tenants outside the managed prefixes.
+
+Just before deleting, `retire` reads the sandbox again, and keeps the renderer until the next run
+if it is no longer stopped (a request may be waking it) or has been disabled. That leaves a short
+window, between that read and the delete, in which a conversion that wakes the renderer can still
+fail.
+
+With `RetireAfterIdle` at `00:00:00` it retires nothing, and says so. It needs valid
+`TenantPrefixes`, or it is a configuration error, but no disk image. A tenant that cannot be retired is reported, the others
+are still retired, and the command exits with `1`; a sandbox left behind after its record was
+deleted is deleted by `prune`, or by `serve`'s next run.
+
+The gateway keeps a record for `ReportsServer:Gateway:Records:CacheDuration` (30 seconds by
+default), so for up to that long after a retirement it may still route the tenant's conversions to
+the retired renderer. The platform's proxy answers them with `404`, as for any sandbox that no
+longer exists, and with on-demand provisioning the gateway then has the provisioning service create
+the renderer again: the conversion succeeds, only slower, since it waits for the new renderer.
+
 ### disable and enable
 
 ```bash
@@ -256,6 +334,155 @@ fails, and the command then exits with `1`. A sandbox the record names that is l
 tenant is left alone. `enable` lets the tenant's sandboxes start again; they stay stopped until a
 request or a resume starts them.
 
+## The provisioning service
+
+```bash
+atli-reports-provisioner serve
+```
+
+`serve` runs the provisioner as a service of its own: an HTTP API that the gateway calls to create
+a renderer for a tenant under one of `Provisioner:Service:TenantPrefixes` on the tenant's first
+conversion, and to delete one when the application deletes the tenant. It holds the provisioner's
+roles, which the gateway never does, and serves only the managed prefixes within their limits. A
+compromised gateway can therefore create renderers under those prefixes and delete their tenants,
+but cannot change, reassign, or enter a renderer, nor touch a tenant outside the prefixes. See
+[Applications with many tenants](../../docs/hosted-renderers.md#applications-with-many-tenants) in
+the design.
+
+A prefix belongs to one application for as long as tenants remain under it. Before giving it to
+another application, in the gateway's configuration or the service's, delete its tenants: `list`
+shows them, and `delete` removes each.
+
+Every request but the health probes carries one of the gateway's keys in `X-Reports-Api-Key`.
+
+| Request | Answer |
+| --- | --- |
+| `PUT /tenants/{id}/renderer` | `200` with `{"tenantId": "<id>", "created": false}` when the tenant's record names a sandbox that exists, disabled or not: a disabled renderer stays disabled. Otherwise, once a renderer is ready, `200` with `"created": true`: the service creates one as `create` does for a tenant without a record, or replaces the record's missing sandbox as `rollout` does, deleting nothing else |
+| `DELETE /tenants/{id}/renderer` | `204` once the tenant's record, then the sandboxes labeled for it when the delete began, are deleted, as `delete` without `--drain` does; also when there was nothing to delete. Each delete lists the whole sandbox group, so at most four run at once, across tenants, and the rest wait their turn |
+| `GET /health/live` | `200` while the service answers; no key needed |
+| `GET /health/ready` | `200` while the service's last listing of the record store that succeeded ended less than two minutes ago, plus twice the time it took; `503` otherwise, and until the first listing succeeds. It never waits for a listing. No key needed |
+
+Failures are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details with a `kind`:
+
+| Status | `kind` | When |
+| --- | --- | --- |
+| `400` | `InvalidRequest` | The tenant ID is not one; also an unknown route (`404`) or method (`405`) |
+| `401` | `Unauthorized` | No key, or not one of `Provisioner:Service:ApiKeys` |
+| `403` | `NotAllowed` | The tenant is under none of the prefixes, which also means that the gateway's `TenantPrefixes` and the service's disagree |
+| `409` | `Disabled` | For `DELETE`: a sandbox labeled for the tenant is disabled, so nothing was deleted. The operator enables the tenant, or deletes it with `delete` |
+| `429` | `QuotaExceeded` | A new tenant's renderer would put its prefix at more than `MaxTenants`. No `Retry-After`: it lasts until tenants under the prefix are deleted or retired |
+| `429` | `RateLimited` | The prefix's `MaxCreatesPerMinute` creates, or the service's, started in the last minute. `Retry-After` says in how many seconds one may start under both |
+| `503` | `Failed` | The renderer could not be created (the data plane, the record store, or its readiness failed), the delete failed, the tenant's record cannot be read or names a sandbox labeled for another tenant, a new tenant's prefix cannot be counted because the store has never been listed, or the service is stopping. The log says why; the answer never does |
+
+Creating a renderer on demand:
+
+- A tenant whose renderer exists is answered at once, and counts toward no limit.
+- Concurrent requests for one tenant share one creation and its answer. A request that gives up,
+  such as one past the gateway's `Provisioning:Timeout`, leaves the creation running, and the next
+  request finds its renderer.
+- The service lists the store's tenants (with Key Vault, the secret names alone) in the
+  background: when it starts, and 30 seconds after each listing ends. No request waits for a
+  listing, but a new tenant's request that arrives before the first has ended. The service counts
+  from its last listing that succeeded, with its own creates and deletes since on top; a tenant
+  created or deleted from the command line or by another replica counts from the next listing.
+- A tenant that has a record is never refused, by the quota or the rate limits: replacing its
+  missing sandbox adds no renderer, even under a prefix with more than `MaxTenants` (tenants
+  created from the command line, a quota lowered since, replicas).
+- A new tenant counts toward its prefix's `MaxTenants`, with the tenants under the prefix that have
+  a record and the creations in flight for new tenants. While the last listing is current (it
+  succeeded less than two minutes ago, plus twice the time it took), a tenant it does not have is
+  taken as new without reading its record, so a refused request costs the store nothing. The
+  creation reads the record first, so a record written since the listing is still found, not
+  replaced; but until the next listing, such a tenant may be refused as new. While the last
+  listing is not current, every tenant's record is read first.
+- Each create counts toward its prefix's `MaxCreatesPerMinute` and the service's, failed ones
+  included: a create starts only while both have had fewer in the last minute, and one refused by
+  either counts toward neither. So one application cannot use up another's creates, as long as the
+  service's `MaxCreatesPerMinute` is above the busiest prefixes' together. Finding a renderer is
+  never limited.
+- The new renderer has the prefix's `Size`, or `Provisioner:Size`, and starts from
+  `Provisioner:DiskImageId`, which `serve` requires; every other setting applies as for `create`.
+- A tenant's creation, delete, and retirement never overlap within the service. A `DELETE` while
+  the tenant's renderer is being created waits for the creation to finish, so that it cannot write
+  its record after the delete; requests for the tenant that arrive during the delete wait for it,
+  then create a renderer afresh. The delete removes only the sandboxes labeled for the tenant when
+  it began, never one created after.
+- The kill switch wins. A `DELETE` of a tenant with a disabled sandbox is refused with `409`
+  `Disabled`, and deletes nothing, so the evidence stays; a `PUT` answers found, and the renderer
+  stays disabled.
+
+`serve` also retires idle renderers as `retire` does, the first time a minute after it starts, so
+that a service restarted more often than `RetireCheckInterval` still does, then
+`RetireCheckInterval` after each run ends. A run leaves alone a tenant whose renderer the service
+is creating or deleting at that moment. With `RetireAfterIdle` at `00:00:00` it retires nothing.
+Each run, with `RetireAfterIdle` at zero too, then deletes the leftover sandboxes of tenants under
+the prefixes, as `prune` does: those the tenant's record does not name, created longer than the
+drain and `ReadyTimeout` ago, of tenants without a disabled sandbox, after the drain
+(`Provisioner:DrainDelay`), and only if the record still does not name them then. A run that fails
+is logged, and the next one runs as planned.
+
+### Keys
+
+Generate a key as for the server, with `scripts/create-reports-api-key.sh`. Give the service the
+`Id` and `Hash` from its `server.env`, as `Provisioner__Service__ApiKeys__0__Id` and
+`Provisioner__Service__ApiKeys__0__Hash`, and give the gateway the credential from `client.env`, as
+`ReportsServer__Gateway__Provisioning__ApiKey`; the rest of `server.env` does not apply. The service
+compares the SHA-256 of the whole key with the `Hash` of the key its ID names, in constant time. To
+rotate, add the new key as `ApiKeys__1`, move the gateway to it, then remove the old one.
+
+### Deployment
+
+- **Internal ingress, TLS at the platform.** The service listens on plain HTTP, where
+  `ASPNETCORE_URLS` or `ASPNETCORE_HTTP_PORTS` says, and on `http://+:8080` when neither is set.
+  Expose it on internal ingress only, behind TLS that the platform terminates; the gateway's
+  `Provisioning:Url` is its `https` address. Nothing else should reach it. On Azure Container
+  Apps the internal name resolves in public DNS, but in the
+  [measured run](../../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md) every request to it from the internet got the platform's `404` or `421`.
+- **An identity of its own**, with the roles in [Azure roles](#azure-roles). Data Owner stays off
+  the request path: the gateway reaches the service only through this API, which can neither run
+  commands in a renderer nor read its files. The service asks each new renderer whether it is ready
+  through the renderer's port, so its outbound address belongs in `Provisioner:AllowedSourceCidrs`,
+  which `serve` requires, with the gateway's.
+- **One replica.** Concurrent requests share a creation, and a tenant's creation, delete, and
+  retirement are kept apart, within one process only. Two replicas that create one tenant's
+  renderer at once are still kept apart by the record check every command makes (see
+  [One command at a time](#one-command-at-a-time)): the replica that finds the other's record when
+  its own renderer is ready discards its sandbox and answers as found, so the cost is a sandbox
+  created for nothing, or, when both check before either writes, one that `prune` deletes. But each
+  replica keeps its own rate limits and counts only its own creations in flight, so replicas
+  together can create more than `MaxCreatesPerMinute`, and briefly exceed `MaxTenants`. Commands
+  from the command line may run while the service does; the same check keeps them apart from it,
+  as [One command at a time](#one-command-at-a-time) says.
+- **Probes.** Liveness on `/health/live`. Readiness on `/health/ready`, which says whether the
+  background listing of the store succeeded lately, without waiting for one: the service is ready
+  once its first listing succeeds, and stays ready, with no request to prompt it, while listings
+  do. At thousands of Key Vault records a listing takes long, since the vault returns 25 names a
+  page; readiness allows for twice the time the last one took.
+- **Shutdown.** The first `SIGTERM` stops taking requests and cancels the creations in flight; each
+  deletes the sandbox it made, for at most two minutes, the requests waiting for it are answered
+  `503`, and the service exits with `0`. Allow for that in the platform's termination grace period;
+  a second signal stops the service at once, and `prune` deletes what it leaves behind.
+- **Logs.** The service logs through ASP.NET Core's console logger, which the usual environment
+  variables configure, such as `Logging__LogLevel__Default` and `Logging__Console__FormatterName=json`.
+  ASP.NET Core's own entries for each request are left out (`Logging__LogLevel__Microsoft.AspNetCore`
+  is `Warning` unless set). The provisioner's progress lines become log entries with the tenant as
+  `TenantId`. Entries name tenants, sandboxes, and disk images; never a key, a renderer's credential,
+  or a verifier, and nothing a refused request sent.
+
+### Container image
+
+[`Dockerfile`](Dockerfile) builds an image that runs `serve`: framework-dependent on the chiseled
+ASP.NET Core runtime image, which has no shell or package manager, as the non-root user `app`
+(UID 1654), on port 8080. Settings come from `Provisioner__*` environment variables.
+
+```bash
+docker build -f src/Atli.Reports.Provisioner/Dockerfile -t atli-reports-provisioner .
+```
+
+Run from the repository root. CI does not build the image. The other commands run from the same
+image with its entrypoint replaced:
+`docker run --entrypoint dotnet <image> atli-reports-provisioner.dll list`.
+
 ## Incident response
 
 When a renderer may be compromised:
@@ -270,7 +497,9 @@ When a renderer may be compromised:
 4. If it was a false alarm, `enable --tenant <id>` instead.
 
 A record that cannot be read does not stop either command: `disable` and `delete` find the
-tenant's sandboxes by their labels.
+tenant's sandboxes by their labels. For a tenant under a managed prefix, the provisioning service
+refuses the application's deletion of a disabled tenant (`409`), and deletes nothing, until step 3
+or 4.
 
 ## Rolling out a server release
 
@@ -287,6 +516,13 @@ of the rollout.
 4. Set `Provisioner:DiskImageId` to the new ID, so tenants created from now on start from it.
 5. Run `list`: every renderer is on the new disk image, every record can be read, and no renderer
    sandbox lacks a record.
+
+With tenants under `Provisioner:Service:TenantPrefixes`, step 2 can be
+`rollout --disk-image <id> --stopped retire`. Then, of those tenants, only running renderers (and
+disabled ones) are replaced; stopped ones are retired, and come back from the provisioning
+service's disk image on their next conversion, so the rollout creates no renderer that would only
+sit idle. Do step 4 for the provisioning service first: until it runs with the new
+`DiskImageId`, retired tenants come back on the old image.
 
 ## Why one sandbox per customer, and no shared snapshot
 

@@ -16,7 +16,11 @@ internal abstract record ProvisionerCommand
 
 internal sealed record CreateCommand(string TenantId) : ProvisionerCommand;
 
-internal sealed record RolloutCommand(string? TenantId, int MaxParallel) : ProvisionerCommand;
+/// <param name="RetireStopped">
+/// Whether managed tenants' stopped renderers are retired instead of replaced: <c>--stopped retire</c>.
+/// </param>
+internal sealed record RolloutCommand(string? TenantId, int MaxParallel, bool RetireStopped)
+  : ProvisionerCommand;
 
 /// <param name="Drain">How long to wait between deleting the record and the sandbox; none by default.</param>
 internal sealed record DeleteCommand(string TenantId, TimeSpan Drain) : ProvisionerCommand;
@@ -31,6 +35,12 @@ internal sealed record DisableCommand(string TenantId) : ProvisionerCommand;
 
 /// <param name="TenantId">The tenant whose disabled renderer may start again.</param>
 internal sealed record EnableCommand(string TenantId) : ProvisionerCommand;
+
+/// <summary><c>serve</c>: run the provisioning service until stopped.</summary>
+internal sealed record ServeCommand : ProvisionerCommand;
+
+/// <summary><c>retire</c>: retire managed tenants' renderers that have been stopped too long, once.</summary>
+internal sealed record RetireCommand : ProvisionerCommand;
 
 /// <summary><c>--help</c>: write <paramref name="Text"/> and succeed.</summary>
 internal sealed record HelpCommand(string Text) : ProvisionerCommand;
@@ -76,6 +86,8 @@ internal static class CommandLine
       prune     Delete renderer sandboxes that no record points to.
       disable   Stop a tenant's renderer and keep it from starting: the kill switch.
       enable    Let a disabled renderer start again.
+      serve     Run the provisioning service, which creates renderers on demand.
+      retire    Retire managed tenants' renderers that have been stopped too long.
 
     Run 'atli-reports-provisioner <command> --help' for a command's options. Settings come from
     appsettings.json next to the binary, then Provisioner__* environment variables, then flags.
@@ -98,7 +110,7 @@ internal static class CommandLine
 
   public const string RolloutUsage = """
     Usage: atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel <n>]
-                                            [--drain <hh:mm:ss>]
+                                            [--drain <hh:mm:ss>] [--stopped replace|retire]
 
     Replaces every renderer, or the tenant's, that runs another disk image or whose sandbox is gone,
     suspended ones included: a new sandbox with a new credential and the old one's size, its record
@@ -113,14 +125,21 @@ internal static class CommandLine
       --drain <hh:mm:ss>     How long an old renderer stays after its record moves, for the gateway's
                              cached records and requests in flight; default Provisioner:DrainDelay,
                              else 00:02:30.
+      --stopped replace|retire
+                             What happens to the stopped renderers of tenants under
+                             Provisioner:Service:TenantPrefixes: replaced like the others (the
+                             default), or retired as the retire command does, however long they have
+                             been stopped, to come back from the provisioning service's disk image on
+                             their next conversion. Disabled renderers are replaced either way.
     """;
 
   public const string DeleteUsage = """
     Usage: atli-reports-provisioner delete --tenant <id> [--drain <hh:mm:ss>]
 
     Deletes the tenant's record, even one that cannot be read, so the gateway stops routing to it,
-    then every sandbox labeled for the tenant. A sandbox the record names that is labeled for another
-    tenant is not deleted. Deleting a tenant that has neither succeeds.
+    then every sandbox labeled for the tenant when the delete began, disabled ones included. A
+    sandbox the record names that is labeled for another tenant is not deleted. Deleting a tenant
+    that has neither succeeds.
 
     Options:
       --tenant <id>        The tenant.
@@ -173,6 +192,28 @@ internal static class CommandLine
       --tenant <id>   The tenant.
     """;
 
+  public const string ServeUsage = """
+    Usage: atli-reports-provisioner serve
+
+    Runs the provisioning service until stopped: an HTTP API on internal ingress that the gateway
+    calls to create a renderer for a tenant under one of Provisioner:Service:TenantPrefixes on its
+    first conversion, and to delete one when the application deletes the tenant. It authenticates
+    the gateway with Provisioner:Service:ApiKeys, keeps each prefix within its MaxTenants and
+    MaxCreatesPerMinute and all creates within the service's MaxCreatesPerMinute, retires renderers
+    stopped for longer than RetireAfterIdle, and deletes the managed tenants' leftover sandboxes.
+    Needs Provisioner:AllowedSourceCidrs. Listens where ASPNETCORE_URLS says.
+    """;
+
+  public const string RetireUsage = """
+    Usage: atli-reports-provisioner retire
+
+    Deletes, with their records, the renderers of tenants under Provisioner:Service:TenantPrefixes
+    that have been stopped for longer than Provisioner:Service:RetireAfterIdle, as serve does every
+    RetireCheckInterval. Each comes back from the current disk image on its tenant's next
+    conversion. Disabled renderers are kept, and so are stopped sandboxes that the tenant's record
+    does not name, which prune deletes.
+    """;
+
   public static ProvisionerCommand Parse(IReadOnlyList<string> arguments)
   {
     ArgumentNullException.ThrowIfNull(arguments);
@@ -196,6 +237,8 @@ internal static class CommandLine
       "prune" => PruneUsage,
       "disable" => DisableUsage,
       "enable" => EnableUsage,
+      "serve" => ServeUsage,
+      "retire" => RetireUsage,
       _ => throw new UsageException($"Unknown command '{name}'.", Overview),
     };
     var options = ParseOptions(arguments.Skip(1), usage);
@@ -212,6 +255,8 @@ internal static class CommandLine
       "prune" => ParsePrune(options, usage),
       "disable" => ParseTenantOnly(options, usage, tenant => new DisableCommand(tenant)),
       "enable" => ParseTenantOnly(options, usage, tenant => new EnableCommand(tenant)),
+      "serve" => ParseNoOptions(options, usage, new ServeCommand()),
+      "retire" => ParseNoOptions(options, usage, new RetireCommand()),
       _ => ParseList(options, usage),
     };
   }
@@ -231,7 +276,7 @@ internal static class CommandLine
 
   private static RolloutCommand ParseRollout(Options options, string usage)
   {
-    options.Allow(usage, "--disk-image", "--tenant", "--max-parallel", "--drain");
+    options.Allow(usage, "--disk-image", "--tenant", "--max-parallel", "--drain", "--stopped");
     Dictionary<string, string?> settings = [];
     AddDiskImage(options, settings, usage);
     AddDrain(options, settings, usage);
@@ -253,8 +298,17 @@ internal static class CommandLine
       );
     }
 
+    var retireStopped = options.Get("--stopped") switch
+    {
+      null or "replace" => false,
+      "retire" => true,
+      var stopped => throw new UsageException(
+        $"--stopped is '{stopped}'; use replace or retire.",
+        usage
+      ),
+    };
     var tenant = options.Get("--tenant") is { } value ? ValidateTenant(value, usage) : null;
-    return new RolloutCommand(tenant, maxParallel) { Settings = settings };
+    return new RolloutCommand(tenant, maxParallel, retireStopped) { Settings = settings };
   }
 
   private static DeleteCommand ParseDelete(Options options, string usage)
@@ -300,6 +354,16 @@ internal static class CommandLine
   {
     options.Allow(usage);
     return new ListCommand();
+  }
+
+  private static ProvisionerCommand ParseNoOptions(
+    Options options,
+    string usage,
+    ProvisionerCommand command
+  )
+  {
+    options.Allow(usage);
+    return command;
   }
 
   /// <summary>

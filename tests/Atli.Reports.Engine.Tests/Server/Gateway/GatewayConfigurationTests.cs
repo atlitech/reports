@@ -89,6 +89,22 @@ public class GatewayConfigurationTests
   )]
   [Arguments("--ReportsServer:Gateway:Replicas=0", "Replicas")]
   [Arguments("--ReportsServer:Gateway:Replicas=1001", "Replicas")]
+  [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=0",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=10001",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=0",
+    "MaxConcurrentDeletesPerCaller"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=101",
+    "MaxConcurrentDeletesPerCaller"
+  )]
   public async Task Invalid_settings_fail_at_startup_naming_the_setting(
     string setting,
     string named
@@ -96,6 +112,38 @@ public class GatewayConfigurationTests
   {
     var exception = await Assert
       .That(() => ReportsServerApplication.Create([.. Valid(), setting]))
+      .Throws<InvalidOperationException>();
+
+    await Assert.That(exception!.Message).Contains(named);
+  }
+
+  [Test]
+  // Over http the gateway's credential for the service would travel in clear.
+  [Arguments("http://provisioner.example.test/", false, "http needs AllowHttpRenderers=true")]
+  [Arguments("https://user:secret@provisioner.example.test/", true, "Provisioning:Url")]
+  [Arguments("https://provisioner.example.test/?key=1", true, "Provisioning:Url")]
+  [Arguments("provisioner/relative", true, "Provisioning:Url")]
+  public async Task An_unusable_provisioning_url_fails_at_startup(
+    string url,
+    bool allowHttp,
+    string named
+  )
+  {
+    var exception = await Assert
+      .That(() =>
+        ReportsServerApplication.Create([
+          "--ReportsServer:Mode=Gateway",
+          "--ReportsServer:Authentication:Mode=None",
+          "--ReportsServer:Gateway:AllowAnonymousCallers=true",
+          $"--ReportsServer:Gateway:AllowHttpRenderers={allowHttp}",
+          .. Membership(0, "anonymous", "acme"),
+          "--ReportsServer:Gateway:Records:Store=File",
+          $"--ReportsServer:Gateway:Records:Path={Path.GetTempPath()}",
+          "--ReportsServer:Gateway:Provisioning:Mode=OnDemand",
+          $"--ReportsServer:Gateway:Provisioning:Url={url}",
+          "--ReportsServer:Gateway:Provisioning:ApiKey=gateway.0123456789abcdefghijklmnopqrstuv",
+        ])
+      )
       .Throws<InvalidOperationException>();
 
     await Assert.That(exception!.Message).Contains(named);
@@ -189,6 +237,43 @@ public class GatewayConfigurationTests
     }
 
     await Assert.That(store.Gets).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task Clearing_out_expired_answers_keeps_the_records_still_cached()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    store.Records["globex"] = Record("globex", renderer.BaseUrl);
+    ManualClock clock = new();
+    await using var gateway = await StartWithStoreAsync(
+      store,
+      [
+        "--ReportsServer:Gateway:Tenants:0:Tenants:1=globex",
+        "--ReportsServer:Gateway:Records:CacheDuration=00:05:00",
+      ],
+      builder => builder.Services.AddSingleton<TimeProvider>(clock)
+    );
+
+    async Task ConvertAsync(string tenant)
+    {
+      using var request = ConvertRequest();
+      request.Headers.Add("X-Reports-Tenant", tenant);
+      using var response = await gateway.Client.SendAsync(request, TestToken);
+      await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    await ConvertAsync("acme");
+    // Past the sweep interval but within acme's cache duration: globex's lookup clears out
+    // expired answers, and acme's is not one of them.
+    clock.Advance(TimeSpan.FromMinutes(2));
+    await ConvertAsync("globex");
+    await ConvertAsync("acme");
+
+    await Assert.That(store.Lookups).IsEquivalentTo(["acme", "globex"]);
   }
 
   [Test]

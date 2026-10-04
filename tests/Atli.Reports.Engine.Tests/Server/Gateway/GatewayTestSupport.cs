@@ -215,6 +215,12 @@ internal sealed class FakeRecordStore : IRendererRecordStore
   /// <summary>The <see cref="Activity.Current"/> of each lookup, null included.</summary>
   public ConcurrentQueue<Activity?> Activities { get; } = new();
 
+  /// <summary>
+  /// When set, each lookup runs it with the tenant after reading the record and before answering,
+  /// so a test can hold a lookup that has already read the store.
+  /// </summary>
+  public Func<string, Task>? AfterRead { get; set; }
+
   public Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken)
   {
     Interlocked.Increment(ref _gets);
@@ -222,7 +228,17 @@ internal sealed class FakeRecordStore : IRendererRecordStore
     Activities.Enqueue(Activity.Current);
     return Failure is { } failure
       ? Task.FromException<RendererRecord?>(failure)
-      : Task.FromResult(Records.GetValueOrDefault(tenantId));
+      : AnswerAsync(Records.GetValueOrDefault(tenantId), tenantId);
+  }
+
+  private async Task<RendererRecord?> AnswerAsync(RendererRecord? record, string tenantId)
+  {
+    if (AfterRead is { } afterRead)
+    {
+      await afterRead(tenantId);
+    }
+
+    return record;
   }
 
   public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken)
@@ -238,6 +254,52 @@ internal sealed class FakeRecordStore : IRendererRecordStore
 
   public Task DeleteAsync(string tenantId, CancellationToken cancellationToken) =>
     throw new NotSupportedException("The gateway never deletes records.");
+}
+
+/// <summary>A clock that moves only when told to; timers still run on real time.</summary>
+internal sealed class ManualClock : TimeProvider
+{
+  private long _ticks;
+
+  public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+  public override long GetTimestamp() => Volatile.Read(ref _ticks);
+
+  public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
+}
+
+/// <summary>
+/// Holds the next lookup of one tenant in a <see cref="FakeRecordStore"/> once it has read the
+/// record, until released: a lookup that read the store before a change and finishes after it.
+/// Later lookups of the tenant answer at once.
+/// </summary>
+internal sealed class HeldLookup
+{
+  private readonly TaskCompletionSource _read = new(
+    TaskCreationOptions.RunContinuationsAsynchronously
+  );
+  private readonly TaskCompletionSource _release = new(
+    TaskCreationOptions.RunContinuationsAsynchronously
+  );
+  private int _taken;
+
+  public HeldLookup(FakeRecordStore store, string tenantId) =>
+    store.AfterRead = tenant =>
+      tenant == tenantId && Interlocked.Exchange(ref _taken, 1) == 0
+        ? HoldAsync()
+        : Task.CompletedTask;
+
+  /// <summary>Completes once the held lookup has read the record.</summary>
+  public Task Read => _read.Task;
+
+  /// <summary>Lets the held lookup answer with the record it read.</summary>
+  public void Release() => _release.TrySetResult();
+
+  private async Task HoldAsync()
+  {
+    _read.TrySetResult();
+    await _release.Task;
+  }
 }
 
 /// <summary>

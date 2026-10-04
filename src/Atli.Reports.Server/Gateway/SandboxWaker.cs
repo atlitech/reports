@@ -38,8 +38,17 @@ internal sealed partial class SandboxWaker(
   /// <summary>The shortest time between two resume calls for one sandbox.</summary>
   private static readonly TimeSpan MinResumeInterval = TimeSpan.FromSeconds(5);
 
+  /// <summary>
+  /// How often sandboxes not checked for a while are forgotten. Renderers are replaced and retired,
+  /// so sandbox IDs keep changing, and entries must not outlive their use.
+  /// </summary>
+  private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
+
   private readonly Lock _gate = new();
   private readonly Dictionary<string, SandboxEntry> _sandboxes = new(StringComparer.Ordinal);
+
+  /// <summary>When idle entries are next forgotten, as a <see cref="TimeProvider"/> timestamp; under <see cref="_gate"/>.</summary>
+  private long _nextSweep;
 
   /// <summary>
   /// Checks <paramref name="sandboxId"/> and resumes it if it is not running, or joins the check
@@ -65,6 +74,7 @@ internal sealed partial class SandboxWaker(
     SandboxEntry entry;
     lock (_gate)
     {
+      SweepIdle();
       if (!_sandboxes.TryGetValue(sandboxId, out var known))
       {
         known = new SandboxEntry();
@@ -236,6 +246,50 @@ internal sealed partial class SandboxWaker(
 
   private bool Fresh(long? at) =>
     at is { } value && timeProvider.GetElapsedTime(value) < StateLifetime;
+
+  /// <summary>
+  /// Forgets sandboxes with no check in flight and nothing read or resumed for longer than any
+  /// request could still wait on them, at most once per <see cref="SweepInterval"/>. Under
+  /// <see cref="_gate"/>.
+  /// </summary>
+  private void SweepIdle()
+  {
+    var now = timeProvider.GetTimestamp();
+    if (now < _nextSweep)
+    {
+      return;
+    }
+
+    _nextSweep = now + Ticks(SweepInterval);
+    // A request sent before a resume uses its time for as long as the request may last.
+    var keep = Ticks(
+      (
+        options.Wake.Timeout > options.RendererTimeout
+          ? options.Wake.Timeout
+          : options.RendererTimeout
+      ) + MinResumeInterval
+    );
+    List<string>? idle = null;
+    foreach (var (sandboxId, entry) in _sandboxes)
+    {
+      var last = Math.Max(
+        entry.StateAt ?? 0,
+        Math.Max(entry.ResumeStartedAt ?? 0, entry.ResumedAt ?? 0)
+      );
+      if (entry.Checking is null && now - last > keep)
+      {
+        (idle ??= []).Add(sandboxId);
+      }
+    }
+
+    foreach (var sandboxId in idle ?? [])
+    {
+      _sandboxes.Remove(sandboxId);
+    }
+  }
+
+  private long Ticks(TimeSpan duration) =>
+    (long)(duration.TotalSeconds * timeProvider.TimestampFrequency);
 
   [LoggerMessage(
     EventId = 60,

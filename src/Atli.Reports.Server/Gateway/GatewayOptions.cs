@@ -42,14 +42,17 @@ internal sealed class GatewayOptions
   public GatewayCallerTenants[] Tenants { get; set; } = [];
 
   /// <summary>
-  /// The header a caller with several tenants names one in. Only a selector: it is checked against
-  /// the caller's membership and never names a tenant the caller does not belong to.
+  /// The header a caller names its tenant in, unless it has one listed tenant and no prefix. Only a
+  /// selector: it is checked against the caller's membership and never names a tenant the caller
+  /// does not belong to.
   /// </summary>
   public string TenantHeader { get; set; } = "X-Reports-Tenant";
 
   public GatewayRecordsOptions Records { get; set; } = new();
 
   public GatewayWakeOptions Wake { get; set; } = new();
+
+  public GatewayProvisioningOptions Provisioning { get; set; } = new();
 
   /// <summary>
   /// The deadline for one forwarded conversion, from the record lookup to the PDF's last byte,
@@ -70,7 +73,16 @@ internal sealed class GatewayOptions
   /// </summary>
   public int Replicas { get; set; } = 1;
 
-  /// <summary>Allows <c>http</c> renderer URLs. For tests and development only.</summary>
+  /// <summary>
+  /// How many record lookups per second, in this replica, one caller may cause for tenants under
+  /// its prefixes that the gateway has no answer for, cached or in flight: a bucket of this many,
+  /// refilled at this rate. A caller can name a new tenant on every request, and each costs a read
+  /// of the record store (Key Vault, whose throttling would fail every tenant's reads) before the
+  /// request body is read; beyond the budget the request is <c>Busy</c> and reads nothing.
+  /// </summary>
+  public int MaxNewTenantLookupsPerCallerPerSecond { get; set; } = 20;
+
+  /// <summary>Allows <c>http</c> renderer and provisioning service URLs. For tests and development only.</summary>
   public bool AllowHttpRenderers { get; set; }
 
   /// <summary>
@@ -112,6 +124,7 @@ internal sealed class GatewayOptions
 
     Records.Validate(AllowHttpRenderers);
     Wake.Validate();
+    Provisioning.Validate(Records, AllowHttpRenderers);
 
     if (RendererTimeout <= TimeSpan.Zero || RendererTimeout > TimeSpan.FromHours(24))
     {
@@ -138,6 +151,13 @@ internal sealed class GatewayOptions
     {
       throw new InvalidOperationException(
         "ReportsServer:Gateway:Replicas must be between 1 and 1000."
+      );
+    }
+
+    if (MaxNewTenantLookupsPerCallerPerSecond is < 1 or > 10_000)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond must be between 1 and 10000."
       );
     }
   }
@@ -177,7 +197,7 @@ internal sealed class GatewayOptions
     if (Tenants.Length == 0)
     {
       throw new InvalidOperationException(
-        "Gateway mode needs ReportsServer:Gateway:Tenants: each authenticated CallerId and the product tenants it belongs to."
+        "Gateway mode needs ReportsServer:Gateway:Tenants: each authenticated CallerId and its product tenants or tenant prefixes."
       );
     }
 
@@ -196,11 +216,15 @@ internal sealed class GatewayOptions
         );
       }
 
+      if (membership.Tenants.Length == 0 && membership.TenantPrefixes.Length == 0)
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' needs at least one tenant ID in Tenants or one prefix in TenantPrefixes."
+        );
+      }
+
       HashSet<string> tenants = new(StringComparer.Ordinal);
-      if (
-        membership.Tenants.Length == 0
-        || !membership.Tenants.All(tenant => TenantId.IsValid(tenant) && tenants.Add(tenant))
-      )
+      if (!membership.Tenants.All(tenant => TenantId.IsValid(tenant) && tenants.Add(tenant)))
       {
         throw new InvalidOperationException(
           $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' must list distinct tenant IDs: 1 to 63 lowercase letters, digits, and hyphens, starting with a letter or digit."
@@ -213,17 +237,97 @@ internal sealed class GatewayOptions
           $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' names the tenant ID '{ReadinessProbeTenantId}', which readiness reserves."
         );
       }
+
+      HashSet<string> prefixes = new(StringComparer.Ordinal);
+      if (
+        !membership.TenantPrefixes.All(prefix =>
+          TenantPrefix.IsValid(prefix) && prefixes.Add(prefix)
+        )
+      )
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' must list distinct TenantPrefixes: 2 to {TenantPrefix.MaxLength} lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen."
+        );
+      }
+
+      var reserved = Array.Find(
+        membership.TenantPrefixes,
+        prefix => TenantPrefix.Owns(prefix, ReadinessProbeTenantId)
+      );
+      if (reserved is not null)
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' has the tenant prefix '{reserved}', which owns the tenant ID '{ReadinessProbeTenantId}' that readiness reserves."
+        );
+      }
+    }
+
+    // A prefix's tenants are its caller's alone, so no other caller's prefix may overlap it. They
+    // are also managed through the prefix: the provisioning service retires and deletes the
+    // renderer of every tenant under a prefix it serves, and the gateway never has it create a
+    // listed tenant's, so a listed tenant under a prefix, even its own caller's, would lose its
+    // renderer for good. No caller may list one. Listed tenants elsewhere may still be shared.
+    foreach (var owner in Tenants)
+    {
+      foreach (var prefix in owner.TenantPrefixes)
+      {
+        foreach (var other in Tenants)
+        {
+          var listed = Array.Find(other.Tenants, tenant => TenantPrefix.Owns(prefix, tenant));
+          if (listed is not null)
+          {
+            throw new InvalidOperationException(
+              (
+                ReferenceEquals(other, owner)
+                  ? $"ReportsServer:Gateway:Tenants for caller '{owner.CallerId}' lists the tenant ID '{listed}', which is under its own tenant prefix '{prefix}'."
+                  : $"ReportsServer:Gateway:Tenants for caller '{other.CallerId}' lists the tenant ID '{listed}', which is under the tenant prefix '{prefix}' of caller '{owner.CallerId}'."
+              )
+                + " A prefix's tenants are managed through the prefix, where the provisioning service creates, retires, and deletes their renderers, so no caller may list one."
+            );
+          }
+
+          if (ReferenceEquals(other, owner))
+          {
+            continue;
+          }
+
+          var overlapping = Array.Find(
+            other.TenantPrefixes,
+            otherPrefix => TenantPrefix.Overlap(prefix, otherPrefix)
+          );
+          if (overlapping is not null)
+          {
+            throw new InvalidOperationException(
+              $"ReportsServer:Gateway:Tenants for callers '{owner.CallerId}' and '{other.CallerId}' have the tenant prefixes '{prefix}' and '{overlapping}', which overlap: one starts with the other, so both callers would own the same tenants."
+            );
+          }
+        }
+      }
     }
   }
 }
 
-/// <summary>One caller's product tenants.</summary>
+/// <summary>
+/// One caller's product tenants: those it lists, and every valid tenant ID under its prefixes.
+/// </summary>
 internal sealed class GatewayCallerTenants
 {
   /// <summary>The authenticated caller ID: an API key's <c>CallerId</c>, or the JWT caller claim.</summary>
   public string CallerId { get; set; } = "";
 
+  /// <summary>
+  /// Tenant IDs the caller belongs to, which other callers may list too, but none under any
+  /// caller's prefix. A caller with exactly one, and no prefixes, may leave the tenant header out.
+  /// </summary>
   public string[] Tenants { get; set; } = [];
+
+  /// <summary>
+  /// Tenant prefixes the caller owns (<see cref="TenantPrefix"/>): every valid tenant ID under one is
+  /// the caller's, named in the tenant header, so that an application can have a tenant per
+  /// workspace without listing each. Renderer records do not name their caller, so a prefix must not
+  /// move to another caller while tenants remain under it.
+  /// </summary>
+  public string[] TenantPrefixes { get; set; } = [];
 }
 
 /// <summary>
@@ -435,6 +539,89 @@ internal sealed class GatewayWakeOptions
           exception
         );
       }
+    }
+  }
+}
+
+/// <summary>
+/// <c>ReportsServer:Gateway:Provisioning</c>: whether the gateway asks the provisioning service
+/// (<see cref="Atli.Reports.Hosting.Provisioning.ProvisioningApi"/>) to create a renderer for a
+/// tenant under one of its callers' prefixes that has none, and to delete one when the caller deletes
+/// the tenant.
+/// </summary>
+internal sealed class GatewayProvisioningOptions
+{
+  public const string OnDemandMode = "OnDemand";
+
+  /// <summary><c>None</c>, or <c>OnDemand</c> to create prefix tenants' renderers on first use.</summary>
+  public string Mode { get; set; } = "None";
+
+  /// <summary>For <c>OnDemand</c>: the provisioning service's base address, on internal ingress.</summary>
+  public Uri? Url { get; set; }
+
+  /// <summary>For <c>OnDemand</c>: the gateway's credential for the provisioning service.</summary>
+  public string ApiKey { get; set; } = "";
+
+  /// <summary>How long the gateway waits for the service to create or delete a renderer.</summary>
+  public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(60);
+
+  /// <summary>
+  /// How many deletions one caller may have in flight in this replica; more are <c>Busy</c>, so no
+  /// caller can hold any number of calls to the service open.
+  /// </summary>
+  public int MaxConcurrentDeletesPerCaller { get; set; } = 2;
+
+  public bool Enabled => Mode == OnDemandMode;
+
+  public void Validate(GatewayRecordsOptions records, bool allowHttp)
+  {
+    if (Mode is not ("None" or OnDemandMode))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode must be None (the default) or OnDemand."
+      );
+    }
+
+    if (Timeout <= TimeSpan.Zero || Timeout > TimeSpan.FromMinutes(10))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Timeout must be positive and at most 10 minutes."
+      );
+    }
+
+    if (MaxConcurrentDeletesPerCaller is < 1 or > 100)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller must be between 1 and 100."
+      );
+    }
+
+    if (!Enabled)
+    {
+      return;
+    }
+
+    // Over http, the gateway's credential for the service would travel in clear.
+    if (!GatewayOptions.IsRendererUrl(Url, allowHttp))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:Url, the provisioning service's absolute https address without credentials, query, or fragment"
+          + (allowHttp ? " (http is allowed)." : "; http needs AllowHttpRenderers=true.")
+      );
+    }
+
+    if (!GatewayOptions.IsApiKey(ApiKey))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:ApiKey, the gateway's credential for the provisioning service."
+      );
+    }
+
+    if (records.Store == GatewayRecordsOptions.ConfigurationStore)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs a record store the provisioning service writes: File or KeyVault."
+      );
     }
   }
 }

@@ -47,6 +47,7 @@ engine and embedded Blazor libraries do not acquire an authentication dependency
 | `POST /convert` | `reports.convert` (configurable JWT permission) |
 | `GET /openapi/v1.json` | `reports.diagnostics` |
 | `GET /health/details` | `reports.diagnostics` |
+| `DELETE /tenants/{tenantId}` | `reports.tenants` (configurable JWT permission); [gateway mode](engine/server.md#gateway-mode) with `Provisioning:Mode=OnDemand` only |
 | `GET /health/live`, `GET /health/ready` | Anonymous, status only |
 
 `None` explicitly permits anonymous access to every endpoint, including diagnostics. Use it only
@@ -105,6 +106,7 @@ ReportsServer__Authentication__Jwt__Authority=https://login.microsoftonline.com/
 ReportsServer__Authentication__Jwt__Audience=<reports-api-audience>
 ReportsServer__Authentication__Jwt__PermissionClaimType=roles
 ReportsServer__Authentication__Jwt__RequiredPermission=reports.convert
+ReportsServer__Authentication__Jwt__TenantsPermission=reports.tenants
 ReportsServer__Authentication__Jwt__CallerIdClaimType=sub
 ```
 
@@ -112,6 +114,9 @@ The standard ASP.NET Core JWT bearer handler validates the issuer, audience, sig
 signature, expiration, and lifetime (30 seconds of clock tolerance), using HTTPS metadata and
 signing-key discovery. The caller must also have the required permission. A valid token without
 that permission gets `403`; a missing or invalid credential gets `401`, never a login redirect.
+`TenantsPermission` names the permission for deleting tenants' renderers; it must differ from
+`RequiredPermission` and from `reports.diagnostics`, so that neither converting nor reading
+diagnostics grants it. API keys grant it with `reports.tenants` in their `Permissions`.
 Use an identity-provider-specific stable application claim if `sub` is unsuitable. Internal
 Atli identity claims in a supplied token are discarded and rebuilt after validation.
 

@@ -1,7 +1,8 @@
 name: Server image
 
 # Builds the Atli.Reports.Server container image natively on amd64 and arm64, with the
-# chrome-headless-shell version the Dockerfile pins, checks that the image has that browser version,
+# chrome-headless-shell version the Dockerfile pins, from a checkout whose files only their owner may
+# read (as under umask 077), checks that the image has that browser version,
 # and smoke-tests each build with .github/scripts/smoke-test-server-image.sh: under the seccomp
 # profile deploy/seccomp/chromium.json the server becomes ready, converts a small document to a PDF,
 # runs as a non-root user under tini with Chromium's sandbox, and shuts down cleanly; under Docker's
@@ -87,6 +88,13 @@ jobs:
       - name: Check the seccomp profile against moby/profiles
         if: matrix.arch == 'amd64'
         run: python3 .github/scripts/chromium-seccomp-profile.py check
+
+      # A checkout made under umask 077 leaves its files readable by their owner alone, and publish
+      # copies appsettings.json into the image with that mode. Building from such a checkout makes
+      # the smoke test below fail if the image ever depends on the builder's umask again: the
+      # server, which runs as app, could not read its settings.
+      - name: Give the checkout a umask 077 checkout's modes
+        run: chmod -R go-rwx .
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

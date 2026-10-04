@@ -35,6 +35,12 @@ namespace Atli.Reports.Server.Gateway;
 /// busy, a few times with a short random pause, so a burst does not fail for a renderer that frees
 /// up within moments.
 /// </para>
+/// <para>
+/// With <c>Provisioning:Mode=OnDemand</c>, a tenant under one of its caller's prefixes that has no
+/// record, or whose record names a renderer the platform no longer finds, gets one from the
+/// provisioning service (see <see cref="TenantProvisioning"/>), and the conversion is sent to it.
+/// That happens at most once per conversion. Listed tenants' renderers are the operator's.
+/// </para>
 /// </remarks>
 internal sealed partial class RendererGateway(
   IHttpContextAccessor httpContextAccessor,
@@ -43,7 +49,8 @@ internal sealed partial class RendererGateway(
   GatewayOptions settings,
   TimeProvider timeProvider,
   ILogger<RendererGateway> logger,
-  SandboxWaker? waker
+  SandboxWaker? waker,
+  TenantProvisioning? provisioning
 ) : IHtmlToPdfConverter
 {
   /// <summary>The named <see cref="HttpClient"/> renderer requests go through.</summary>
@@ -98,6 +105,8 @@ internal sealed partial class RendererGateway(
         "Gateway conversions need the tenant that the gateway middleware resolves."
       );
     var tenantId = tenant.TenantId;
+    // Only a tenant under one of its caller's prefixes is the provisioning service's to create.
+    var canEnsure = provisioning is not null && tenant.ViaPrefix;
 
     using var deadline = new CancellationTokenSource(settings.RendererTimeout, timeProvider);
     using var linked = CancellationTokenSource.CreateLinkedTokenSource(
@@ -121,23 +130,32 @@ internal sealed partial class RendererGateway(
         return Unavailable("The renderer directory is unavailable.");
       }
 
-      if (record is null)
+      var ensured = false;
+      if (record is null && canEnsure)
       {
-        LogNoRenderer(logger, tenantId);
-        return Unavailable("The tenant has no renderer.");
+        ensured = true;
+        (record, var failure) = await EnsureAsync(tenantId, linked.Token);
+        if (failure is not null)
+        {
+          return failure;
+        }
       }
 
-      if (
-        record.TenantId != tenantId
-        || !GatewayOptions.IsRendererUrl(record.Url, settings.AllowHttpRenderers)
-        || !GatewayOptions.IsApiKey(record.ApiKey)
-      )
+      var result = await ForwardAsync(attempt, record);
+      // The platform found no renderer at the record's URL: deleted, or replaced since the record
+      // was read. The service creates one, or finds the replacement, and the conversion goes there.
+      if (attempt.RendererNotFound && canEnsure && !ensured)
       {
-        LogInvalidRecord(logger, tenantId);
-        return Unavailable("The tenant's renderer is unavailable.");
+        (record, var failure) = await EnsureAsync(tenantId, linked.Token);
+        if (failure is not null)
+        {
+          return failure;
+        }
+
+        result = await ForwardAsync(attempt, record);
       }
 
-      return await ForwardAsync(attempt, record);
+      return result;
     }
     catch (DestinationWriteException exception)
     {
@@ -158,14 +176,61 @@ internal sealed partial class RendererGateway(
   }
 
   /// <summary>
-  /// Sends the conversion, resending it while a suspended sandbox wakes or while the renderer is
-  /// busy, and relays the answer.
+  /// Has the provisioning service ensure the tenant's renderer, then reads its record; or the
+  /// caller's error, with the service's <c>Retry-After</c> set on the response when it gave one.
+  /// </summary>
+  private async Task<(RendererRecord? Record, ConversionError? Error)> EnsureAsync(
+    string tenantId,
+    CancellationToken cancellationToken
+  )
+  {
+    if (await provisioning!.EnsureAsync(tenantId, cancellationToken) is { } failure)
+    {
+      if (httpContextAccessor.HttpContext is { } context)
+      {
+        failure.ApplyRetryAfter(context);
+      }
+
+      return (null, failure.Error);
+    }
+
+    try
+    {
+      return (await directory.GetAsync(tenantId, cancellationToken), null);
+    }
+    catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+    {
+      LogDirectoryFailed(logger, tenantId, exception);
+      return (null, Unavailable("The renderer directory is unavailable."));
+    }
+  }
+
+  /// <summary>
+  /// Checks the record, sends the conversion, resending it while a suspended sandbox wakes or while
+  /// the renderer is busy, and relays the answer.
   /// </summary>
   private async Task<OneOf<Success, ConversionError>> ForwardAsync(
     Attempt attempt,
-    RendererRecord record
+    RendererRecord? record
   )
   {
+    attempt.RendererNotFound = false;
+    if (record is null)
+    {
+      LogNoRenderer(logger, attempt.TenantId);
+      return Unavailable("The tenant has no renderer.");
+    }
+
+    if (
+      record.TenantId != attempt.TenantId
+      || !GatewayOptions.IsRendererUrl(record.Url, settings.AllowHttpRenderers)
+      || !GatewayOptions.IsApiKey(record.ApiKey)
+    )
+    {
+      LogInvalidRecord(logger, attempt.TenantId);
+      return Unavailable("The tenant's renderer is unavailable.");
+    }
+
     var client = httpClientFactory.CreateClient(HttpClientName);
     var convertUri = new Uri(record.Url.AbsoluteUri.TrimEnd('/') + "/convert", UriKind.Absolute);
     var canWake = waker is not null && record.SandboxId is not null;
@@ -251,6 +316,8 @@ internal sealed partial class RendererGateway(
             case WakeResult.Missing:
               LogNoSandbox(logger, attempt.TenantId, record.SandboxId);
               directory.Evict(attempt.TenantId, record);
+              // As the port proxy's 404: the provisioning service may create a new renderer.
+              attempt.RendererNotFound = true;
               return Unavailable("The tenant's renderer is not running.");
             case WakeResult.Disabled:
               LogDisabled(logger, attempt.TenantId, record.SandboxId);
@@ -297,6 +364,7 @@ internal sealed partial class RendererGateway(
           continue;
         }
 
+        attempt.RendererNotFound = failure.Proxy == ProxyAnswer.SandboxNotFound;
         return Map(attempt.TenantId, record, failure);
       }
     }
@@ -788,6 +856,12 @@ internal sealed partial class RendererGateway(
     public Stream Destination => destination;
 
     public CancellationToken CancellationToken => cancellationToken;
+
+    /// <summary>
+    /// Whether the last send found no renderer at the record's URL: the platform's proxy answered
+    /// <c>404 {"error":"Not found"}</c>.
+    /// </summary>
+    public bool RendererNotFound { get; set; }
   }
 
   private sealed class RendererReadException(Exception inner)

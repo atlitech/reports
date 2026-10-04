@@ -141,6 +141,9 @@ internal sealed class SandboxResponse
 internal sealed class StateDetailsWire
 {
   public string? StoppedReason { get; init; }
+
+  /// <summary>An ISO 8601 time, read as text as <see cref="SandboxResponse.CreatedAt"/> is.</summary>
+  public string? StoppedAt { get; init; }
 }
 
 internal sealed class PortResponse
@@ -170,4 +173,18 @@ internal sealed class PortResponse
 [JsonSerializable(typeof(AddPortRequest))]
 [JsonSerializable(typeof(SandboxResponse))]
 [JsonSerializable(typeof(List<SandboxResponse>))]
+[JsonSerializable(typeof(SandboxPageResponse))]
 internal sealed partial class SandboxesJsonContext : JsonSerializerContext;
+
+/// <summary>
+/// A page of <c>GET sandboxes</c> on <see cref="SandboxesOptions.ListApiVersion"/>:
+/// <c>{"value": [...], "nextLink": "..."}</c>, the link absent on the last page. Observed on
+/// api-version 2026-09-01-preview, eastus2, 2026-10-04: the link is the same address with a
+/// <c>skipToken</c>.
+/// </summary>
+internal sealed class SandboxPageResponse
+{
+  public List<SandboxResponse>? Value { get; init; }
+
+  public string? NextLink { get; init; }
+}

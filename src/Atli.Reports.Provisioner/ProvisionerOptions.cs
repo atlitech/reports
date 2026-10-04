@@ -29,6 +29,9 @@ internal sealed class ProvisionerOptions
   /// <summary>Where the records the gateway routes by are kept.</summary>
   public RendererRecordStoreOptions Records { get; set; } = new();
 
+  /// <summary>The prefixes managed on demand, and the provisioning service's callers.</summary>
+  public ProvisioningServiceOptions Service { get; set; } = new();
+
   /// <summary>The disk image new renderers start from, unless a command names one.</summary>
   public string DiskImageId { get; set; } = "";
 
@@ -109,6 +112,8 @@ internal sealed class ProvisionerOptions
     CheckDuration(section, nameof(AutoSuspendAfter));
     CheckDuration(section, nameof(ReadyTimeout));
     CheckDuration(section, nameof(DrainDelay));
+    CheckDuration(section, "Service:RetireAfterIdle");
+    CheckDuration(section, "Service:RetireCheckInterval");
 
     ProvisionerOptions options = new();
     section.Bind(options);
@@ -172,6 +177,24 @@ internal sealed class ProvisionerOptions
       zeroAllowed: true
     );
     return options;
+  }
+
+  /// <summary>
+  /// Throws <see cref="InvalidOperationException"/> naming the first setting <c>serve</c> cannot run
+  /// with: <see cref="Service"/>, API keys included, and <see cref="AllowedSourceCidrs"/>, which the
+  /// renderers it creates on demand need.
+  /// </summary>
+  public void ValidateServe()
+  {
+    Service.Validate(requireApiKeys: true);
+    if (AllowedSourceCidrs.Count == 0)
+    {
+      throw new InvalidOperationException(
+        $"{SectionName}:AllowedSourceCidrs is empty: serve creates renderers on demand, whose ports "
+          + "must admit only the gateway's outbound addresses and the service's own, such as "
+          + "[\"203.0.113.7/32\"]."
+      );
+    }
   }
 
   /// <summary>

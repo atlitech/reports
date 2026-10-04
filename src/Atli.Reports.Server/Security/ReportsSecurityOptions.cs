@@ -50,6 +50,9 @@ internal sealed class ReportsJwtOptions
 
   public string RequiredPermission { get; set; } = "reports.convert";
 
+  // Deleting a tenant's renderer (gateway mode with on-demand renderers); never the convert permission.
+  public string TenantsPermission { get; set; } = ReportsSecurityRegistration.TenantsPermission;
+
   public string CallerIdClaimType { get; set; } = "sub";
 }
 

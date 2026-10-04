@@ -265,6 +265,12 @@ ran the gateway and renderers as production would, in one region. What they esta
   minutes, 388 conversions still ended in `503 Busy`, and tail latency rose. The renderers' own
   admission kept them from running out of memory. The gateway's `Replicas` setting, added since,
   makes each replica admit only its share.
+- **Listing a group's sandboxes is paged.** On `2026-02-01-preview` the data plane answers with
+  the first 25 sandboxes (100 at most, with `pageSize`) and no way to the rest; on
+  `2026-09-01-preview` each page carries a `nextLink`, which the client follows. In a
+  [later run](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md),
+  deleting a stopped renderer took 0.3 to 0.8 s and a running one 9 to 10 s, and one retirement
+  pass deleted 43 idle renderers in 20 s.
 - **Clones of one memory snapshot share the browser's memory layout and environment.** Two
   sandboxes started from a snapshot of a warm renderer had the same browser executable, libc,
   and stack addresses as the original, and the original's environment, credentials included. The
@@ -323,13 +329,91 @@ hours a day at 1 vCPU costs about $6.50 a month.
 Chromium's sandbox is therefore one layer. The per-customer renderer bounds what one escape
 reaches, and the runtime and node pool decide how hard the next step is.
 
+## Applications with many tenants
+
+Status: built, and validated on Azure in a [run with two applications](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md). An application
+whose own users keep separate workspaces can give each
+workspace a renderer of its own, so that one workspace's documents never render on the machine
+that renders another's: the separation this design gives customers, one level down. The
+application chooses the level, the workspace or the person, by where its users' trust ends.
+
+- **The application owns a tenant prefix.** The gateway gives its caller ID a prefix, such as
+  `myapp-`, in `Tenants:<n>:TenantPrefixes`. Every valid tenant ID under the prefix is the
+  caller's, such as `myapp-<workspace id>`, and the caller names one in the tenant header on every
+  request. A prefix is 2 to 27 lowercase letters, digits, and hyphens and ends with a hyphen, so a
+  36-character GUID fits in a tenant ID's 63, and `acme-` cannot own `acmecorp-1`. Prefixes of
+  different callers may not overlap, and no caller may list a tenant under any prefix: everything
+  under a prefix is the application's, which the provisioning service creates, retires, and
+  deletes. Records are not tied to the caller that made them, so a prefix must not move to another
+  caller while tenants remain under it.
+- **The application decides which of its users may use a workspace.** The gateway knows that the
+  application may use every tenant under its prefix, and nothing of the application's users. The
+  application must check that the signed-in user may use a workspace before naming it.
+- **A separate provisioning service creates renderers on first use.** The gateway never holds the
+  right to create renderers, since the role that grants it also runs commands and reads files in
+  every sandbox of the group. The provisioner's `serve` mode runs as a service of its own, on
+  internal ingress, with that role and write access to the record vault. When a tenant under a
+  prefix has no record, or its record names a sandbox that no longer exists, the gateway asks the
+  service to create one (`PUT /tenants/{id}/renderer`), waits, and then converts. Concurrent first
+  conversions of a tenant share one creation.
+- **The service limits what the gateway can ask for.** It serves only the prefixes it is
+  configured with, at most `MaxTenants` renderers under each, a number of creates per minute for
+  each prefix within a ceiling for all of them, so one application cannot use up another's, and it
+  authenticates the gateway with an API key of its own. A compromised gateway can therefore create
+  renderers there and delete the application's tenants, but cannot change, reassign, or enter a
+  renderer, nor delete one the operator has disabled. Creating, deleting, and retiring one
+  tenant's renderer take turns in the service, and each deletes only the sandboxes it decided on.
+- **The gateway limits each application.** Lookups of tenants it has no answer for cost each
+  caller from a budget per second, so one application naming new tenants cannot exhaust the record
+  vault's request limits for every tenant, and each caller has only a few deletions in flight.
+- **The application deletes a workspace's renderer** with `DELETE /tenants/{id}` on the gateway,
+  which needs the permission `reports.tenants` and removes the renderer, its record, and with them
+  its memory snapshot. Only tenants under the caller's prefixes can be deleted this way. A tenant
+  whose renderer the operator disabled is refused with `409`, so the kill switch keeps the
+  renderer for investigation.
+- **Idle renderers retire.** A renderer under a managed prefix stopped for longer than
+  `RetireAfterIdle` (7 days by default) is deleted with its record and snapshot, and the tenant's
+  next conversion creates a new one from the current disk image. A rollout can retire such stopped
+  renderers instead of replacing them (`rollout --stopped retire`), so only running renderers are
+  replaced, and the rest come back on the new image when they are next used. The service also
+  deletes sandboxes of its prefixes that no record points to, left by an interrupted command.
+- **Cost and latency.** A workspace costs only while its renderer runs: each burst of use plus the
+  idle time before it suspends. The first conversion of a new workspace waits for a renderer to be
+  created, and the first after a quiet period for one to wake. Recreating a deleted or retired
+  workspace's renderer took about 2.3 s longer than a first creation, while Key Vault recovered the
+  record's soft-deleted secret.
+
+The [run](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md) put two applications with prefixes of their own behind one gateway, on renderers in a
+virtual network without DNS, with the provisioning service on internal ingress:
+
+- Every cross-application, out-of-prefix, and reserved tenant was refused, and nothing was created
+  for it.
+- 40 new workspaces at once all got a PDF within 66.6 s: the first 20 in 2.2 to 4.7 s, the rest
+  after the prefix's 20 creates a minute allowed them. There were exactly 40 renderers, with no
+  duplicate or leftover. Ten simultaneous first requests to one workspace made one renderer.
+- Ten minutes of 30 workspaces converting every 5 s returned 3,609 of 3,609 PDFs: a warm invoice
+  in 0.086 s at the median, a first request that created a renderer in 1.91 s, and one that woke
+  it in 1.56 s.
+- One application flooding new workspace IDs at 4,041 requests a second for 70 s was refused by
+  its own budget in 6 ms. The other application's workspaces, existing and new, kept working, and
+  Key Vault throttled nothing. The flood saturated the gateway replica's one vCPU and wrote 250 MB
+  of logs, and the flooding application's own workspaces that had been idle for more than about
+  ten minutes waited for its budget.
+- Deleting, the kill switch's refusal of a delete, retirement, a rollout that retired stopped
+  renderers under load (1,800 of 1,800 requests), and leftover cleanup all worked.
+
+The run found that the data plane's sandbox listing, on the API version the client then used,
+returned only the first 25 sandboxes, so with more renderers the kill switch and deletes could
+miss theirs; the client now follows every page.
+
 ## Exception: end users who distrust each other
 
 If one customer's documents come from parties that distrust each other, for example when the
 customer lets its own end users upload raw HTML, the trust domain is the end user, not the
-customer. That calls for per-job or per-user isolation delivered by the platform, not by the API
-shelling out to Docker. This design does not provide it, so it does not cover such customers yet;
-how the hosted service handles them is an
+customer. Where those parties are the customer's workspaces or users, the customer can give each a
+tenant of its own; see [Applications with many tenants](#applications-with-many-tenants). Per-job
+isolation, for documents that distrust each other within one workspace, is not provided; how the
+hosted service handles that is an
 [open question](#open-questions-and-next-measurements).
 
 ## Production acceptance gates
@@ -391,6 +475,9 @@ renderer template.
   divides each renderer's admitted requests by a fixed count, which leaves renderers partly unused
   while fewer replicas run, and cannot divide a renderer that admits fewer requests than there
   are replicas. Measure two replicas with `Replicas=2` at twice the admitted concurrency.
+- Put a rate limit in front of the gateway, and throttle its per-request logs (events 20 and 70)
+  under a flood: one caller's 4,000 refused requests a second saturated a one-vCPU replica and
+  wrote 250 MB of logs in 70 s, about 13 GB an hour if it went on.
 - Test Chromium's sandbox on Ubuntu 23.10 and later renderer nodes, with the containerd versions
   the platform runs.
 - Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a

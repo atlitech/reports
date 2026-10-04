@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using Atli.Reports.Engine;
 using Atli.Reports.Hosting;
+using Atli.Reports.Hosting.Provisioning;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Server.Endpoints;
@@ -50,7 +51,6 @@ internal static partial class GatewayRegistration
     services.TryAddSingleton(TimeProvider.System);
     services.AddHttpContextAccessor();
     services.AddSingleton<TenantMembership>();
-    services.AddSingleton<TenantAdmission>();
 
     services.TryAddSingleton<IRendererRecordStore>(_ =>
       settings.Records.Store == GatewayRecordsOptions.ConfigurationStore
@@ -109,6 +109,26 @@ internal static partial class GatewayRegistration
       services.AddSingleton<SandboxWaker>();
     }
 
+    if (settings.Provisioning.Enabled)
+    {
+      services
+        .AddHttpClient(TenantProvisioning.HttpClientName)
+        // No redirects (the credential header must not follow one), no trace context or baggage,
+        // and connections recycled, since the client keeps this HttpClient for the process's life.
+        .ConfigurePrimaryHttpMessageHandler(ProvisioningClient.CreateHandler)
+        // Provisioning:Timeout bounds each call.
+        .ConfigureHttpClient(client => client.Timeout = Timeout.InfiniteTimeSpan)
+        .RemoveAllLoggers();
+      services.TryAddSingleton<IProvisioningClient>(provider => new ProvisioningClient(
+        provider
+          .GetRequiredService<IHttpClientFactory>()
+          .CreateClient(TenantProvisioning.HttpClientName),
+        settings.Provisioning.Url!,
+        settings.Provisioning.ApiKey
+      ));
+      services.AddSingleton<TenantProvisioning>();
+    }
+
     services.AddSingleton(provider => new RendererGateway(
       provider.GetRequiredService<IHttpContextAccessor>(),
       provider.GetRequiredService<RendererDirectory>(),
@@ -116,7 +136,8 @@ internal static partial class GatewayRegistration
       settings,
       provider.GetRequiredService<TimeProvider>(),
       provider.GetRequiredService<ILogger<RendererGateway>>(),
-      provider.GetService<SandboxWaker>()
+      provider.GetService<SandboxWaker>(),
+      provider.GetService<TenantProvisioning>()
     ));
     // Not TryAdd: in gateway mode nothing converts in this process.
     services.AddSingleton<IHtmlToPdfConverter>(provider =>
@@ -135,7 +156,7 @@ internal static partial class GatewayRegistration
         )
       );
 
-    // Callers with several tenants name one in this header; the document says so.
+    // Callers name their tenant in this header, unless they have only one; the document says so.
     services.Configure<OpenApiOptions>(
       "v1",
       options =>
@@ -156,7 +177,7 @@ internal static partial class GatewayRegistration
                   In = ParameterLocation.Header,
                   Required = false,
                   Description =
-                    "The product tenant to convert for, when the caller belongs to several; it must be one of them. Callers with one tenant may omit it.",
+                    "The product tenant to convert for: one the caller lists, or one under one of its tenant prefixes. A caller with one listed tenant and no prefix may omit it.",
                   Schema = new OpenApiSchema
                   {
                     Type = JsonSchemaType.String,
@@ -173,20 +194,30 @@ internal static partial class GatewayRegistration
   }
 
   /// <summary>
-  /// Resolves each conversion's tenant from the authenticated caller, before the body is read, and
-  /// holds a per-tenant admission lease for the rest of the request. Runs after caller admission,
-  /// so the caller's limits and deadline already apply.
+  /// Resolves each conversion's tenant from the authenticated caller, before the body is read, keeps
+  /// the caller's lookups of tenants new to the gateway within its budget, and holds a per-tenant
+  /// admission lease for the rest of the request. Runs after caller admission, so the caller's
+  /// limits and deadline already apply. With <c>Provisioning:Mode=OnDemand</c>, also maps
+  /// <c>DELETE /tenants/{tenantId}</c> (see <see cref="TenantEndpoints"/>).
   /// </summary>
   public static void UseReportsGateway(this WebApplication app)
   {
-    // Built now rather than on the first request, so a store or Sandboxes client that cannot be
-    // created fails the start.
+    // Built now rather than on the first request, so a store, Sandboxes client, or provisioning
+    // client that cannot be created fails the start.
     _ = app.Services.GetRequiredService<IRendererRecordStore>();
     _ = app.Services.GetService<SandboxWaker>();
+    _ = app.Services.GetService<TenantProvisioning>();
 
     var settings = app.Services.GetRequiredService<GatewayOptions>();
+    if (settings.Provisioning.Enabled)
+    {
+      app.MapTenantEndpoints();
+    }
+
     var membership = app.Services.GetRequiredService<TenantMembership>();
-    var admission = app.Services.GetRequiredService<TenantAdmission>();
+    // Conversions in flight per tenant.
+    InFlightAdmission admission = new();
+    NewTenantLookups lookups = new(settings, app.Services.GetRequiredService<TimeProvider>());
     var directory = app.Services.GetRequiredService<RendererDirectory>();
     var logger = app
       .Services.GetRequiredService<ILoggerFactory>()
@@ -237,7 +268,7 @@ internal static partial class GatewayRegistration
               new ConversionError(
                 ConversionErrorKind.InvalidRequest,
                 resolution.Rejection == TenantRejection.HeaderRequired
-                  ? $"The caller belongs to several product tenants. Name one in the {settings.TenantHeader} header."
+                  ? $"Name the product tenant in the {settings.TenantHeader} header."
                   : $"Send the {settings.TenantHeader} header once."
               )
             );
@@ -245,6 +276,22 @@ internal static partial class GatewayRegistration
         }
 
         var tenantId = resolution.TenantId!;
+        // A caller can name a new tenant under its prefixes on every request, and each costs a read
+        // of the record store before the body is read: only within the caller's budget. Answers
+        // the directory already has, and tenants it knows had a renderer, cost nothing.
+        if (resolution.ViaPrefix && !directory.IsKnown(tenantId) && !lookups.TryTake(caller))
+        {
+          LogLookupsSpent(logger, caller, lookups.PerSecond);
+          await ConversionProblems.WriteAsync(
+            context,
+            new ConversionError(
+              ConversionErrorKind.Busy,
+              "The caller named more new tenants than the gateway looks up per second. Retry later."
+            )
+          );
+          return;
+        }
+
         var (limit, feature) = await TenantLimitAsync(
           directory,
           settings,
@@ -266,7 +313,7 @@ internal static partial class GatewayRegistration
 
         using (lease)
         {
-          context.Features.Set(feature);
+          context.Features.Set(feature with { ViaPrefix = resolution.ViaPrefix });
           Activity.Current?.SetTag(TenantTag, tenantId);
           await next(context);
         }
@@ -319,6 +366,13 @@ internal static partial class GatewayRegistration
     Message = "Tenant {TenantId} reached its limit of {Limit} conversions in flight."
   )]
   private static partial void LogTenantBusy(ILogger logger, string tenantId, int limit);
+
+  [LoggerMessage(
+    EventId = 70,
+    Level = LogLevel.Information,
+    Message = "Caller {CallerId} spent its budget of {PerSecond} lookups of new tenants per second."
+  )]
+  private static partial void LogLookupsSpent(ILogger logger, string callerId, int perSecond);
 }
 
 /// <summary>

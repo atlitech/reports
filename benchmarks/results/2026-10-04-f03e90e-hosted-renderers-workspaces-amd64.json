@@ -1,0 +1,3343 @@
+{
+  "notes": [
+    "Build round 1 extracted the server's build context under umask 077, so appsettings.json reached the image as 0600 root and the server (UID 1654) exited with code 134 at startup. Round 2 gave the context a default checkout's modes (normalize_modes) and rebuilt the server image and disks a and b from the same commit; the provisioner image, whose /app is generated in the build, was unaffected and kept."
+  ],
+  "build_rounds": [
+    {
+      "round": 2,
+      "deleted_disks_exit": {
+        "a": 0,
+        "b": 0
+      },
+      "at_utc": "2026-10-04T20:39:21Z",
+      "acr_server_build_s": 228.17,
+      "disk_build_s": {
+        "a": 158.05,
+        "b": 132.75
+      }
+    }
+  ],
+  "setup": {
+    "commit": "f03e90e",
+    "location": "eastus2",
+    "started_utc": "2026-10-04T20:02:16Z",
+    "resource_group": "rg-atli-reports-workspaces-20261004200214",
+    "aca_cli": "aca 1.0.0-preview.4",
+    "az_cli": "2.87.0",
+    "timings_s": {
+      "identities_and_workspace": 0.0,
+      "registry_and_images": 0.0,
+      "vault": 0.62,
+      "networks": 1.29,
+      "role_assignments": 0.0,
+      "sandbox_groups_and_disks": 1.29,
+      "container_apps_environment": 3.47,
+      "service": 58.78,
+      "gateway": 35.64,
+      "client_sandbox": 6.39
+    },
+    "disk_build_s": {
+      "a": 158.05,
+      "b": 132.75
+    },
+    "acr_build_s": {
+      "server": 228.17,
+      "provisioner": 58.11
+    },
+    "data_plane_propagation_s": {
+      "rend": 11.3,
+      "client": 21.89
+    },
+    "deploys": [
+      {
+        "app": "ca-provisioner",
+        "settings": {
+          "retire_after_idle": "00:00:00",
+          "retire_check": "00:01:00",
+          "disk": "a"
+        },
+        "revision": "ca-provisioner--4s3hc29",
+        "ready_after_s": 81.26,
+        "since_utc": "2026-10-04T20:21:19Z",
+        "at_utc": "2026-10-04T20:22:40Z"
+      },
+      {
+        "app": "ca-provisioner",
+        "settings": {
+          "retire_after_idle": "00:00:00",
+          "retire_check": "00:01:00",
+          "disk": "a"
+        },
+        "revision": "ca-provisioner--0000001",
+        "ready_after_s": 58.78,
+        "since_utc": "2026-10-04T20:39:27Z",
+        "at_utc": "2026-10-04T20:40:26Z"
+      },
+      {
+        "app": "ca-gateway",
+        "settings": {
+          "log_requests": false,
+          "image": "<registry_server>/atli-reports-server:f03e90e-r2"
+        },
+        "revision": "ca-gateway--0000001",
+        "ready_after_s": 35.64,
+        "since_utc": "2026-10-04T20:40:26Z",
+        "at_utc": "2026-10-04T20:41:01Z"
+      }
+    ],
+    "client": {
+      "size": [
+        "4000m",
+        "8192Mi"
+      ],
+      "info": [
+        "4",
+        "Python",
+        "3.12.14",
+        "MemTotal:",
+        "8379276",
+        "kB"
+      ],
+      "outbound_addresses": 10
+    },
+    "smoke": {
+      "attempts": [
+        {
+          "status": 200,
+          "s": 5.1818,
+          "kind": null,
+          "detail": null
+        }
+      ],
+      "until_pdf_s": 15.74,
+      "delete": {
+        "status": 204,
+        "s": 9.1352,
+        "bytes": 0,
+        "pdf": false
+      }
+    },
+    "timings_round1_s": {
+      "networks": 69.38,
+      "vault": 37.96,
+      "identities_and_workspace": 35.15,
+      "registry_and_images": 239.38,
+      "sandbox_groups_and_disks": 241.96,
+      "role_assignments": 9.15,
+      "container_apps_environment": 1071.96,
+      "service": 81.31,
+      "disk_a_build_s": 162.74,
+      "disk_b_build_s": 167.82,
+      "gateway": "exited with code 134 at every start until the revision's progress deadline (10 min)"
+    }
+  },
+  "isolation": {
+    "a_converts_under_b_prefix": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0203
+    },
+    "a_deletes_under_b_prefix": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The tenant is not under one of the caller's tenant prefixes.",
+      "s": 0.0252
+    },
+    "b_converts_under_a_prefix": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0264
+    },
+    "b_deletes_under_a_prefix": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The tenant is not under one of the caller's tenant prefixes.",
+      "s": 0.0116
+    },
+    "a_converts_outside_prefixes": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0125
+    },
+    "a_deletes_outside_prefixes": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The tenant is not under one of the caller's tenant prefixes.",
+      "s": 0.0123
+    },
+    "a_converts_listed_style_id": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0158
+    },
+    "a_deletes_listed_style_id": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The tenant is not under one of the caller's tenant prefixes.",
+      "s": 0.0218
+    },
+    "a_converts_prefix_alone": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0181
+    },
+    "a_converts_invalid_id": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0126
+    },
+    "a_deletes_invalid_id": {
+      "status": 400,
+      "kind": "InvalidRequest",
+      "detail": "A tenant ID is 1 to 63 lowercase letters, digits, and hyphens, starting with a letter or digit.",
+      "s": 0.0104
+    },
+    "a_converts_without_header": {
+      "status": 400,
+      "kind": "InvalidRequest",
+      "detail": "Name the product tenant in the X-Reports-Tenant header.",
+      "s": 0.017
+    },
+    "a_converts_readiness_probe": {
+      "status": 403,
+      "kind": "Forbidden",
+      "detail": "The caller does not belong to the requested product tenant.",
+      "s": 0.0179
+    },
+    "internal_address": {
+      "from_laptop": {
+        "service_host_direct": {
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 404 Not Found",
+          "body": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Azure Container App - Unavailable</title>\n    <style type=\"text/css\">\n        html {\n            height: 100%;\n        ",
+          "s": 1.243
+        },
+        "gateway_name_with_service_host_header": {
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 404 Not Found",
+          "body": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Azure Container App - Unavailable</title>\n    <style type=\"text/css\">\n        html {\n            height: 100%;\n        ",
+          "s": 1.258
+        },
+        "gateway_itself": {
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 200 OK",
+          "body": "14\r\n{\"status\":\"Healthy\"}\r\n0\r\n\r\n",
+          "s": 0.25
+        },
+        "environment_address_with_service_name": {
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 404 Not Found",
+          "body": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Azure Container App - Unavailable</title>\n    <style type=\"text/css\">\n        html {\n            height: 100%;\n        ",
+          "s": 1.248
+        }
+      },
+      "from_client": {
+        "service_host_direct": {
+          "connect": "<given>",
+          "path": "/health/live",
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 404 Not Found",
+          "body": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Azure Container App - Unavailable</title>\n    <style type=\"text/css\">\n        html {\n            height: 100%;\n        ",
+          "s": 0.05
+        },
+        "gateway_name_with_service_host_header": {
+          "connect": "<given>",
+          "path": "/health/live",
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 421 Misdirected Request",
+          "body": "",
+          "s": 0.024
+        },
+        "gateway_itself": {
+          "connect": "<given>",
+          "path": "/health/live",
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 200 OK",
+          "body": "14\r\n{\"status\":\"Healthy\"}\r\n0\r\n\r\n",
+          "s": 0.022
+        },
+        "environment_address_with_service_name": {
+          "connect": "<given>",
+          "path": "/health/live",
+          "dns": [
+            "public"
+          ],
+          "status_line": "HTTP/1.1 404 Not Found",
+          "body": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Azure Container App - Unavailable</title>\n    <style type=\"text/css\">\n        html {\n            height: 100%;\n        ",
+          "s": 0.015
+        }
+      }
+    },
+    "nothing_created": {
+      "tenants_before": [],
+      "tenants_after": [],
+      "service_lines": [
+        "20:43:06.831 info: Atli.Reports.Provisioner.RendererProvisioner[31] Retired 0, deleted 0 leftover sandbox(es), failed 0.",
+        "20:43:06.810 info: Atli.Reports.Provisioner.RendererProvisioner[31] Retiring is off: Provisioner:Service:RetireAfterIdle is 00:00:00.",
+        "20:43:06.831 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+        "20:44:06.833 info: Atli.Reports.Provisioner.RendererProvisioner[31] Retiring is off: Provisioner:Service:RetireAfterIdle is 00:00:00.",
+        "20:44:06.853 info: Atli.Reports.Provisioner.RendererProvisioner[31] Retired 0, deleted 0 leftover sandbox(es), failed 0.",
+        "20:44:06.853 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed."
+      ],
+      "gateway_events": {
+        "Atli.Reports.Server.Gateway[52]": 8,
+        "Atli.Reports.Server[20]": 8,
+        "Atli.Reports.Server.Gateway[69]": 4
+      }
+    },
+    "gateway_log_excerpt": [
+      "20:42:12.925 info: Atli.Reports.Server.Gateway[69] Caller app-a was refused the deletion of tenant appb-x (NotMember).",
+      "20:42:12.217 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember).",
+      "20:42:13.582 info: Atli.Reports.Server.Gateway[52] Caller app-b was refused a tenant (NotMember).",
+      "20:42:14.845 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember).",
+      "20:42:14.206 info: Atli.Reports.Server.Gateway[69] Caller app-b was refused the deletion of tenant appa-x (NotMember).",
+      "20:42:15.509 info: Atli.Reports.Server.Gateway[69] Caller app-a was refused the deletion of tenant other-1 (NotMember).",
+      "20:42:16.830 info: Atli.Reports.Server.Gateway[69] Caller app-a was refused the deletion of tenant contoso (NotMember).",
+      "20:42:16.169 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember).",
+      "20:42:18.117 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember).",
+      "20:42:17.473 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember).",
+      "20:42:19.451 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (HeaderRequired).",
+      "20:42:20.099 info: Atli.Reports.Server.Gateway[52] Caller app-a was refused a tenant (NotMember)."
+    ]
+  },
+  "leftover": {
+    "tenant": "appa-leftover",
+    "sandbox": "563d749d-3546-498b-930f-bc8bbb937dd2",
+    "created_utc": "2026-10-04T21:23:18Z",
+    "created_at": "2026-10-04T21:23:19.4362445+00:00",
+    "create_call_s": 1.27,
+    "record": null,
+    "gone_observed_utc": "2026-10-04T22:13:54Z",
+    "service_lines": [
+      "2026-10-04T21:29:51.1088181Z 21:29:50.294 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-leftover] Sandbox 563d749d-3546-498b-930f-bc8bbb937dd2 is a renderer no record points to.",
+      "2026-10-04T21:32:22.2224815Z 21:32:21.042 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-leftover] Deleted the leftover sandbox 563d749d-3546-498b-930f-bc8bbb937dd2."
+    ],
+    "retirement_runs": [
+      "2026-10-04T21:23:43.145972Z 21:23:41.796 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:24:45.1692379Z 21:24:43.164 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:25:46.1966816Z 21:25:44.853 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:26:47.1150343Z 21:26:46.187 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:27:51.328488Z 21:27:47.486 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:28:50.0785563Z 21:28:48.775 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:32:22.2224815Z 21:32:21.043 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 1 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:33:24.119485Z 21:33:22.813 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:34:25.4454821Z 21:34:24.523 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:35:27.1449707Z 21:35:26.531 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:36:29.1145181Z 21:36:28.490 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:37:31.3525667Z 21:37:30.166 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:38:32.4496949Z 21:38:31.711 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:39:34.2365488Z 21:39:33.601 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:40:36.1133713Z 21:40:35.379 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed."
+    ]
+  },
+  "burst": {
+    "tenants": 40,
+    "before": {
+      "at_utc": "2026-10-04T20:45:26Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "since_utc": "2026-10-04T20:45:26Z",
+    "until_utc": "2026-10-04T20:46:43Z",
+    "requests": 79,
+    "answers": {
+      "pdf": 40,
+      "503 Busy: service rate limit": 20,
+      "503 Busy: new-tenant budget": 19
+    },
+    "first_pdf_done_s": {
+      "n": 40,
+      "min": 2.15,
+      "p50": 4.66,
+      "p95": 66.32,
+      "p99": 66.58,
+      "max": 66.58
+    },
+    "all_done_s": 66.58,
+    "tenants_with_pdf": 40,
+    "pdf_request_s": {
+      "n": 40,
+      "min": 1.581,
+      "p50": 4.414,
+      "p95": 5.173,
+      "p99": 5.449,
+      "max": 5.449
+    },
+    "attempts_per_tenant": {
+      "1": 20,
+      "3": 19,
+      "2": 1
+    },
+    "per_tenant": {
+      "appa-b01": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.66,
+        "pdf_request_s": 4.6588
+      },
+      "appa-b02": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 3.73,
+        "pdf_request_s": 3.7327
+      },
+      "appa-b03": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.01,
+        "pdf_request_s": 4.8772
+      },
+      "appa-b04": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.79,
+        "pdf_request_s": 4.6449
+      },
+      "appa-b05": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.32,
+        "pdf_request_s": 4.313
+      },
+      "appa-b06": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.59,
+        "pdf_request_s": 2.5925
+      },
+      "appa-b07": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 62.66,
+        "pdf_request_s": 1.5829
+      },
+      "appa-b08": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.94,
+        "pdf_request_s": 4.8662
+      },
+      "appa-b09": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.04,
+        "pdf_request_s": 4.0425
+      },
+      "appa-b10": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.29,
+        "pdf_request_s": 5.1605
+      },
+      "appa-b11": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 62.71,
+        "pdf_request_s": 1.5807
+      },
+      "appa-b12": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.17,
+        "pdf_request_s": 5.0431
+      },
+      "appa-b13": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.44,
+        "pdf_request_s": 4.4344
+      },
+      "appa-b14": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.58,
+        "pdf_request_s": 5.4486
+      },
+      "appa-b15": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.4,
+        "pdf_request_s": 4.2672
+      },
+      "appa-b16": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.42,
+        "pdf_request_s": 4.4141
+      },
+      "appa-b17": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.07,
+        "pdf_request_s": 4.066
+      },
+      "appa-b18": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.24,
+        "pdf_request_s": 4.2375
+      },
+      "appa-b19": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.08,
+        "pdf_request_s": 4.0804
+      },
+      "appa-b20": {
+        "attempts": 2,
+        "answers": [
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 62.21,
+        "pdf_request_s": 1.7457
+      },
+      "appa-b21": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 3.3,
+        "pdf_request_s": 3.2939
+      },
+      "appa-b22": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.17,
+        "pdf_request_s": 5.0214
+      },
+      "appa-b23": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.77,
+        "pdf_request_s": 4.635
+      },
+      "appa-b24": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.48,
+        "pdf_request_s": 4.4772
+      },
+      "appa-b25": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.58,
+        "pdf_request_s": 2.5767
+      },
+      "appa-b26": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 62.89,
+        "pdf_request_s": 1.7612
+      },
+      "appa-b27": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.15,
+        "pdf_request_s": 2.1472
+      },
+      "appa-b28": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.16,
+        "pdf_request_s": 5.0282
+      },
+      "appa-b29": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.83,
+        "pdf_request_s": 4.68
+      },
+      "appa-b30": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.23,
+        "pdf_request_s": 4.23
+      },
+      "appa-b31": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.32,
+        "pdf_request_s": 5.1735
+      },
+      "appa-b32": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.63,
+        "pdf_request_s": 4.628
+      },
+      "appa-b33": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.6,
+        "pdf_request_s": 4.6019
+      },
+      "appa-b34": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.9,
+        "pdf_request_s": 4.7718
+      },
+      "appa-b35": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 66.4,
+        "pdf_request_s": 5.2579
+      },
+      "appa-b36": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 3.89,
+        "pdf_request_s": 3.8868
+      },
+      "appa-b37": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.31,
+        "pdf_request_s": 4.3088
+      },
+      "appa-b38": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.89,
+        "pdf_request_s": 4.7462
+      },
+      "appa-b39": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 4.37,
+        "pdf_request_s": 4.372
+      },
+      "appa-b40": {
+        "attempts": 3,
+        "answers": [
+          "503 Busy: new-tenant budget",
+          "503 Busy: service rate limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 65.79,
+        "pdf_request_s": 4.6618
+      }
+    },
+    "timeline_pdfs_by_10s": {
+      "0": 20,
+      "60": 20
+    },
+    "after": {
+      "at_utc": "2026-10-04T20:46:45Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 40,
+          "sandboxes": 25,
+          "states": {
+            "Running": 25
+          }
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": [
+        "appa-b02",
+        "appa-b05",
+        "appa-b06",
+        "appa-b09",
+        "appa-b13",
+        "appa-b17",
+        "appa-b18",
+        "appa-b19",
+        "appa-b21",
+        "appa-b25",
+        "appa-b27",
+        "appa-b33",
+        "appa-b36",
+        "appa-b37",
+        "appa-b39"
+      ]
+    },
+    "after_tenants": {
+      "appa-b01": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b02": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b03": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b04": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b05": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b06": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b07": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b08": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b09": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b10": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b11": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b12": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b13": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b14": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b15": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b16": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b17": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b18": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b19": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b20": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b21": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b22": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b23": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b24": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b25": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b26": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b27": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b28": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b29": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b30": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b31": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b32": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b33": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b34": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b35": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b36": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b37": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b38": {
+        "sandboxes": 1,
+        "record_names_one": true
+      },
+      "appa-b39": {
+        "sandboxes": 0,
+        "record_names_one": false
+      },
+      "appa-b40": {
+        "sandboxes": 1,
+        "record_names_one": true
+      }
+    },
+    "exactly_40": false,
+    "service_events": {
+      "Atli.Reports.Provisioner.RendererProvisioner[30]": 200,
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[1]": 40,
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[6]": 20,
+      "Atli.Reports.Provisioner.RendererProvisioner[31]": 8,
+      "Atli.Reports.Provisioner.Service.RetirementLoop[20]": 4
+    },
+    "gateway_events": {
+      "Atli.Reports.Server[20]": 79,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[64]": 60,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[65]": 40,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[66]": 20,
+      "Atli.Reports.Server.Gateway[70]": 19
+    },
+    "service_created_times": [
+      "2026-10-04T20:45:35.3296314Z",
+      "2026-10-04T20:45:35.3296314Z",
+      "2026-10-04T20:45:35.3296314Z",
+      "2026-10-04T20:45:35.3296314Z",
+      "2026-10-04T20:45:35.3296314Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:35.6956348Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:45:37.1175217Z",
+      "2026-10-04T20:46:33.6403726Z",
+      "2026-10-04T20:46:35.5833778Z",
+      "2026-10-04T20:46:35.5833778Z",
+      "2026-10-04T20:46:35.5833778Z",
+      "2026-10-04T20:46:36.6860651Z",
+      "2026-10-04T20:46:36.6860651Z",
+      "2026-10-04T20:46:36.6860651Z",
+      "2026-10-04T20:46:36.6860651Z",
+      "2026-10-04T20:46:36.6860651Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z",
+      "2026-10-04T20:46:37.661325Z"
+    ],
+    "service_ready_after_s": {
+      "n": 0
+    },
+    "service_excerpt": [
+      "2026-10-04T20:45:31.6810959Z 20:45:31.308 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b20 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.989 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b14 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.990 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b12 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.983 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b15 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:32.005 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b35 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.983 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b10 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.930 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b08 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.982 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b03 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.989 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b28 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.983 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b34 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:31.983 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b40 for now: prefix appa- created its most renderers (20) in the last minute.",
+      "2026-10-04T20:45:32.7132803Z 20:45:32.005 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[6] Refused tenant appa-b04 for now: prefix appa- created its most renderers (20) in the last minute."
+    ],
+    "after_paged": {
+      "at_utc": "2026-10-04T20:55:24Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 40,
+          "sandboxes": 40,
+          "states": {
+            "Stopped": 40
+          }
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "exactly_40_paged": true,
+    "after_note": "The census right after the burst (after, exactly_40) listed the group with GET sandboxes at api-version 2026-02-01-preview, which answers at most 25 sandboxes: it showed 25 of the 40, and 15 records naming sandboxes it had not listed. Each of those 15 read as Stopped when fetched by ID. after_paged lists every page of api-version 2026-09-01-preview.",
+    "service_waves": {
+      "note": "From the service's log (Log Analytics), queried after the run: the harness's own extraction (service_ready_after_s) looked for the wrong words and came out empty.",
+      "wave_1": {
+        "creates_started": [
+          "2026-10-04T20:45:31.111Z",
+          "2026-10-04T20:45:31.483Z"
+        ],
+        "create_calls_returned": [
+          "2026-10-04T20:45:32.235Z",
+          "2026-10-04T20:45:34.505Z"
+        ],
+        "ready_after_create_call_s": {
+          "n": 20,
+          "min": 1.4,
+          "p50": 3.3,
+          "max": 3.9
+        },
+        "records_written": [
+          "2026-10-04T20:45:32.762Z",
+          "2026-10-04T20:45:35.236Z"
+        ]
+      },
+      "wave_2": {
+        "creates_started": [
+          "2026-10-04T20:46:31.399Z",
+          "2026-10-04T20:46:32.342Z"
+        ],
+        "create_calls_returned": [
+          "2026-10-04T20:46:32.171Z",
+          "2026-10-04T20:46:36.622Z"
+        ],
+        "ready_after_create_call_s": {
+          "n": 20,
+          "min": 1.1,
+          "p50": 4.2,
+          "max": 4.7
+        },
+        "records_written": [
+          "2026-10-04T20:46:32.762Z",
+          "2026-10-04T20:46:37.162Z"
+        ]
+      }
+    }
+  },
+  "listing_bug": {
+    "counts": {
+      "sandboxes": 41,
+      "first_page": 25,
+      "records": 40
+    },
+    "cli_list": {
+      "exit": 0,
+      "missing_rows": 15,
+      "rows": 40
+    },
+    "disable_attempts": [
+      {
+        "tenant": "appa-b37",
+        "exit": 0,
+        "lines": [
+          "[appa-b37] No sandbox to disable."
+        ],
+        "state_after": "Stopped",
+        "stopped_reason_after": "Idle"
+      }
+    ],
+    "gateway_deletes": [
+      {
+        "tenant": "appa-x1",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.5093,
+        "record_after": false,
+        "sandbox_after": "gone"
+      },
+      {
+        "tenant": "appa-x2",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.1591,
+        "record_after": false,
+        "sandbox_after": "gone"
+      },
+      {
+        "tenant": "appa-x3",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.5761,
+        "record_after": false,
+        "sandbox_after": "gone"
+      },
+      {
+        "tenant": "appa-x4",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.3526,
+        "record_after": false,
+        "sandbox_after": "gone"
+      },
+      {
+        "tenant": "appa-x5",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.6519,
+        "record_after": false,
+        "sandbox_after": "gone"
+      },
+      {
+        "tenant": "appa-x6",
+        "created": 200,
+        "delete": 204,
+        "delete_s": 9.7743,
+        "record_after": false,
+        "sandbox_after": "gone"
+      }
+    ],
+    "at_utc": "2026-10-04T20:57:10Z",
+    "gateway_delete_older": [
+      {
+        "tenant": "appa-b30",
+        "delete": 204,
+        "delete_s": 0.2959,
+        "record_after": false,
+        "sandbox_after": "Stopped",
+        "leaked_sandbox_deleted_by_harness": 200
+      }
+    ],
+    "after_fix": {
+      "provisioner_commit": "1d108c9",
+      "counts": {
+        "sandboxes": 40,
+        "first_page": 25,
+        "records": 39
+      },
+      "cli_list": {
+        "exit": 0,
+        "missing_rows": 0,
+        "rows": 39
+      },
+      "disable": {
+        "tenant": "appa-b37",
+        "on_first_page": true,
+        "exit": 0,
+        "lines": [
+          "[appa-b37] Disabled sandbox 8387b73d-31c1-4baf-b050-c481009fdfad (Stopped)."
+        ],
+        "stopped_reason_after": "Disabled",
+        "enable_exit": 0,
+        "enable_lines": [
+          "[appa-b37] Enabled sandbox 8387b73d-31c1-4baf-b050-c481009fdfad (Stopped)."
+        ],
+        "stopped_reason_after_enable": "UserStopped"
+      },
+      "gateway_delete_older": [
+        {
+          "tenant": "appa-b27",
+          "on_first_page": false,
+          "delete": 204,
+          "delete_s": 0.6256,
+          "record_after": false,
+          "sandbox_after": "gone"
+        }
+      ],
+      "at_utc": "2026-10-04T21:05:58Z"
+    }
+  },
+  "provisioner_images": [
+    {
+      "commit": "1d108c9",
+      "replaces": "atli-reports-provisioner:f03e90e",
+      "acr_build_s": 51.04,
+      "at_utc": "2026-10-04T21:04:13Z"
+    },
+    {
+      "commit": "5b23334",
+      "replaces": "atli-reports-provisioner:1d108c9-r2",
+      "acr_build_s": 52.47,
+      "at_utc": "2026-10-04T22:14:48Z"
+    }
+  ],
+  "same": {
+    "tenant": "appa-s01",
+    "requests_at_once": 10,
+    "since_utc": "2026-10-04T21:06:15Z",
+    "until_utc": "2026-10-04T21:06:29Z",
+    "requests": 16,
+    "answers": {
+      "pdf": 10,
+      "503 Busy: tenant limit": 6
+    },
+    "first_attempt_answers": {
+      "pdf": 8,
+      "503 Busy: tenant limit": 2
+    },
+    "first_attempt_s": {
+      "n": 8,
+      "min": 1.827,
+      "p50": 2.03,
+      "p95": 2.454,
+      "p99": 2.454,
+      "max": 2.454
+    },
+    "pdfs": 10,
+    "first_pdf_done_s": {
+      "n": 10,
+      "min": 1.83,
+      "p50": 2.1,
+      "p95": 3.29,
+      "p99": 3.29,
+      "max": 3.29
+    },
+    "per_request": {
+      "appa-s01": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.03,
+        "pdf_request_s": 2.03
+      },
+      "appa-s01#1": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.17,
+        "pdf_request_s": 2.1701
+      },
+      "appa-s01#2": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 1.96,
+        "pdf_request_s": 1.956
+      },
+      "appa-s01#3": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.45,
+        "pdf_request_s": 2.4538
+      },
+      "appa-s01#4": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 1.83,
+        "pdf_request_s": 1.8265
+      },
+      "appa-s01#5": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.24,
+        "pdf_request_s": 2.2358
+      },
+      "appa-s01#6": {
+        "attempts": 4,
+        "answers": [
+          "503 Busy: tenant limit",
+          "503 Busy: tenant limit",
+          "503 Busy: tenant limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 3.29,
+        "pdf_request_s": 0.1467
+      },
+      "appa-s01#7": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 1.9,
+        "pdf_request_s": 1.8947
+      },
+      "appa-s01#8": {
+        "attempts": 1,
+        "answers": [
+          "pdf"
+        ],
+        "first_pdf_done_s": 2.1,
+        "pdf_request_s": 2.1008
+      },
+      "appa-s01#9": {
+        "attempts": 4,
+        "answers": [
+          "503 Busy: tenant limit",
+          "503 Busy: tenant limit",
+          "503 Busy: tenant limit",
+          "pdf"
+        ],
+        "first_pdf_done_s": 3.22,
+        "pdf_request_s": 0.0808
+      }
+    },
+    "after": {
+      "record_sandbox": "091e8288-dca6-46aa-bc33-615aad997398",
+      "record_disk": "a",
+      "record_created": "2026-10-04T21:06:21.1938908+00:00",
+      "sandboxes": [
+        {
+          "id": "091e8288-dca6-46aa-bc33-615aad997398",
+          "state": "Running",
+          "stopped_reason": null,
+          "stopped_at": null,
+          "created_at": "2026-10-04T21:06:21.1747234+00:00"
+        }
+      ]
+    },
+    "one_sandbox": true,
+    "service_lines": [
+      "2026-10-04T21:06:21.5612944Z 21:06:20.357 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Creating a sandbox from disk image <disk_a>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T21:06:22.1303676Z 21:06:21.193 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Created sandbox 091e8288-dca6-46aa-bc33-615aad997398; exposing port 8080.",
+      "2026-10-04T21:06:22.1303676Z 21:06:21.613 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Ready 1.3 s after the create call.",
+      "2026-10-04T21:06:22.1303676Z 21:06:21.296 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Waiting for <port URL> to be ready.",
+      "2026-10-04T21:06:22.1303676Z 21:06:21.731 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] The record now points to sandbox 091e8288-dca6-46aa-bc33-615aad997398.",
+      "2026-10-04T21:06:22.1303676Z 21:06:21.735 info: Atli.Reports.Provisioner.Service.ManagedRenderers[1] Created the renderer of tenant appa-s01: sandbox 091e8288-dca6-46aa-bc33-615aad997398, size S."
+    ],
+    "gateway_ensure_calls": 1,
+    "gateway_events": {
+      "Gateway[53]": 6,
+      "TenantProvisioning[64]": 1,
+      "TenantProvisioning[65]": 1
+    }
+  },
+  "quota": {
+    "since_utc": "2026-10-04T21:09:55Z",
+    "creates": {
+      "appb-q1": {
+        "status": 200,
+        "s": 3.6226
+      },
+      "appb-q2": {
+        "status": 200,
+        "s": 1.695
+      },
+      "appb-q3": {
+        "status": 200,
+        "s": 1.6843
+      },
+      "appb-q4": {
+        "status": 200,
+        "s": 1.5875
+      },
+      "appb-q5": {
+        "status": 200,
+        "s": 1.6143
+      },
+      "appb-q6": {
+        "status": 503,
+        "s": 0.0764,
+        "kind": "BrowserUnavailable",
+        "detail": "The renderer quota of the tenant's prefix is full. Delete tenants that are no longer used, or ask the operator to raise the quota.",
+        "retry_after": "5"
+      }
+    },
+    "sixth_again_after_60s": {
+      "status": 503,
+      "s": 0.1051,
+      "kind": "BrowserUnavailable",
+      "detail": "The renderer quota of the tenant's prefix is full. Delete tenants that are no longer used, or ask the operator to raise the quota.",
+      "retry_after": "5"
+    },
+    "after": {
+      "at_utc": "2026-10-04T21:11:14Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "appb-": {
+          "records": 5,
+          "sandboxes": 5,
+          "states": {
+            "Running": 5
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "exactly_5": true,
+    "deleted_for_fairness": {
+      "appb-q2": {
+        "status": 204,
+        "s": 3.8949
+      },
+      "appb-q3": {
+        "status": 204,
+        "s": 3.8222
+      },
+      "appb-q4": {
+        "status": 204,
+        "s": 0.4133
+      },
+      "appb-q5": {
+        "status": 204,
+        "s": 4.6887
+      }
+    },
+    "after_deletes": {
+      "at_utc": "2026-10-04T21:11:32Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "appb-": {
+          "records": 1,
+          "sandboxes": 1,
+          "states": {
+            "Running": 1
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "until_utc": "2026-10-04T21:11:32Z",
+    "service_lines_q6": [
+      "2026-10-04T21:10:12.075254Z 21:10:11.462 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[5] Refused tenant appb-q6: prefix appb- already has its most renderers (5).",
+      "2026-10-04T21:11:13.8571562Z 21:11:12.261 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[5] Refused tenant appb-q6: prefix appb- already has its most renderers (5)."
+    ]
+  },
+  "fairness": {
+    "before": {
+      "at_utc": "2026-10-04T21:14:30Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 39,
+          "sandboxes": 39,
+          "states": {
+            "Running": 3,
+            "Stopped": 36
+          }
+        },
+        "appb-": {
+          "records": 1,
+          "sandboxes": 1,
+          "states": {
+            "Stopped": 1
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "burst_ended_utc": "2026-10-04T20:46:43Z",
+    "since_utc": "2026-10-04T21:14:30Z",
+    "until_utc": "2026-10-04T21:16:02Z",
+    "duration_s": 70,
+    "streams": {
+      "a-flood": {
+        "requests": 282841,
+        "answers": {
+          "503 Busy: new-tenant budget": 281118,
+          "503 Busy: service rate limit": 1198,
+          "503 BrowserUnavailable: quota full": 198,
+          "0 SSLEOFError": 185,
+          "0 RemoteDisconnected": 121,
+          "pdf": 21
+        },
+        "pdf_s": {
+          "n": 21,
+          "min": 1.653,
+          "p50": 2.069,
+          "p95": 2.454,
+          "p99": 3.884,
+          "max": 3.884
+        },
+        "requests_per_s": 4040.6,
+        "tenants_named": 282841,
+        "refusal_s": {
+          "503 Busy: new-tenant budget": {
+            "n": 281118,
+            "min": 0.002,
+            "p50": 0.006,
+            "p95": 0.02,
+            "p99": 0.033,
+            "max": 0.084
+          },
+          "503 Busy: service rate limit": {
+            "n": 1198,
+            "min": 0.032,
+            "p50": 0.045,
+            "p95": 0.085,
+            "p99": 0.131,
+            "max": 1.014
+          },
+          "503 BrowserUnavailable: quota full": {
+            "n": 198,
+            "min": 0.032,
+            "p50": 0.045,
+            "p95": 0.075,
+            "p99": 0.11,
+            "max": 0.452
+          },
+          "0 SSLEOFError": {
+            "n": 185,
+            "min": 0.0,
+            "p50": 0.0,
+            "p95": 0.016,
+            "p99": 0.033,
+            "max": 0.042
+          },
+          "0 RemoteDisconnected": {
+            "n": 121,
+            "min": 0.0,
+            "p50": 0.0,
+            "p95": 0.001,
+            "p99": 0.007,
+            "max": 0.034
+          }
+        },
+        "pdfs_by_10s": {
+          "0": 20,
+          "60": 1
+        },
+        "first_quota_t": 1.914
+      },
+      "a-warm": {
+        "requests": 48,
+        "answers": {
+          "pdf": 48
+        },
+        "pdf_s": {
+          "n": 48,
+          "min": 0.077,
+          "p50": 0.094,
+          "p95": 0.128,
+          "p99": 0.129,
+          "max": 0.129
+        }
+      },
+      "a-cold": {
+        "requests": 127,
+        "answers": {
+          "503 Busy: new-tenant budget": 97,
+          "pdf": 30
+        },
+        "pdf_s": {
+          "n": 30,
+          "min": 0.067,
+          "p50": 0.088,
+          "p95": 2.534,
+          "p99": 2.983,
+          "max": 2.983
+        },
+        "first_pdf_done_t": {
+          "appa-b04": 2.99,
+          "appa-b05": 72.74,
+          "appa-b06": 33.31
+        }
+      },
+      "b-existing": {
+        "requests": 40,
+        "answers": {
+          "pdf": 40
+        },
+        "pdf_s": {
+          "n": 40,
+          "min": 0.081,
+          "p50": 0.095,
+          "p95": 0.111,
+          "p99": 1.594,
+          "max": 1.594
+        }
+      },
+      "b-new-1": {
+        "requests": 14,
+        "answers": {
+          "pdf": 14
+        },
+        "pdf_s": {
+          "n": 14,
+          "min": 0.079,
+          "p50": 0.089,
+          "p95": 1.699,
+          "p99": 1.699,
+          "max": 1.699
+        },
+        "first_request_t": 10.0,
+        "first_pdf_done_t": 11.7,
+        "first_answers": [
+          "pdf",
+          "pdf",
+          "pdf",
+          "pdf"
+        ]
+      },
+      "b-new-2": {
+        "requests": 10,
+        "answers": {
+          "pdf": 10
+        },
+        "pdf_s": {
+          "n": 10,
+          "min": 0.089,
+          "p50": 0.094,
+          "p95": 1.847,
+          "p99": 1.847,
+          "max": 1.847
+        },
+        "first_request_t": 29.997,
+        "first_pdf_done_t": 31.84,
+        "first_answers": [
+          "pdf",
+          "pdf",
+          "pdf",
+          "pdf"
+        ]
+      }
+    },
+    "after": {
+      "at_utc": "2026-10-04T21:16:06Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 60,
+          "sandboxes": 60,
+          "states": {
+            "Running": 19,
+            "Stopped": 41
+          }
+        },
+        "appb-": {
+          "records": 3,
+          "sandboxes": 3,
+          "states": {
+            "Running": 3
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "flood_tenants_with_renderer": [
+      "appa-f0-1-1",
+      "appa-f0-2-1",
+      "appa-f0-3-1",
+      "appa-f0-4-4",
+      "appa-f0-5-1",
+      "appa-f0-6-1",
+      "appa-f0-7-1",
+      "appa-f1-1-1",
+      "appa-f1-2-1",
+      "appa-f1-6-1",
+      "appa-f1-6-7546",
+      "appa-f2-3-1",
+      "appa-f2-5-1",
+      "appa-f2-6-6",
+      "appa-f3-0-1",
+      "appa-f3-1-1",
+      "appa-f3-2-1",
+      "appa-f3-3-1",
+      "appa-f3-4-6",
+      "appa-f3-5-1",
+      "appa-f3-7-1"
+    ],
+    "gateway_events": {
+      "Atli.Reports.Server[20]": 282774,
+      "Atli.Reports.Server.Gateway[70]": 281215,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[64]": 1419,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[66]": 1396,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[65]": 23
+    },
+    "service_events": {
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[6]": 1198,
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[5]": 198,
+      "Atli.Reports.Provisioner.RendererProvisioner[30]": 115,
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[1]": 23,
+      "Atli.Reports.Provisioner.RendererProvisioner[31]": 10,
+      "Atli.Reports.Provisioner.Service.RetirementLoop[20]": 5
+    },
+    "vault_api_results": {
+      "by_status": {
+        "404": 1475,
+        "200": 452,
+        "401": 0
+      },
+      "busiest_minute_by_status": {
+        "404": 909,
+        "200": 138,
+        "401": 0
+      }
+    },
+    "gateway_metrics": {
+      "cpu_cores": {
+        "minutes": 6,
+        "mean": 0.187,
+        "max_minute_mean": 0.996,
+        "max": 1.01
+      },
+      "working_set_mib": {
+        "minutes": 6,
+        "mean": 160.793,
+        "max_minute_mean": 169.717,
+        "max": 171.785
+      }
+    },
+    "service_metrics": {
+      "cpu_cores": {
+        "minutes": 6,
+        "mean": 0.007,
+        "max_minute_mean": 0.023,
+        "max": 0.028
+      },
+      "working_set_mib": {
+        "minutes": 6,
+        "mean": 191.892,
+        "max_minute_mean": 199.266,
+        "max": 199.418
+      }
+    },
+    "gateway_directory_failures": [],
+    "log_volume": {
+      "window_utc": [
+        "2026-10-04T21:14:30Z",
+        "2026-10-04T21:16:30Z"
+      ],
+      "gateway": {
+        "lines": 566827,
+        "billed_bytes": 250269555
+      },
+      "service": {
+        "lines": 1537,
+        "billed_bytes": 792182
+      },
+      "note": "Log Analytics _BilledSize of ContainerAppConsoleLogs_CL. The gateway logs event 20 (each conversion request's end) and event 70 (each refusal from the caller's budget of new tenants) for every request."
+    },
+    "service_timeline": {
+      "note": "From the service's log, queried after the run.",
+      "creates_started_first_wave": [
+        "2026-10-04T21:14:35.277Z",
+        "2026-10-04T21:14:35.577Z",
+        20
+      ],
+      "creates_ended_first_wave": [
+        "2026-10-04T21:14:36.637Z",
+        "2026-10-04T21:14:38.856Z",
+        20
+      ],
+      "app_b_creates": {
+        "appb-f1": [
+          "2026-10-04T21:14:45.202Z",
+          "2026-10-04T21:14:46.554Z"
+        ],
+        "appb-f2": [
+          "2026-10-04T21:15:05.215Z",
+          "2026-10-04T21:15:06.709Z"
+        ]
+      },
+      "twenty_first_appa_create": [
+        "2026-10-04T21:15:35.316Z",
+        "2026-10-04T21:15:36.595Z"
+      ],
+      "quota_refusals": {
+        "count": 198,
+        "first": "2026-10-04T21:14:37.076Z",
+        "last": "2026-10-04T21:15:45.147Z",
+        "client_seconds": {
+          "1": 1,
+          "60": 17,
+          "61-69": "20 each"
+        }
+      },
+      "early_quota_refusal": "One QuotaExceeded at 21:14:37.076 (client t = 1.91 s), when app-a had 39 records and 20 creations ending (59 of 60), in the same millisecond a creation ended: the census counted the new record before the creation stopped counting as in flight. Fixed in 5b23334."
+    },
+    "a_cold_first_pdf_t": {
+      "appa-b04": 2.99,
+      "appa-b05": 72.74,
+      "appa-b06": 33.31
+    },
+    "a_cold_refused": {
+      "appa-b04": 0,
+      "appa-b05": 68,
+      "appa-b06": 29
+    }
+  },
+  "trim": {
+    "tenants": 21,
+    "answers": {
+      "204": 21
+    },
+    "delete_s": {
+      "n": 21,
+      "min": 0.413,
+      "p50": 0.495,
+      "p95": 0.657,
+      "p99": 0.761,
+      "max": 0.761
+    },
+    "after": {
+      "at_utc": "2026-10-04T21:22:29Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "census": {
+      "at_utc": "2026-10-04T21:22:33Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 39,
+          "sandboxes": 39,
+          "states": {
+            "Stopped": 39
+          }
+        },
+        "appb-": {
+          "records": 3,
+          "sandboxes": 3,
+          "states": {
+            "Stopped": 3
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    }
+  },
+  "leftover_first": {
+    "tenant": "appa-leftover",
+    "sandbox": "5bc530db-571e-46aa-9d0a-28db61ef1ae4",
+    "created_utc": "2026-10-04T20:45:16Z",
+    "created_at": "2026-10-04T20:45:19.4965049+00:00",
+    "create_call_s": 2.67,
+    "record": null,
+    "gone_observed_utc": "2026-10-04T21:22:44Z",
+    "service_lines": [
+      "2026-10-04T21:05:49.2007297Z 21:05:48.337 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-leftover] Sandbox 5bc530db-571e-46aa-9d0a-28db61ef1ae4 is a renderer no record points to.",
+      "2026-10-04T21:08:19.1511821Z 21:08:18.720 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-leftover] Deleted the leftover sandbox 5bc530db-571e-46aa-9d0a-28db61ef1ae4."
+    ],
+    "retirement_runs": [
+      "2026-10-04T20:46:07.9501069Z 20:46:06.898 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:47:07.8406232Z 20:47:06.927 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:48:07.8284675Z 20:48:06.957 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:49:07.7580105Z 20:49:06.993 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:50:08.705489Z 20:50:07.252 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:51:08.9168247Z 20:51:07.443 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:52:10.0111633Z 20:52:08.531 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:53:12.0832446Z 20:53:09.388 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:54:10.7645629Z 20:54:10.261 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:55:13.4134608Z 20:55:11.179 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:56:13.6017419Z 20:56:12.016 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:57:14.0827036Z 20:57:13.024 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:58:14.7425156Z 20:58:13.992 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T20:59:15.767587Z 20:59:14.858 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:00:16.7348378Z 21:00:16.030 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed."
+    ],
+    "note": "Created while the service ran f03e90e, whose listing saw only the first 25 sandboxes: no retirement run from 20:51 to 21:04 saw it. The service ran 1d108c9 from 21:04:58; its first run found the leftover and deleted it after the drain."
+  },
+  "steady": {
+    "existing": [
+      "appa-b07",
+      "appa-b08",
+      "appa-b09",
+      "appa-b10",
+      "appa-b11",
+      "appa-b12",
+      "appa-b13",
+      "appa-b14",
+      "appa-b15",
+      "appa-b16",
+      "appa-b17",
+      "appa-b18",
+      "appa-b19",
+      "appa-b20",
+      "appa-b21",
+      "appa-b22",
+      "appa-b23",
+      "appa-b24",
+      "appa-b25",
+      "appa-b26"
+    ],
+    "new": [
+      "appa-n01",
+      "appa-n02",
+      "appa-n03",
+      "appa-n04",
+      "appa-n05",
+      "appa-n06",
+      "appa-n07",
+      "appa-n08",
+      "appa-n09",
+      "appa-n10"
+    ],
+    "sparse": [
+      "appa-b28",
+      "appa-b29",
+      "appa-b31"
+    ],
+    "duration_s": 600,
+    "before": {
+      "at_utc": "2026-10-04T21:23:35Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 39,
+          "sandboxes": 39,
+          "states": {
+            "Stopped": 39
+          }
+        },
+        "appb-": {
+          "records": 3,
+          "sandboxes": 3,
+          "states": {
+            "Stopped": 3
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "states_before": {
+      "Stopped": 23
+    },
+    "since_utc": "2026-10-04T21:23:39Z",
+    "until_utc": "2026-10-04T21:33:48Z",
+    "requests": 3609,
+    "pdfs": 3609,
+    "success_rate": 1.0,
+    "answers": {
+      "pdf": 3609
+    },
+    "latency_s": {
+      "first_created": {
+        "n": 10,
+        "min": 1.559,
+        "p50": 1.907,
+        "p95": 2.078,
+        "p99": 2.078,
+        "max": 2.078,
+        "failed": 0
+      },
+      "first_woken": {
+        "n": 20,
+        "min": 0.644,
+        "p50": 1.564,
+        "p95": 4.231,
+        "p99": 8.24,
+        "max": 8.24,
+        "failed": 0
+      },
+      "warm_invoice": {
+        "n": 3390,
+        "min": 0.07,
+        "p50": 0.086,
+        "p95": 0.129,
+        "p99": 0.17,
+        "max": 0.587,
+        "failed": 0
+      },
+      "warm_report": {
+        "n": 179,
+        "min": 2.615,
+        "p50": 2.895,
+        "p95": 3.163,
+        "p99": 3.296,
+        "max": 3.306,
+        "failed": 0
+      },
+      "sparse_first": {
+        "n": 3,
+        "min": 1.441,
+        "p50": 1.773,
+        "p95": 2.174,
+        "p99": 2.174,
+        "max": 2.174,
+        "failed": 0
+      },
+      "sparse_after_180s_idle": {
+        "n": 7,
+        "min": 0.747,
+        "p50": 1.254,
+        "p95": 1.621,
+        "p99": 1.621,
+        "max": 1.621,
+        "failed": 0
+      }
+    },
+    "non_pdf": [],
+    "after": {
+      "at_utc": "2026-10-04T21:33:51Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 49,
+          "sandboxes": 49,
+          "states": {
+            "Stopped": 18,
+            "Running": 31
+          }
+        },
+        "appb-": {
+          "records": 3,
+          "sandboxes": 3,
+          "states": {
+            "Stopped": 3
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "gateway_metrics": {
+      "cpu_cores": {
+        "minutes": 10,
+        "mean": 0.036,
+        "max_minute_mean": 0.051,
+        "max": 0.053
+      },
+      "working_set_mib": {
+        "minutes": 10,
+        "mean": 196.319,
+        "max_minute_mean": 218.492,
+        "max": 218.793
+      }
+    },
+    "service_metrics": {
+      "cpu_cores": {
+        "minutes": 10,
+        "mean": 0.003,
+        "max_minute_mean": 0.007,
+        "max": 0.013
+      },
+      "working_set_mib": {
+        "minutes": 10,
+        "mean": 206.772,
+        "max_minute_mean": 208.395,
+        "max": 208.41
+      }
+    },
+    "gateway_events": {
+      "Atli.Reports.Server[20]": 3609,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[64]": 10,
+      "Atli.Reports.Server.Gateway.TenantProvisioning[65]": 10
+    },
+    "service_events": {
+      "Atli.Reports.Provisioner.RendererProvisioner[30]": 52,
+      "Atli.Reports.Provisioner.RendererProvisioner[31]": 25,
+      "Atli.Reports.Provisioner.Service.RetirementLoop[20]": 12,
+      "Atli.Reports.Provisioner.Service.ManagedRenderers[1]": 10
+    },
+    "vault_api_results": {
+      "by_status": {
+        "200": 1462,
+        "404": 60,
+        "401": 0
+      },
+      "busiest_minute_by_status": {
+        "200": 209,
+        "404": 33,
+        "401": 0
+      }
+    }
+  },
+  "delete": {
+    "since_utc": "2026-10-04T21:38:15Z",
+    "before": {
+      "appa-b32": {
+        "record": true,
+        "sandboxes": 1,
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-b33": {
+        "record": true,
+        "sandboxes": 1,
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-b34": {
+        "record": true,
+        "sandboxes": 1,
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-b35": {
+        "record": true,
+        "sandboxes": 1,
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-b36": {
+        "record": true,
+        "sandboxes": 1,
+        "states": [
+          "Stopped"
+        ]
+      }
+    },
+    "deletes": {
+      "appa-b32": {
+        "status": 204,
+        "s": 0.5889
+      },
+      "appa-b33": {
+        "status": 204,
+        "s": 0.8081
+      },
+      "appa-b34": {
+        "status": 204,
+        "s": 0.4384
+      },
+      "appa-b35": {
+        "status": 204,
+        "s": 0.479
+      },
+      "appa-b36": {
+        "status": 204,
+        "s": 0.4438
+      }
+    },
+    "after": {
+      "records": {
+        "appa-b32": false,
+        "appa-b33": false,
+        "appa-b34": false,
+        "appa-b35": false,
+        "appa-b36": false
+      },
+      "secrets_enabled": {
+        "appa-b32": false,
+        "appa-b33": false,
+        "appa-b34": false,
+        "appa-b35": false,
+        "appa-b36": false
+      },
+      "sandboxes_labeled": {
+        "appa-b32": 0,
+        "appa-b33": 0,
+        "appa-b34": 0,
+        "appa-b35": 0,
+        "appa-b36": 0
+      },
+      "census": {
+        "at_utc": "2026-10-04T21:38:26Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        },
+        "duplicates": {},
+        "leftovers": {},
+        "records_without_sandbox": []
+      }
+    },
+    "recreate": {
+      "tenant": "appa-b32",
+      "status": 200,
+      "s": 3.9348,
+      "after": {
+        "record_sandbox": "61894045-11e9-4e90-967a-d2d284b57c97",
+        "record_disk": "a",
+        "record_created": "2026-10-04T21:38:37.0325318+00:00",
+        "sandboxes": [
+          {
+            "id": "61894045-11e9-4e90-967a-d2d284b57c97",
+            "state": "Running",
+            "stopped_reason": null,
+            "stopped_at": null,
+            "created_at": "2026-10-04T21:38:37.0196539+00:00"
+          }
+        ]
+      }
+    },
+    "until_utc": "2026-10-04T21:38:41Z",
+    "service_lines": [
+      "2026-10-04T21:38:20.1156579Z 21:38:19.525 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T21:38:20.1156579Z 21:38:19.741 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Deleted sandbox 48b5eb42-500e-440b-9730-6ad00e2b520b.",
+      "2026-10-04T21:38:20.1156579Z 21:38:19.741 info: Atli.Reports.Provisioner.Service.ManagedRenderers[8] Deleted the renderer of tenant appa-b32, if it had one.",
+      "2026-10-04T21:38:22.0848374Z 21:38:20.981 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b33] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T21:38:22.0848374Z 21:38:21.201 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b33] Deleted sandbox c3009781-fcca-440b-8e21-c1adbeffceb4.",
+      "2026-10-04T21:38:22.0848374Z 21:38:21.201 info: Atli.Reports.Provisioner.Service.ManagedRenderers[8] Deleted the renderer of tenant appa-b33, if it had one.",
+      "2026-10-04T21:38:23.28848Z 21:38:22.315 info: Atli.Reports.Provisioner.Service.ManagedRenderers[8] Deleted the renderer of tenant appa-b34, if it had one.",
+      "2026-10-04T21:38:23.28848Z 21:38:22.108 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b34] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T21:38:23.28848Z 21:38:22.315 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b34] Deleted sandbox 4b9d33f8-3630-4f04-a807-78dda47aa978.",
+      "2026-10-04T21:38:24.282123Z 21:38:23.195 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b35] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T21:38:24.282123Z 21:38:23.437 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b35] Deleted sandbox 9e13eb21-836d-4e6f-9988-6108d841ecab.",
+      "2026-10-04T21:38:24.282123Z 21:38:23.437 info: Atli.Reports.Provisioner.Service.ManagedRenderers[8] Deleted the renderer of tenant appa-b35, if it had one.",
+      "2026-10-04T21:38:25.1337688Z 21:38:24.504 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b36] Deleted sandbox 27b2ae7b-27c1-4547-9f3e-9dbaec00a954.",
+      "2026-10-04T21:38:25.1337688Z 21:38:24.504 info: Atli.Reports.Provisioner.Service.ManagedRenderers[8] Deleted the renderer of tenant appa-b36, if it had one.",
+      "2026-10-04T21:38:25.1337688Z 21:38:24.278 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b36] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T21:38:37.1328338Z 21:38:36.132 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Creating a sandbox from disk image <disk_a>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T21:38:38.1966216Z 21:38:37.427 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Ready 1.3 s after the create call.",
+      "2026-10-04T21:38:38.1966216Z 21:38:37.032 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Created sandbox 61894045-11e9-4e90-967a-d2d284b57c97; exposing port 8080.",
+      "2026-10-04T21:38:38.1966216Z 21:38:37.120 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] Waiting for <port URL> to be ready.",
+      "2026-10-04T21:38:40.2278722Z 21:38:39.710 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b32] The record now points to sandbox 61894045-11e9-4e90-967a-d2d284b57c97.",
+      "2026-10-04T21:38:40.2278722Z 21:38:39.710 info: Atli.Reports.Provisioner.Service.ManagedRenderers[1] Created the renderer of tenant appa-b32: sandbox 61894045-11e9-4e90-967a-d2d284b57c97, size S."
+    ],
+    "gateway_lines": [
+      "2026-10-04T21:38:20.5481908Z 21:38:19.743 info: Atli.Reports.Server.Gateway[68] Caller app-a deleted the renderer of tenant appa-b32.",
+      "2026-10-04T21:38:22.501324Z 21:38:21.203 info: Atli.Reports.Server.Gateway[68] Caller app-a deleted the renderer of tenant appa-b33.",
+      "2026-10-04T21:38:23.3812136Z 21:38:22.317 info: Atli.Reports.Server.Gateway[68] Caller app-a deleted the renderer of tenant appa-b34.",
+      "2026-10-04T21:38:24.3974187Z 21:38:23.439 info: Atli.Reports.Server.Gateway[68] Caller app-a deleted the renderer of tenant appa-b35.",
+      "2026-10-04T21:38:26.3991248Z 21:38:24.506 info: Atli.Reports.Server.Gateway[68] Caller app-a deleted the renderer of tenant appa-b36.",
+      "2026-10-04T21:38:37.4340313Z 21:38:36.092 info: Atli.Reports.Server.Gateway.TenantProvisioning[64] Asking the provisioning service for the renderer of tenant appa-b32.",
+      "2026-10-04T21:38:40.7579453Z 21:38:39.712 info: Atli.Reports.Server.Gateway.TenantProvisioning[65] The provisioning service created the renderer of tenant appa-b32 in 3620.0146 ms."
+    ]
+  },
+  "killswitch": {
+    "tenant": "appa-b37",
+    "since_utc": "2026-10-04T21:41:29Z",
+    "before": {
+      "record_sandbox": "8387b73d-31c1-4baf-b050-c481009fdfad",
+      "sandboxes": [
+        {
+          "id": "8387b73d-31c1-4baf-b050-c481009fdfad",
+          "state": "Stopped",
+          "stopped_reason": "UserStopped",
+          "stopped_at": "2026-10-04T21:05:54.8928244+00:00",
+          "created_at": "2026-10-04T20:45:33.9573531+00:00"
+        }
+      ]
+    },
+    "warm_up": {
+      "status": 200,
+      "s": 2.886,
+      "bytes": 69600,
+      "pdf": true
+    },
+    "disable": {
+      "exit": 0,
+      "seconds": 15.8,
+      "lines": [
+        "[appa-b37] Disabled sandbox 8387b73d-31c1-4baf-b050-c481009fdfad (Stopped)."
+      ]
+    },
+    "after_disable": {
+      "record_sandbox": "8387b73d-31c1-4baf-b050-c481009fdfad",
+      "sandboxes": [
+        {
+          "id": "8387b73d-31c1-4baf-b050-c481009fdfad",
+          "state": "Stopped",
+          "stopped_reason": "Disabled",
+          "stopped_at": "2026-10-04T21:41:52.3637038+00:00",
+          "created_at": "2026-10-04T20:45:33.9573531+00:00"
+        }
+      ]
+    },
+    "delete_while_disabled": {
+      "status": 409,
+      "s": 0.0943,
+      "bytes": 349,
+      "pdf": false,
+      "kind": "InvalidRequest",
+      "detail": "The operator disabled the tenant's renderer. The operator must enable or delete it before the tenant can be deleted."
+    },
+    "after_refused_delete": {
+      "record_sandbox": "8387b73d-31c1-4baf-b050-c481009fdfad",
+      "sandboxes": [
+        {
+          "id": "8387b73d-31c1-4baf-b050-c481009fdfad",
+          "state": "Stopped",
+          "stopped_reason": "Disabled",
+          "stopped_at": "2026-10-04T21:41:52.3637038+00:00",
+          "created_at": "2026-10-04T20:45:33.9573531+00:00"
+        }
+      ]
+    },
+    "conversions_while_disabled": [
+      {
+        "status": 503,
+        "s": 0.0441,
+        "bytes": 280,
+        "pdf": false,
+        "kind": "BrowserUnavailable",
+        "detail": "The tenant's renderer is not running.",
+        "retry_after": "5"
+      },
+      {
+        "status": 503,
+        "s": 0.0279,
+        "bytes": 280,
+        "pdf": false,
+        "kind": "BrowserUnavailable",
+        "detail": "The tenant's renderer is not running.",
+        "retry_after": "5"
+      }
+    ],
+    "conversion_while_disabled_after_cache": {
+      "status": 503,
+      "s": 0.0716,
+      "bytes": 280,
+      "pdf": false,
+      "kind": "BrowserUnavailable",
+      "detail": "The tenant's renderer is not running.",
+      "retry_after": "5"
+    },
+    "after_conversions": {
+      "record_sandbox": "8387b73d-31c1-4baf-b050-c481009fdfad",
+      "sandboxes": [
+        {
+          "id": "8387b73d-31c1-4baf-b050-c481009fdfad",
+          "state": "Stopped",
+          "stopped_reason": "Disabled",
+          "stopped_at": "2026-10-04T21:41:52.3637038+00:00",
+          "created_at": "2026-10-04T20:45:33.9573531+00:00"
+        }
+      ]
+    },
+    "enable": {
+      "exit": 0,
+      "seconds": 3.62,
+      "lines": [
+        "[appa-b37] Enabled sandbox 8387b73d-31c1-4baf-b050-c481009fdfad (Stopped)."
+      ]
+    },
+    "conversions_after_enable": [
+      {
+        "status": 200,
+        "s": 1.5425,
+        "bytes": 69600,
+        "pdf": true
+      },
+      {
+        "status": 200,
+        "s": 0.0843,
+        "bytes": 69600,
+        "pdf": true
+      }
+    ],
+    "after_enable": {
+      "record_sandbox": "8387b73d-31c1-4baf-b050-c481009fdfad",
+      "sandboxes": [
+        {
+          "id": "8387b73d-31c1-4baf-b050-c481009fdfad",
+          "state": "Running",
+          "stopped_reason": "UserStopped",
+          "stopped_at": "2026-10-04T21:42:39.8124756+00:00",
+          "created_at": "2026-10-04T20:45:33.9573531+00:00"
+        }
+      ]
+    },
+    "list_lines": [
+      "TENANT    SANDBOX                               STATE    SIZE  DISK IMAGE                            CREATED",
+      "appa-b37  8387b73d-31c1-4baf-b050-c481009fdfad  Running  S     <disk_a>  2026-10-04 20:45:33Z"
+    ],
+    "until_utc": "2026-10-04T21:42:50Z",
+    "gateway_lines": [
+      "2026-10-04T21:41:56.3406079Z 21:41:55.226 warn: Atli.Reports.Server.Gateway.TenantProvisioning[66] The provisioning service refused to delete the renderer of tenant appa-b37: Disabled (409).",
+      "2026-10-04T21:41:58.6551243Z 21:41:57.862 warn: Atli.Reports.Server.Gateway.RendererGateway[50] The renderer of tenant appa-b37 (sandbox 8387b73d-31c1-4baf-b050-c481009fdfad) is not running, and the gateway cannot wake it.",
+      "2026-10-04T21:41:59.369566Z 21:41:58.497 warn: Atli.Reports.Server.Gateway.RendererGateway[50] The renderer of tenant appa-b37 (sandbox 8387b73d-31c1-4baf-b050-c481009fdfad) is not running, and the gateway cannot wake it.",
+      "2026-10-04T21:42:35.3897503Z 21:42:34.194 warn: Atli.Reports.Server.Gateway.RendererGateway[50] The renderer of tenant appa-b37 (sandbox 8387b73d-31c1-4baf-b050-c481009fdfad) is not running, and the gateway cannot wake it."
+    ],
+    "service_lines": [
+      "2026-10-04T21:41:56.2262693Z 21:41:55.223 warn: Atli.Reports.Provisioner.Service.ManagedRenderers[13] Refused to delete the renderer of tenant appa-b37: Sandbox 8387b73d-31c1-4baf-b050-c481009fdfad of tenant appa-b37 is disabled, so nothing was deleted. Enable it, or delete the tenant from the command line."
+    ]
+  },
+  "retire": {
+    "before": {
+      "at_utc": "2026-10-04T21:45:52Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 45,
+          "sandboxes": 45,
+          "states": {
+            "Stopped": 44,
+            "Running": 1
+          }
+        },
+        "appb-": {
+          "records": 3,
+          "sandboxes": 3,
+          "states": {
+            "Stopped": 3
+          }
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "revision": {
+      "app": "ca-provisioner",
+      "settings": {
+        "retire_after_idle": "00:05:00",
+        "retire_check": "00:01:00",
+        "disk": "a"
+      },
+      "revision": "ca-provisioner--0000003",
+      "ready_after_s": 41.77,
+      "since_utc": "2026-10-04T21:45:52Z",
+      "at_utc": "2026-10-04T21:46:34Z"
+    },
+    "watched_used": {
+      "appa-b39": {
+        "status": 200,
+        "s": 1.9115,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-b40": {
+        "status": 200,
+        "s": 3.4423,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-s01": {
+        "status": 200,
+        "s": 2.6583,
+        "bytes": 69600,
+        "pdf": true
+      }
+    },
+    "watched_used_utc": "2026-10-04T21:46:44Z",
+    "timeline": [
+      {
+        "at_utc": "2026-10-04T21:46:47Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 45,
+            "sandboxes": 45,
+            "states": {
+              "Stopped": 41,
+              "Running": 4
+            }
+          },
+          "appb-": {
+            "records": 3,
+            "sandboxes": 3,
+            "states": {
+              "Stopped": 3
+            }
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:47:20Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 42,
+            "sandboxes": 45,
+            "states": {
+              "Stopped": 41,
+              "Running": 4
+            }
+          },
+          "appb-": {
+            "records": 3,
+            "sandboxes": 3,
+            "states": {
+              "Stopped": 3
+            }
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:47:52Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 2,
+              "Running": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:48:24Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 4,
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:48:56Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 4,
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:49:29Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 4,
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:50:01Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 4,
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:50:33Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 5,
+            "sandboxes": 5,
+            "states": {
+              "Stopped": 4,
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:51:05Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 4,
+            "sandboxes": 4,
+            "states": {
+              "Running": 1,
+              "Stopped": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:51:37Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 4,
+            "sandboxes": 4,
+            "states": {
+              "Running": 1,
+              "Stopped": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:52:09Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 4,
+            "sandboxes": 4,
+            "states": {
+              "Running": 1,
+              "Stopped": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:52:41Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 4,
+            "sandboxes": 4,
+            "states": {
+              "Running": 1,
+              "Stopped": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:53:14Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 4,
+            "sandboxes": 4,
+            "states": {
+              "Running": 1,
+              "Stopped": 3
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      },
+      {
+        "at_utc": "2026-10-04T21:53:46Z",
+        "by_prefix": {
+          "appa-": {
+            "records": 1,
+            "sandboxes": 1,
+            "states": {
+              "Running": 1
+            }
+          },
+          "appb-": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          },
+          "other": {
+            "records": 0,
+            "sandboxes": 0,
+            "states": {}
+          }
+        }
+      }
+    ],
+    "retired_observed_utc": {
+      "appa-b39": "2026-10-04T21:53:46Z",
+      "appa-b40": "2026-10-04T21:53:46Z",
+      "appa-s01": "2026-10-04T21:53:46Z"
+    },
+    "stopped_at": {
+      "appa-b39": "2026-10-04T21:47:52.4946611+00:00",
+      "appa-b40": "2026-10-04T21:47:49.9683855+00:00",
+      "appa-s01": "2026-10-04T21:48:18.9348194+00:00"
+    },
+    "recreated": {
+      "appa-b39": {
+        "status": 200,
+        "s": 4.1596,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-b40": {
+        "status": 200,
+        "s": 5.7997,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-s01": {
+        "status": 200,
+        "s": 4.0501,
+        "bytes": 69600,
+        "pdf": true
+      }
+    },
+    "busy": {
+      "tenant": "appa-b38",
+      "requests": 75,
+      "answers": {
+        "pdf": 75
+      },
+      "same_sandbox_throughout": true
+    },
+    "after": {
+      "at_utc": "2026-10-04T22:10:23Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 1,
+          "sandboxes": 1,
+          "states": {
+            "Running": 1
+          }
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "until_utc": "2026-10-04T22:10:23Z",
+    "retirement_runs": [
+      "2026-10-04T21:46:47.1696231Z 21:46:44.767 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:47:39.455945Z 21:47:38.258 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 43 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:48:38.8525412Z 21:48:38.456 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:49:39.9010181Z 21:49:38.698 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:50:41.0584184Z 21:50:39.392 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 1 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:51:40.7970607Z 21:51:39.674 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:52:42.4910842Z 21:52:39.824 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:53:42.7700803Z 21:53:41.717 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 3 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:54:43.086317Z 21:54:41.779 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:55:42.8199013Z 21:55:41.841 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:56:42.8052835Z 21:56:41.907 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:57:42.88432Z 21:57:41.969 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:58:42.8015982Z 21:58:42.028 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T21:59:43.3789162Z 21:59:42.098 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:00:44.7351782Z 22:00:42.708 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 1 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:01:45.3048808Z 22:01:44.045 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 2 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:02:45.8015201Z 22:02:44.912 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:03:45.8907694Z 22:03:44.977 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:04:47.0087185Z 22:04:45.369 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:05:46.8474579Z 22:05:45.423 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:06:47.2544221Z 22:06:45.523 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:07:46.9404313Z 22:07:45.581 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:08:46.9120486Z 22:08:45.642 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:09:46.7831902Z 22:09:45.700 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:10:46.7875007Z 22:10:45.752 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:11:47.4921192Z 22:11:45.905 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed.",
+      "2026-10-04T22:12:46.7805584Z 22:12:45.994 info: Atli.Reports.Provisioner.Service.RetirementLoop[20] Retired 0 idle renderers and deleted 0 leftover sandboxes; 0 tenants failed."
+    ],
+    "watched_lines": [
+      "2026-10-04T21:53:41.183697Z 21:53:39.940 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b39] Retiring: sandbox 82eaddf6-75e3-4720-91ee-4ec806b312d2 has been stopped since 2026-10-04 21:47:52Z, longer than 00:05:00.",
+      "2026-10-04T21:53:42.4225021Z 21:53:40.741 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b40] Retiring: sandbox 01b31401-a95c-43bf-beee-70b3a03dbfe2 has been stopped since 2026-10-04 21:47:49Z, longer than 00:05:00.",
+      "2026-10-04T21:53:42.7700803Z 21:53:41.204 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Retiring: sandbox 091e8288-dca6-46aa-bc33-615aad997398 has been stopped since 2026-10-04 21:48:18Z, longer than 00:05:00.",
+      "2026-10-04T22:00:43.3489894Z 22:00:42.170 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b40] Retiring: sandbox f88eed93-25c3-4076-9f71-42315a7cd0ee has been stopped since 2026-10-04 21:55:36Z, longer than 00:05:00.",
+      "2026-10-04T22:01:44.5603633Z 22:01:42.863 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-b39] Retiring: sandbox 081504d3-0cc6-45b9-b443-94bcb587b4e5 has been stopped since 2026-10-04 21:55:55Z, longer than 00:05:00.",
+      "2026-10-04T22:01:45.3048808Z 22:01:43.605 info: Atli.Reports.Provisioner.RendererProvisioner[30] [appa-s01] Retiring: sandbox 1eb1018b-60af-4103-9342-cd126bed6a79 has been stopped since 2026-10-04 21:55:59Z, longer than 00:05:00."
+    ],
+    "busy_lines": [],
+    "retiring_lines": 51,
+    "first_run": {
+      "retired": 43,
+      "first_retiring_line": "2026-10-04T21:47:18.199Z",
+      "run_logged": "2026-10-04T21:47:38.251Z",
+      "note": "The run at 21:46:44 that retired nothing was the previous revision's, with RetireAfterIdle 00:00:00."
+    },
+    "retirements_in_all": 50,
+    "watched_stopped_to_retired_s": {
+      "appa-b39": 347.4,
+      "appa-b40": 350.7,
+      "appa-s01": 322.3
+    },
+    "appa_b37": "Enabled and used at 21:42 in scenario 8; retired at 21:50:38."
+  },
+  "rollout": {
+    "prepared": {
+      "appa-l01": {
+        "status": 200,
+        "s": 3.0647,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-l02": {
+        "status": 200,
+        "s": 2.1627,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-l03": {
+        "status": 200,
+        "s": 1.6805,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-l04": {
+        "status": 200,
+        "s": 1.8253,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-r01": {
+        "status": 200,
+        "s": 1.5861,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-r02": {
+        "status": 200,
+        "s": 1.6159,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-r03": {
+        "status": 200,
+        "s": 1.5234,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "appa-r04": {
+        "status": 200,
+        "s": 1.55,
+        "bytes": 69600,
+        "pdf": true
+      }
+    },
+    "prepared_utc": "2026-10-04T22:16:37Z",
+    "service_on_b": {
+      "app": "ca-provisioner",
+      "settings": {
+        "retire_after_idle": "00:00:00",
+        "retire_check": "00:01:00",
+        "disk": "b"
+      },
+      "revision": "ca-provisioner--0000006",
+      "ready_after_s": 41.88,
+      "since_utc": "2026-10-04T22:16:39Z",
+      "at_utc": "2026-10-04T22:17:21Z"
+    },
+    "before": {
+      "at_utc": "2026-10-04T22:19:08Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 9,
+          "sandboxes": 9,
+          "states": {
+            "Stopped": 5,
+            "Running": 4
+          }
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "before_tenants": {
+      "appa-b38": {
+        "disk": "a",
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-l01": {
+        "disk": "a",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l02": {
+        "disk": "a",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l03": {
+        "disk": "a",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l04": {
+        "disk": "a",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-r01": {
+        "disk": "a",
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-r02": {
+        "disk": "a",
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-r03": {
+        "disk": "a",
+        "states": [
+          "Stopped"
+        ]
+      },
+      "appa-r04": {
+        "disk": "a",
+        "states": [
+          "Stopped"
+        ]
+      }
+    },
+    "job": {
+      "execution": "job-provisioner-gtdq3gp",
+      "started_utc": "2026-10-04T22:19:17Z",
+      "load_started_epoch": 1791152201.71595,
+      "status": "Succeeded",
+      "start_time": "2026-10-04T22:19:18+00:00",
+      "end_time": "2026-10-04T22:22:25+00:00",
+      "observed_s": 196.84
+    },
+    "load": {
+      "requests": 1800,
+      "answers": {
+        "pdf": 1800
+      },
+      "during_job": {
+        "requests": 374,
+        "answers": {
+          "pdf": 374
+        }
+      },
+      "pdf_s": {
+        "n": 1800,
+        "min": 0.07,
+        "p50": 0.086,
+        "p95": 0.124,
+        "p99": 0.197,
+        "max": 0.463
+      },
+      "non_pdf": [],
+      "job_window_s": [
+        156.3,
+        343.3
+      ]
+    },
+    "after": {
+      "at_utc": "2026-10-04T22:32:59Z",
+      "by_prefix": {
+        "appa-": {
+          "records": 4,
+          "sandboxes": 4,
+          "states": {
+            "Running": 4
+          }
+        },
+        "appb-": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        },
+        "other": {
+          "records": 0,
+          "sandboxes": 0,
+          "states": {}
+        }
+      },
+      "duplicates": {},
+      "leftovers": {},
+      "records_without_sandbox": []
+    },
+    "after_tenants": {
+      "appa-l01": {
+        "disk": "b",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l02": {
+        "disk": "b",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l03": {
+        "disk": "b",
+        "states": [
+          "Running"
+        ]
+      },
+      "appa-l04": {
+        "disk": "b",
+        "states": [
+          "Running"
+        ]
+      }
+    },
+    "list": [
+      "TENANT    SANDBOX                               STATE    SIZE  DISK IMAGE                            CREATED",
+      "appa-l01  abe37509-a212-41c4-8066-088ce8173807  Running  S     <disk_b>  2026-10-04 22:19:51Z",
+      "appa-l02  ae0c6f48-bf6e-403b-8e52-7e31329cd8f0  Running  S     <disk_b>  2026-10-04 22:19:51Z",
+      "appa-l03  086e5fef-5cbe-4da5-b1ee-ef00dd54fa79  Running  S     <disk_b>  2026-10-04 22:19:51Z",
+      "appa-l04  4cda0201-8c15-4d2b-bac6-3cdbd2e43727  Running  S     <disk_b>  2026-10-04 22:19:51Z"
+    ],
+    "retired_comes_back": {
+      "tenant": "appa-r01",
+      "status": 200,
+      "s": 6.4591,
+      "disk": "b"
+    },
+    "job_lines": [
+      "2026-10-04T22:19:49.8606905Z Rollout of disk image <disk_b>: 4 to replace, 5 stopped to retire, 0 already on it. 4 at a time; old sandboxes are deleted 00:02:30 after their record moves.",
+      "2026-10-04T22:19:50.0095178Z [appa-b38] Retiring the stopped sandbox d5aa5b7d-f8d1-4718-a1e0-26a614c785a7; the tenant's next conversion creates a new renderer.",
+      "2026-10-04T22:19:50.0095178Z [appa-l04] Creating a sandbox from disk image <disk_b>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T22:19:50.0095178Z [appa-l03] Replacing sandbox 3fd8d77e-4ce5-4300-9761-53045d8636af (disk image <disk_a>, size S).",
+      "2026-10-04T22:19:50.0095178Z [appa-l01] Creating a sandbox from disk image <disk_b>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T22:19:50.0095178Z [appa-l02] Creating a sandbox from disk image <disk_b>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T22:19:50.0095178Z [appa-l01] Replacing sandbox f7a96742-4c40-49ee-9550-21e194aa24d6 (disk image <disk_a>, size S).",
+      "2026-10-04T22:19:50.0095178Z [appa-b38] Deleted sandbox d5aa5b7d-f8d1-4718-a1e0-26a614c785a7.",
+      "2026-10-04T22:19:50.0095178Z [appa-l03] Creating a sandbox from disk image <disk_b>, size S (500m CPU, 1024Mi memory).",
+      "2026-10-04T22:19:50.0095178Z [appa-l02] Replacing sandbox 0e532eb5-8d72-4a11-922c-df4f4344a5c6 (disk image <disk_a>, size S).",
+      "2026-10-04T22:19:50.0095178Z [appa-b38] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T22:19:50.0095178Z [appa-l04] Replacing sandbox 31e6aef2-83c6-4b65-b25b-58447c3647d7 (disk image <disk_a>, size S).",
+      "2026-10-04T22:19:55.0302188Z [appa-l04] Ready 3.2 s after the create call.",
+      "2026-10-04T22:19:55.0302188Z [appa-r03] Retiring the stopped sandbox f1d85cf5-0612-4ddc-99f9-fd87b29719c4; the tenant's next conversion creates a new renderer.",
+      "2026-10-04T22:19:55.0302188Z [appa-r04] Deleted sandbox 2ce414d0-49d2-4e06-b99e-a53cc12b1eb3.",
+      "2026-10-04T22:19:55.0302188Z [appa-l02] Created sandbox ae0c6f48-bf6e-403b-8e52-7e31329cd8f0; exposing port 8080.",
+      "2026-10-04T22:19:55.0302188Z [appa-l01] Waiting for <port URL> to be ready.",
+      "2026-10-04T22:19:55.0302188Z [appa-l04] The record now points to sandbox 4cda0201-8c15-4d2b-bac6-3cdbd2e43727.",
+      "2026-10-04T22:19:55.0302188Z [appa-l02] The record now points to sandbox ae0c6f48-bf6e-403b-8e52-7e31329cd8f0.",
+      "2026-10-04T22:19:55.0302188Z [appa-l02] Waiting for <port URL> to be ready.",
+      "2026-10-04T22:19:55.0302188Z [appa-l03] Ready 3.0 s after the create call.",
+      "2026-10-04T22:19:55.0302188Z [appa-r02] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T22:19:55.0302188Z [appa-l01] Created sandbox abe37509-a212-41c4-8066-088ce8173807; exposing port 8080.",
+      "2026-10-04T22:19:55.0302188Z [appa-l01] The record now points to sandbox abe37509-a212-41c4-8066-088ce8173807.",
+      "2026-10-04T22:19:55.0302188Z [appa-r04] Retiring the stopped sandbox 2ce414d0-49d2-4e06-b99e-a53cc12b1eb3; the tenant's next conversion creates a new renderer.",
+      "2026-10-04T22:19:55.0302188Z [appa-l03] The record now points to sandbox 086e5fef-5cbe-4da5-b1ee-ef00dd54fa79.",
+      "2026-10-04T22:19:55.0302188Z [appa-l03] Created sandbox 086e5fef-5cbe-4da5-b1ee-ef00dd54fa79; exposing port 8080.",
+      "2026-10-04T22:19:55.0302188Z [appa-l02] Ready 3.7 s after the create call.",
+      "2026-10-04T22:19:55.0302188Z [appa-r02] Retiring the stopped sandbox 8d0f7311-2bfa-403c-8b1e-d33cc3831eff; the tenant's next conversion creates a new renderer.",
+      "2026-10-04T22:19:55.0302188Z [appa-r01] Deleted sandbox c850ae74-5af2-4d54-a0a5-f5495460f5af.",
+      "2026-10-04T22:19:55.0302188Z [appa-r03] Deleted sandbox f1d85cf5-0612-4ddc-99f9-fd87b29719c4.",
+      "2026-10-04T22:19:55.0302188Z [appa-r03] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T22:19:55.0302188Z [appa-l04] Created sandbox 4cda0201-8c15-4d2b-bac6-3cdbd2e43727; exposing port 8080.",
+      "2026-10-04T22:19:55.0302188Z [appa-r01] Retiring the stopped sandbox c850ae74-5af2-4d54-a0a5-f5495460f5af; the tenant's next conversion creates a new renderer.",
+      "2026-10-04T22:19:55.0302188Z [appa-l03] Waiting for <port URL> to be ready.",
+      "2026-10-04T22:19:55.0302188Z [appa-r04] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T22:19:55.0302188Z [appa-r02] Deleted sandbox 8d0f7311-2bfa-403c-8b1e-d33cc3831eff.",
+      "2026-10-04T22:19:55.0302188Z [appa-l01] Ready 3.6 s after the create call.",
+      "2026-10-04T22:19:55.0302188Z [appa-l04] Waiting for <port URL> to be ready.",
+      "2026-10-04T22:19:55.0302188Z [appa-r01] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+      "2026-10-04T22:22:23.1147755Z [appa-l03] Deleted the old sandbox 3fd8d77e-4ce5-4300-9761-53045d8636af.",
+      "2026-10-04T22:22:24.2259738Z [appa-l01] Deleted the old sandbox f7a96742-4c40-49ee-9550-21e194aa24d6.",
+      "2026-10-04T22:22:24.2259738Z [appa-l04] Deleted the old sandbox 31e6aef2-83c6-4b65-b25b-58447c3647d7.",
+      "2026-10-04T22:22:24.2259738Z [appa-l02] Deleted the old sandbox 0e532eb5-8d72-4a11-922c-df4f4344a5c6.",
+      "2026-10-04T22:22:25.0077647Z   appa-r02",
+      "2026-10-04T22:22:25.0077647Z   appa-b38",
+      "2026-10-04T22:22:25.0077647Z   appa-r01",
+      "2026-10-04T22:22:25.0077647Z Replaced 4, retired 5, already on the image 0, failed 0.",
+      "2026-10-04T22:22:25.0077647Z No renderer sandboxes are left over.",
+      "2026-10-04T22:22:25.0077647Z   appa-r03",
+      "2026-10-04T22:22:25.0077647Z Retired, to be created again on their next conversion:",
+      "2026-10-04T22:22:25.0077647Z   appa-r04"
+    ]
+  },
+  "verify": {
+    "files": 30,
+    "values_checked": 129,
+    "found": "none"
+  },
+  "cleanup": {
+    "started_utc": "2026-10-04T22:38:08Z",
+    "role_assignments_deleted": 9,
+    "sandbox_group_client_delete": {
+      "exit": 0,
+      "s": 16.52
+    },
+    "sandbox_group_rend_delete": {
+      "exit": 0,
+      "s": 33.02
+    },
+    "resource_groups_gone_after_s": 1811.7,
+    "vault_purged": true,
+    "checks": {
+      "resource_group_exists": "false",
+      "infra_resource_group_exists": "false",
+      "groups_with_prefix": [],
+      "resources_with_tag": 0,
+      "role_assignments_in_scope": 0,
+      "role_definition_left": false,
+      "role_definitions_named": 0,
+      "assignments_for_identities": 0,
+      "identities_exist": [],
+      "deleted_workspaces": 0
+    },
+    "finished_utc": "2026-10-04T23:11:26Z"
+  }
+}
