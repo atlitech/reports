@@ -7,10 +7,12 @@ http_status() {
     awk '{ print $2 }' | tr -d '\r'
 }
 echo "http_example_com=$(http_status example.com || true)"
+# By address, so the answer does not depend on name resolution.
+echo "http_1_1_1_1=$(http_status 1.1.1.1 || true)"
 echo "tcp_1_1_1_1_443=$(tcp 1.1.1.1 443)"
 echo "tcp_8_8_8_8_53=$(tcp 8.8.8.8 53)"
 echo "tcp_imds_169_254_169_254_80=$(tcp 169.254.169.254 80)"
-if getent hosts example.com >/dev/null; then echo "dns_resolves_example_com=yes"; else echo "dns_resolves_example_com=no"; fi
+if timeout 20 getent hosts example.com >/dev/null; then echo "dns_resolves_example_com=yes"; else echo "dns_resolves_example_com=no"; fi
 # The platform's managed-identity endpoint. Without an identity on the sandbox group it must refuse.
 if [ -n "${IDENTITY_ENDPOINT:-}" ]; then
   hostport=$(echo "$IDENTITY_ENDPOINT" | sed -E 's#^https?://([^/]+).*#\1#')
