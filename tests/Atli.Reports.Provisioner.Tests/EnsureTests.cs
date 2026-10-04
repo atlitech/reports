@@ -273,6 +273,113 @@ public class EnsureTests
   }
 
   [Test]
+  public async Task A_record_that_names_another_tenants_sandbox_is_an_error()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("fabrikam", "disk-1");
+    var tampered = provisioning.AddRenderer("contoso", "disk-1") with
+    {
+      SandboxId = "old-fabrikam",
+    };
+    provisioning.Records.Add(tampered);
+
+    var exception = await Assert
+      .That(async () =>
+        await provisioning.Provisioner.EnsureAsync(
+          "contoso",
+          RendererSize.Medium,
+          "disk-1",
+          TestToken
+        )
+      )
+      .Throws<ProvisioningException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "The record of tenant contoso names sandbox old-fabrikam, which is labeled for tenant "
+          + "fabrikam; fix the record, or delete the tenant."
+      );
+    await Assert.That(provisioning.Records["contoso"]).IsSameReferenceAs(tampered);
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_launch_whose_sandbox_is_deleted_while_it_starts_fails_at_once()
+  {
+    using Provisioning provisioning = new();
+    // The proxy answers 404 for a sandbox that no longer exists; a delete got there first.
+    provisioning.Readiness.Answer = (_, _) =>
+    {
+      provisioning.Sandboxes.Remove("sandbox-1");
+      return Task.FromResult(ReadinessAnswer.NotReady(404));
+    };
+
+    var ensure = provisioning.Provisioner.EnsureAsync(
+      "contoso",
+      RendererSize.Medium,
+      "disk-1",
+      TestToken
+    );
+
+    // Without the clock moving: not at the ready timeout, which is minutes away.
+    var exception = await Assert
+      .That(async () => await ensure.WaitAsync(TimeSpan.FromSeconds(30), TestToken))
+      .Throws<ProvisioningException>();
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo("Sandbox sandbox-1 was deleted while it started; its port answered HTTP 404.");
+    await Assert.That(provisioning.Records.Count).IsEqualTo(0);
+    await Assert.That(provisioning.Journal.Matching("probe")).HasSingleItem();
+  }
+
+  [Test]
+  public async Task A_404_from_a_sandbox_that_still_exists_is_asked_again()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Readiness.AnswerInTurn(ReadinessAnswer.NotReady(404), ReadinessAnswer.Ready);
+
+    var ensure = provisioning.Provisioner.EnsureAsync(
+      "contoso",
+      RendererSize.Medium,
+      "disk-1",
+      TestToken
+    );
+    await provisioning.Clock.WaitForTimerAsync(RendererProvisioner.ReadyPollInterval);
+    provisioning.Clock.Advance(RendererProvisioner.ReadyPollInterval);
+    var result = await ensure;
+
+    await Assert.That(result.Created).IsTrue();
+    await Assert.That(provisioning.Journal.Matching("probe").Count).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task A_record_write_whose_answer_was_lost_is_this_launchs_own_renderer()
+  {
+    using Provisioning provisioning = new();
+    // The write takes effect but its answer is lost, and so is the read that would have told.
+    provisioning.Records.FailPutAfterWriting = new InvalidOperationException("No answer.");
+    provisioning.Records.BeforePut = () =>
+      provisioning.Records.FailNextGet = new InvalidOperationException("No answer either.");
+
+    var result = await provisioning.Provisioner.EnsureAsync(
+      "contoso",
+      RendererSize.Medium,
+      "disk-1",
+      TestToken
+    );
+
+    await Assert.That(result.Created).IsTrue();
+    await Assert.That(result.Record.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+    var output = provisioning.Output.ToString();
+    await Assert
+      .That(output)
+      .EndsWith("[contoso] The record points to this launch's sandbox sandbox-1 after all.\n");
+    await Assert.That(output).DoesNotContain("Another command or replica");
+  }
+
+  [Test]
   public async Task Writes_its_progress_but_never_the_credential()
   {
     using Provisioning provisioning = new();

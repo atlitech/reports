@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 
@@ -100,6 +101,7 @@ internal sealed class RendererProvisioner
       size,
       diskImageId,
       replacing: null,
+      NewLaunchId(),
       cancellationToken
     );
     _output.WriteLine($"Tenant:      {tenantId}");
@@ -116,7 +118,8 @@ internal sealed class RendererProvisioner
   /// service: returns the existing record when it names a sandbox that exists (disabled or not), and
   /// otherwise creates a renderer as <see cref="CreateAsync"/> does, or replaces the record's missing
   /// sandbox as a rollout does. A create that another command or replica finished first counts as
-  /// found, not failed.
+  /// found, not failed. A record that cannot be read, or that names a sandbox labeled for another
+  /// tenant, is a <see cref="ProvisioningException"/>.
   /// </summary>
   public async Task<EnsureResult> EnsureAsync(
     string tenantId,
@@ -136,6 +139,7 @@ internal sealed class RendererProvisioner
       Log(tenantId, $"Sandbox {record.SandboxId} of the record no longer exists; replacing it.");
     }
 
+    var launchId = NewLaunchId();
     try
     {
       // A missing sandbox is replaced as a rollout replaces one, but there is nothing to retire.
@@ -144,6 +148,7 @@ internal sealed class RendererProvisioner
         size,
         diskImageId,
         replacing: record,
+        launchId,
         cancellationToken
       );
       Log(tenantId, $"The record now points to sandbox {created.SandboxId}.");
@@ -154,11 +159,18 @@ internal sealed class RendererProvisioner
         || !cancellationToken.IsCancellationRequested
       )
     {
-      // The launch deleted its own sandbox. If another command or replica gave the tenant a
-      // renderer meanwhile (the record's compare-and-swap is what discarded this launch), that
-      // renderer is the answer.
-      if (await LookUpWinnerAsync(tenantId, record, cancellationToken) is { } winner)
+      // The launch deleted its own sandbox, unless it could not tell whether its record write took
+      // effect. If the record points to a renderer now, that renderer is the answer: another
+      // command's or replica's (the record's compare-and-swap is what discarded this launch), or
+      // this launch's own after all.
+      if (await LookUpWinnerAsync(tenantId, record, cancellationToken) is var (winner, sandbox))
       {
+        if (sandbox is not null && RendererLabels.IsFromLaunch(sandbox, launchId))
+        {
+          Log(tenantId, $"The record points to this launch's sandbox {sandbox.Id} after all.");
+          return new EnsureResult(winner, Created: true);
+        }
+
         Log(
           tenantId,
           $"Another command or replica gave the tenant sandbox {winner.SandboxId} meanwhile; "
@@ -175,7 +187,8 @@ internal sealed class RendererProvisioner
   /// The tenant's record when <see cref="EnsureAsync"/> would return it as found: it names a
   /// sandbox that exists (disabled or not), or no sandbox at all, as a renderer that is not a
   /// sandbox. <see langword="null"/> when there is no record or its sandbox is gone. Throws
-  /// <see cref="ProvisioningException"/> for a record that cannot be read.
+  /// <see cref="ProvisioningException"/> for a record that cannot be read, or that names a sandbox
+  /// labeled for another tenant.
   /// </summary>
   public async Task<RendererRecord?> FindAsync(
     string tenantId,
@@ -188,6 +201,21 @@ internal sealed class RendererProvisioner
   /// there is no record, or when <c>Record</c> names a sandbox that is gone.
   /// </summary>
   private async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
+    string tenantId,
+    CancellationToken cancellationToken
+  )
+  {
+    var (record, sandbox) = await ReadRendererAsync(tenantId, cancellationToken);
+    return (record, record is not null && (record.SandboxId is null || sandbox is not null));
+  }
+
+  /// <summary>
+  /// Reads the tenant's record and the sandbox it names, <see langword="null"/> when there is no
+  /// record, or it names no sandbox or one that is gone. Throws <see cref="ProvisioningException"/>
+  /// for a record that cannot be read, and for one that names a sandbox labeled for another tenant
+  /// or for none: a record is never trusted to route to a sandbox that is not the tenant's own.
+  /// </summary>
+  private async Task<(RendererRecord? Record, SandboxView? Sandbox)> ReadRendererAsync(
     string tenantId,
     CancellationToken cancellationToken
   )
@@ -208,18 +236,28 @@ internal sealed class RendererProvisioner
 
     if (record?.SandboxId is not { } sandboxId)
     {
-      return (record, record is not null);
+      return (record, null);
     }
 
-    return (record, await _sandboxes.GetAsync(sandboxId, cancellationToken) is not null);
+    var sandbox = await _sandboxes.GetAsync(sandboxId, cancellationToken);
+    if (sandbox is not null && RendererLabels.TenantOf(sandbox) is var owner && owner != tenantId)
+    {
+      throw new ProvisioningException(
+        $"The record of tenant {tenantId} names sandbox {sandboxId}, which is labeled for "
+          + $"{(owner is null ? "no tenant" : "tenant " + owner)}; fix the record, or delete the "
+          + "tenant."
+      );
+    }
+
+    return (record, sandbox);
   }
 
   /// <summary>
-  /// After a launch for <see cref="EnsureAsync"/> failed: the renderer another command or replica
-  /// recorded for the tenant meanwhile, or <see langword="null"/> when there is none, or it cannot
-  /// be read. <paramref name="read"/> is the record the launch meant to replace.
+  /// After a launch for <see cref="EnsureAsync"/> failed: the renderer recorded for the tenant now,
+  /// with its sandbox, or <see langword="null"/> when there is none, its sandbox is gone, it is still
+  /// <paramref name="read"/>, the record the launch meant to replace, or it cannot be read.
   /// </summary>
-  private async Task<RendererRecord?> LookUpWinnerAsync(
+  private async Task<(RendererRecord Record, SandboxView? Sandbox)?> LookUpWinnerAsync(
     string tenantId,
     RendererRecord? read,
     CancellationToken cancellationToken
@@ -227,13 +265,15 @@ internal sealed class RendererProvisioner
   {
     try
     {
+      var (current, sandbox) = await ReadRendererAsync(tenantId, cancellationToken);
       return
-        await LookUpAsync(tenantId, cancellationToken) is (var current, true)
+        current is not null
+        && (current.SandboxId is null || sandbox is not null)
         && (
           read is null
-          || !string.Equals(current!.SandboxId, read.SandboxId, StringComparison.Ordinal)
+          || !string.Equals(current.SandboxId, read.SandboxId, StringComparison.Ordinal)
         )
-        ? current
+        ? (current, sandbox)
         : null;
     }
     catch (Exception exception)
@@ -381,6 +421,7 @@ internal sealed class RendererProvisioner
               size,
               diskImageId,
               replacing: old,
+              NewLaunchId(),
               token
             );
             Log(old.TenantId, $"The record now points to sandbox {record.SandboxId}.");
@@ -1139,16 +1180,17 @@ internal sealed class RendererProvisioner
   /// had none. If the record is no longer that when the renderer is ready, another command got
   /// there first, and this launch is discarded.
   /// </param>
+  /// <param name="launchId">The launch's own label value, from <see cref="NewLaunchId"/>.</param>
   private async Task<(RendererRecord Record, SandboxView Sandbox)> LaunchAsync(
     string tenantId,
     RendererSize size,
     string diskImageId,
     RendererRecord? replacing,
+    string launchId,
     CancellationToken cancellationToken
   )
   {
     var credential = RendererCredential.Generate();
-    var launchId = Guid.NewGuid().ToString("N");
     SandboxSpec spec = new()
     {
       DiskImageId = diskImageId,
@@ -1198,7 +1240,7 @@ internal sealed class RendererProvisioner
           $"Sandbox {created.Id} reported no URL for port {RendererPort}."
         );
       Log(tenantId, $"Waiting for {url} to be ready.");
-      await WaitUntilReadyAsync(url, cancellationToken);
+      await WaitUntilReadyAsync(url, created.Id, cancellationToken);
       Log(tenantId, $"Ready {Seconds(_time.GetElapsedTime(started))} after the create call.");
       record = new RendererRecord
       {
@@ -1313,9 +1355,15 @@ internal sealed class RendererProvisioner
   /// <summary>
   /// Asks the renderer whether it is ready until it answers <c>200</c>, for up to the ready timeout.
   /// For its first seconds a new sandbox's proxy answers <c>403</c> or <c>502</c>, and its server
-  /// <c>503</c> until the browser is up.
+  /// <c>503</c> until the browser is up. The proxy answers <c>404</c> for a sandbox that no longer
+  /// exists, so a <c>404</c> asks the data plane whether <paramref name="sandboxId"/> is gone, and a
+  /// sandbox that is gone fails the wait at once rather than at the timeout.
   /// </summary>
-  private async Task WaitUntilReadyAsync(Uri url, CancellationToken cancellationToken)
+  private async Task WaitUntilReadyAsync(
+    Uri url,
+    string sandboxId,
+    CancellationToken cancellationToken
+  )
   {
     var started = _time.GetTimestamp();
     while (true)
@@ -1324,6 +1372,16 @@ internal sealed class RendererProvisioner
       if (answer.IsReady)
       {
         return;
+      }
+
+      if (
+        answer.StatusCode == (int)HttpStatusCode.NotFound
+        && await _sandboxes.GetAsync(sandboxId, cancellationToken) is null
+      )
+      {
+        throw new ProvisioningException(
+          $"Sandbox {sandboxId} was deleted while it started; its port answered {answer.Status}."
+        );
       }
 
       var left = _options.ReadyTimeout - _time.GetElapsedTime(started);
@@ -1476,6 +1534,9 @@ internal sealed class RendererProvisioner
       );
     }
   }
+
+  /// <summary>A new value of the <c>launch</c> label, unique to one create call.</summary>
+  private static string NewLaunchId() => Guid.NewGuid().ToString("N");
 
   private void Log(string tenantId, string message) => _output.WriteLine($"[{tenantId}] {message}");
 

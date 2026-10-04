@@ -24,6 +24,9 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
   /// <summary>Fails every get with this exception, when set.</summary>
   public Exception? FailGet { get; set; }
 
+  /// <summary>Fails the next get with this exception; cleared once thrown.</summary>
+  public Exception? FailNextGet { get; set; }
+
   /// <summary>Runs before each put, when set.</summary>
   public Action? BeforePut { get; set; }
 
@@ -46,6 +49,12 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
     if (FailGet is { } failure)
     {
       return Task.FromException<RendererRecord?>(failure);
+    }
+
+    if (FailNextGet is { } once)
+    {
+      FailNextGet = null;
+      return Task.FromException<RendererRecord?>(once);
     }
 
     return _unreadable.TryGetValue(tenantId, out var reason)

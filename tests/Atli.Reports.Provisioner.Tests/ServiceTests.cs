@@ -343,6 +343,25 @@ public class ServiceTests
   }
 
   [Test]
+  public async Task A_record_that_names_another_tenants_sandbox_is_a_failure_not_found()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-b", "disk-1");
+    var tampered = provisioning.AddRenderer("myapp-a", "disk-1") with { SandboxId = "old-myapp-b" };
+    provisioning.Records.Add(tampered);
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    using var response = await service.PutAsync("myapp-a", TestToken);
+
+    await AssertProblemAsync(response, HttpStatusCode.ServiceUnavailable, "Failed");
+    var failures = service.Logs.Of<ManagedRenderers>(2);
+    await Assert.That(failures).HasSingleItem();
+    await Assert.That(failures[0].Exception!.Message).Contains("labeled for tenant myapp-b");
+    await Assert.That(provisioning.Records["myapp-a"]).IsSameReferenceAs(tampered);
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
+  }
+
+  [Test]
   public async Task A_prefix_with_its_most_renderers_refuses_only_new_tenants()
   {
     using Provisioning provisioning = new();

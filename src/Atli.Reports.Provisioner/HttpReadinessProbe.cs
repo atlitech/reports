@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 
 namespace Atli.Reports.Provisioner;
@@ -27,9 +26,7 @@ internal sealed class HttpReadinessProbe(HttpClient httpClient) : IReadinessProb
       );
       return response.StatusCode == HttpStatusCode.OK
         ? ReadinessAnswer.Ready
-        : ReadinessAnswer.NotReady(
-          "HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)
-        );
+        : ReadinessAnswer.NotReady((int)response.StatusCode);
     }
     catch (HttpRequestException exception)
     {
