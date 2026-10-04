@@ -10,6 +10,8 @@ internal static class ReportsSecurityRegistration
   internal const string ApiKeyScheme = "ReportsApiKey";
   internal const string ConvertPolicy = "Reports.Convert";
   internal const string DiagnosticsPolicy = "Reports.Diagnostics";
+  internal const string TenantsPolicy = "Reports.Tenants";
+  internal const string TenantsPermission = "reports.tenants";
   internal const string CallerClaim = "atli.reports.caller";
   internal const string PartitionClaim = "atli.reports.partition";
   internal const string PermissionClaim = "atli.reports.permission";
@@ -143,6 +145,27 @@ internal static class ReportsSecurityRegistration
             policy.RequireClaim(PermissionClaim, "reports.diagnostics");
           }
         }
+      )
+      .AddPolicy(
+        TenantsPolicy,
+        policy =>
+        {
+          if (mode == "None")
+          {
+            policy.RequireAssertion(_ => true);
+          }
+          else
+          {
+            policy.RequireAuthenticatedUser();
+            policy.RequireClaim(CallerClaim);
+            policy.RequireClaim(
+              PermissionClaim,
+              mode == "JwtBearer"
+                ? settings.Authentication.Jwt.TenantsPermission
+                : TenantsPermission
+            );
+          }
+        }
       );
   }
 
@@ -208,12 +231,21 @@ internal static class ReportsSecurityRegistration
         || !ValidIdentifier(jwt.CallerIdClaimType)
         || !ValidIdentifier(jwt.PermissionClaimType)
         || !ValidIdentifier(jwt.RequiredPermission)
+        || !ValidIdentifier(jwt.TenantsPermission)
         || jwt.CallerIdClaimType.StartsWith("atli.reports.", StringComparison.OrdinalIgnoreCase)
         || jwt.PermissionClaimType.StartsWith("atli.reports.", StringComparison.OrdinalIgnoreCase)
       )
       {
         throw new InvalidOperationException(
           "JwtBearer authentication requires an HTTPS Authority, an Audience, and valid caller/permission claim settings."
+        );
+      }
+
+      // Otherwise every caller that may convert could delete its tenants' renderers.
+      if (string.Equals(jwt.TenantsPermission, jwt.RequiredPermission, StringComparison.Ordinal))
+      {
+        throw new InvalidOperationException(
+          "ReportsServer:Authentication:Jwt:TenantsPermission must differ from Jwt:RequiredPermission."
         );
       }
     }

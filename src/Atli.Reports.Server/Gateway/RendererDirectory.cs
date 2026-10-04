@@ -11,10 +11,17 @@ namespace Atli.Reports.Server.Gateway;
 /// Store failures, a damaged record among them, are not cached, and affect only that tenant.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A record the provisioner replaces (a rotated credential, a recreated renderer) reaches the
 /// gateway when the cached one expires, or sooner: the gateway evicts a record whose renderer
 /// rejected its credential, could not be reached, or names a sandbox that no longer exists, so the
 /// next conversion reads the store again.
+/// </para>
+/// <para>
+/// A record the provisioning service has just written is read with <see cref="ReloadAsync"/>, past
+/// the cached missing answer and any lookup that may have started before the write. A lookup that
+/// finishes after a later one never replaces the later one's answer.
+/// </para>
 /// </remarks>
 internal sealed class RendererDirectory(
   IRendererRecordStore store,
@@ -36,6 +43,9 @@ internal sealed class RendererDirectory(
     StringComparer.Ordinal
   );
 
+  /// <summary>Numbers store lookups in the order they start.</summary>
+  private long _lookups;
+
   /// <summary>
   /// The tenant's record, or <see langword="null"/> when it has none. Throws what the store throws.
   /// </summary>
@@ -51,10 +61,25 @@ internal sealed class RendererDirectory(
 
     var load = _loads.GetOrAdd(
       tenantId,
-      static (tenant, directory) =>
-        new Lazy<Task<RendererRecord?>>(() => SharedWork.Run(() => directory.LoadAsync(tenant))),
+      static (tenant, directory) => directory.NewLoad(tenant),
       this
     );
+    return await load.Value.WaitAsync(cancellationToken);
+  }
+
+  /// <summary>
+  /// Reads the tenant's record from the store again, past its cached answer and any lookup already
+  /// in flight, which may have started before the record was written; lookups from now on share
+  /// this one. Throws what the store throws.
+  /// </summary>
+  public async Task<RendererRecord?> ReloadAsync(
+    string tenantId,
+    CancellationToken cancellationToken
+  )
+  {
+    _entries.TryRemove(tenantId, out _);
+    var load = NewLoad(tenantId);
+    _loads[tenantId] = load;
     return await load.Value.WaitAsync(cancellationToken);
   }
 
@@ -70,7 +95,28 @@ internal sealed class RendererDirectory(
     }
   }
 
-  private async Task<RendererRecord?> LoadAsync(string tenantId)
+  /// <summary>
+  /// Forgets the tenant's cached answer, whatever it is, so the next lookup reads the store: after
+  /// the tenant's renderer was deleted.
+  /// </summary>
+  public void Evict(string tenantId) => _entries.TryRemove(tenantId, out _);
+
+  /// <summary>A store lookup for the tenant, not yet started; it runs on its first use.</summary>
+  private Lazy<Task<RendererRecord?>> NewLoad(string tenantId)
+  {
+    var lookup = Interlocked.Increment(ref _lookups);
+    Lazy<Task<RendererRecord?>>? load = null;
+    load = new Lazy<Task<RendererRecord?>>(() =>
+      SharedWork.Run(() => LoadAsync(tenantId, lookup, load!))
+    );
+    return load;
+  }
+
+  private async Task<RendererRecord?> LoadAsync(
+    string tenantId,
+    long lookup,
+    Lazy<Task<RendererRecord?>> load
+  )
   {
     try
     {
@@ -86,18 +132,25 @@ internal sealed class RendererDirectory(
         var expiresAt =
           timeProvider.GetTimestamp()
           + (long)(lifetime.TotalSeconds * timeProvider.TimestampFrequency);
-        _entries[tenantId] = new Entry(record, expiresAt);
+        // A lookup that started earlier but finished later read an older store.
+        _entries.AddOrUpdate(
+          tenantId,
+          static (_, entry) => entry,
+          static (_, cached, entry) => cached.Lookup > entry.Lookup ? cached : entry,
+          new Entry(record, expiresAt, lookup)
+        );
       }
 
       return record;
     }
     finally
     {
-      _loads.TryRemove(tenantId, out _);
+      // Only this lookup: a reload may have taken its place.
+      _loads.TryRemove(KeyValuePair.Create(tenantId, load));
     }
   }
 
-  private sealed record Entry(RendererRecord? Record, long ExpiresAt);
+  private sealed record Entry(RendererRecord? Record, long ExpiresAt, long Lookup);
 }
 
 /// <summary>

@@ -42,8 +42,9 @@ internal sealed class GatewayOptions
   public GatewayCallerTenants[] Tenants { get; set; } = [];
 
   /// <summary>
-  /// The header a caller with several tenants names one in. Only a selector: it is checked against
-  /// the caller's membership and never names a tenant the caller does not belong to.
+  /// The header a caller names its tenant in, unless it has one listed tenant and no prefix. Only a
+  /// selector: it is checked against the caller's membership and never names a tenant the caller
+  /// does not belong to.
   /// </summary>
   public string TenantHeader { get; set; } = "X-Reports-Tenant";
 
