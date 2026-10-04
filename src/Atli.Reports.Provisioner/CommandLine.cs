@@ -32,6 +32,12 @@ internal sealed record DisableCommand(string TenantId) : ProvisionerCommand;
 /// <param name="TenantId">The tenant whose disabled renderer may start again.</param>
 internal sealed record EnableCommand(string TenantId) : ProvisionerCommand;
 
+/// <summary><c>serve</c>: run the provisioning service until stopped.</summary>
+internal sealed record ServeCommand : ProvisionerCommand;
+
+/// <summary><c>retire</c>: retire managed tenants' renderers that have been stopped too long, once.</summary>
+internal sealed record RetireCommand : ProvisionerCommand;
+
 /// <summary><c>--help</c>: write <paramref name="Text"/> and succeed.</summary>
 internal sealed record HelpCommand(string Text) : ProvisionerCommand;
 
@@ -76,6 +82,8 @@ internal static class CommandLine
       prune     Delete renderer sandboxes that no record points to.
       disable   Stop a tenant's renderer and keep it from starting: the kill switch.
       enable    Let a disabled renderer start again.
+      serve     Run the provisioning service, which creates renderers on demand.
+      retire    Retire managed tenants' renderers that have been stopped too long.
 
     Run 'atli-reports-provisioner <command> --help' for a command's options. Settings come from
     appsettings.json next to the binary, then Provisioner__* environment variables, then flags.
@@ -173,6 +181,26 @@ internal static class CommandLine
       --tenant <id>   The tenant.
     """;
 
+  public const string ServeUsage = """
+    Usage: atli-reports-provisioner serve
+
+    Runs the provisioning service until stopped: an HTTP API on internal ingress that the gateway
+    calls to create a renderer for a tenant under one of Provisioner:Service:TenantPrefixes on its
+    first conversion, and to delete one when the application deletes the tenant. It authenticates
+    the gateway with Provisioner:Service:ApiKeys, keeps each prefix within its MaxTenants and every
+    create within MaxCreatesPerMinute, and retires renderers stopped for longer than
+    RetireAfterIdle. Listens where ASPNETCORE_URLS says.
+    """;
+
+  public const string RetireUsage = """
+    Usage: atli-reports-provisioner retire
+
+    Deletes, with their records, the renderers of tenants under Provisioner:Service:TenantPrefixes
+    that have been stopped for longer than Provisioner:Service:RetireAfterIdle, as serve does every
+    RetireCheckInterval. Each comes back from the current disk image on its tenant's next
+    conversion. Disabled renderers are kept.
+    """;
+
   public static ProvisionerCommand Parse(IReadOnlyList<string> arguments)
   {
     ArgumentNullException.ThrowIfNull(arguments);
@@ -196,6 +224,8 @@ internal static class CommandLine
       "prune" => PruneUsage,
       "disable" => DisableUsage,
       "enable" => EnableUsage,
+      "serve" => ServeUsage,
+      "retire" => RetireUsage,
       _ => throw new UsageException($"Unknown command '{name}'.", Overview),
     };
     var options = ParseOptions(arguments.Skip(1), usage);
@@ -212,6 +242,8 @@ internal static class CommandLine
       "prune" => ParsePrune(options, usage),
       "disable" => ParseTenantOnly(options, usage, tenant => new DisableCommand(tenant)),
       "enable" => ParseTenantOnly(options, usage, tenant => new EnableCommand(tenant)),
+      "serve" => ParseNoOptions(options, usage, new ServeCommand()),
+      "retire" => ParseNoOptions(options, usage, new RetireCommand()),
       _ => ParseList(options, usage),
     };
   }
@@ -300,6 +332,16 @@ internal static class CommandLine
   {
     options.Allow(usage);
     return new ListCommand();
+  }
+
+  private static ProvisionerCommand ParseNoOptions(
+    Options options,
+    string usage,
+    ProvisionerCommand command
+  )
+  {
+    options.Allow(usage);
+    return command;
   }
 
   /// <summary>

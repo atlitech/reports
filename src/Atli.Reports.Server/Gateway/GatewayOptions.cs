@@ -51,6 +51,8 @@ internal sealed class GatewayOptions
 
   public GatewayWakeOptions Wake { get; set; } = new();
 
+  public GatewayProvisioningOptions Provisioning { get; set; } = new();
+
   /// <summary>
   /// The deadline for one forwarded conversion, from the record lookup to the PDF's last byte,
   /// waking the renderer included.
@@ -112,6 +114,7 @@ internal sealed class GatewayOptions
 
     Records.Validate(AllowHttpRenderers);
     Wake.Validate();
+    Provisioning.Validate(Records, AllowHttpRenderers);
 
     if (RendererTimeout <= TimeSpan.Zero || RendererTimeout > TimeSpan.FromHours(24))
     {
@@ -224,6 +227,13 @@ internal sealed class GatewayCallerTenants
   public string CallerId { get; set; } = "";
 
   public string[] Tenants { get; set; } = [];
+
+  /// <summary>
+  /// Tenant prefixes the caller owns (<see cref="TenantPrefix"/>): every valid tenant ID under one is
+  /// the caller's, named in the tenant header, so that an application can have a tenant per
+  /// workspace without listing each.
+  /// </summary>
+  public string[] TenantPrefixes { get; set; } = [];
 }
 
 /// <summary>
@@ -435,6 +445,80 @@ internal sealed class GatewayWakeOptions
           exception
         );
       }
+    }
+  }
+}
+
+/// <summary>
+/// <c>ReportsServer:Gateway:Provisioning</c>: whether the gateway asks the provisioning service
+/// (<see cref="Atli.Reports.Hosting.Provisioning.ProvisioningApi"/>) to create a renderer for a
+/// tenant under one of its callers' prefixes that has none, and to delete one when the caller deletes
+/// the tenant.
+/// </summary>
+internal sealed class GatewayProvisioningOptions
+{
+  public const string OnDemandMode = "OnDemand";
+
+  /// <summary><c>None</c>, or <c>OnDemand</c> to create prefix tenants' renderers on first use.</summary>
+  public string Mode { get; set; } = "None";
+
+  /// <summary>For <c>OnDemand</c>: the provisioning service's base address, on internal ingress.</summary>
+  public Uri? Url { get; set; }
+
+  /// <summary>For <c>OnDemand</c>: the gateway's credential for the provisioning service.</summary>
+  public string ApiKey { get; set; } = "";
+
+  /// <summary>How long a conversion waits for its tenant's renderer to be created.</summary>
+  public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(60);
+
+  public bool Enabled => Mode == OnDemandMode;
+
+  public void Validate(GatewayRecordsOptions records, bool allowHttp)
+  {
+    if (Mode is not ("None" or OnDemandMode))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode must be None (the default) or OnDemand."
+      );
+    }
+
+    if (Timeout <= TimeSpan.Zero || Timeout > TimeSpan.FromMinutes(10))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Timeout must be positive and at most 10 minutes."
+      );
+    }
+
+    if (!Enabled)
+    {
+      return;
+    }
+
+    if (
+      Url is not { IsAbsoluteUri: true }
+      || !(Url.Scheme == Uri.UriSchemeHttps || (allowHttp && Url.Scheme == Uri.UriSchemeHttp))
+      || !string.IsNullOrEmpty(Url.UserInfo)
+      || !string.IsNullOrEmpty(Url.Query)
+      || !string.IsNullOrEmpty(Url.Fragment)
+    )
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:Url, the provisioning service's https address."
+      );
+    }
+
+    if (!GatewayOptions.IsApiKey(ApiKey))
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:ApiKey, the gateway's credential for the provisioning service."
+      );
+    }
+
+    if (records.Store == GatewayRecordsOptions.ConfigurationStore)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs a record store the provisioning service writes: File or KeyVault."
+      );
     }
   }
 }

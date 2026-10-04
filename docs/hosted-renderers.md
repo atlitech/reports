@@ -323,13 +323,55 @@ hours a day at 1 vCPU costs about $6.50 a month.
 Chromium's sandbox is therefore one layer. The per-customer renderer bounds what one escape
 reaches, and the runtime and node pool decide how hard the next step is.
 
+## Applications with many tenants
+
+Status: being built. An application whose own users keep separate workspaces can give each
+workspace a renderer of its own, so that one workspace's documents never render on the machine
+that renders another's: the separation this design gives customers, one level down. The
+application chooses the level, the workspace or the person, by where its users' trust ends.
+
+- **The application owns a tenant prefix.** The gateway gives its caller ID a prefix, such as
+  `myapp-`, in `Tenants:<n>:TenantPrefixes`. Every valid tenant ID under the prefix is the
+  caller's, such as `myapp-<workspace id>`, and the caller names one in the tenant header on every
+  request. A prefix is 2 to 27 lowercase letters, digits, and hyphens and ends with a hyphen, so a
+  36-character GUID fits in a tenant ID's 63, and `acme-` cannot own `acmecorp-1`. Prefixes of
+  different callers may not overlap.
+- **The application decides which of its users may use a workspace.** The gateway knows that the
+  application may use every tenant under its prefix, and nothing of the application's users. The
+  application must check that the signed-in user may use a workspace before naming it.
+- **A separate provisioning service creates renderers on first use.** The gateway never holds the
+  right to create renderers, since the role that grants it also runs commands and reads files in
+  every sandbox of the group. The provisioner's `serve` mode runs as a service of its own, on
+  internal ingress, with that role and write access to the record vault. When a tenant under a
+  prefix has no record, or its record names a sandbox that no longer exists, the gateway asks the
+  service to create one (`PUT /tenants/{id}/renderer`), waits, and then converts. Concurrent first
+  conversions of a tenant share one creation.
+- **The service limits what the gateway can ask for.** It serves only the prefixes it is
+  configured with, at most `MaxTenants` renderers under each and `MaxCreatesPerMinute` creates in
+  all, and it authenticates the gateway with an API key of its own. A compromised gateway can
+  therefore create renderers there and delete the application's tenants, but cannot change,
+  reassign, or enter a renderer.
+- **The application deletes a workspace's renderer** with `DELETE /tenants/{id}` on the gateway,
+  which needs the permission `reports.tenants` and removes the renderer, its record, and with them
+  its memory snapshot. Only tenants under the caller's prefixes can be deleted this way; listed
+  tenants stay the operator's.
+- **Idle renderers retire.** A renderer under a managed prefix stopped for longer than
+  `RetireAfterIdle` (7 days by default) is deleted with its record and snapshot, and the tenant's
+  next conversion creates a new one from the current disk image. A rollout can retire such stopped
+  renderers instead of replacing them (`rollout --stopped retire`), so only running renderers are
+  replaced, and the rest come back on the new image when they are next used.
+- **Cost and latency.** A workspace costs only while its renderer runs: each burst of use plus the
+  idle time before it suspends. The first conversion of a new workspace waits for a renderer to be
+  created, and the first after a quiet period for one to wake.
+
 ## Exception: end users who distrust each other
 
 If one customer's documents come from parties that distrust each other, for example when the
 customer lets its own end users upload raw HTML, the trust domain is the end user, not the
-customer. That calls for per-job or per-user isolation delivered by the platform, not by the API
-shelling out to Docker. This design does not provide it, so it does not cover such customers yet;
-how the hosted service handles them is an
+customer. Where those parties are the customer's workspaces or users, the customer can give each a
+tenant of its own; see [Applications with many tenants](#applications-with-many-tenants). Per-job
+isolation, for documents that distrust each other within one workspace, is not provided; how the
+hosted service handles that is an
 [open question](#open-questions-and-next-measurements).
 
 ## Production acceptance gates

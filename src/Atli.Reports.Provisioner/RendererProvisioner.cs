@@ -128,6 +128,20 @@ internal sealed class RendererProvisioner
   /// </param>
   /// <param name="drain">How long an old renderer stays after its record moves.</param>
   /// <param name="cancellationToken">Cancels the rollout; replacements not yet recorded are deleted.</param>
+  /// <summary>
+  /// Makes sure <paramref name="tenantId"/> has a ready renderer and record, for the provisioning
+  /// service: returns the existing record when it names a sandbox that exists (disabled or not), and
+  /// otherwise creates a renderer as <see cref="CreateAsync"/> does, or replaces the record's missing
+  /// sandbox as a rollout does. A create that another command or replica finished first counts as
+  /// found, not failed.
+  /// </summary>
+  public Task<EnsureResult> EnsureAsync(
+    string tenantId,
+    RendererSize size,
+    string diskImageId,
+    CancellationToken cancellationToken
+  ) => throw new NotImplementedException();
+
   public async Task<RolloutResult> RolloutAsync(
     string diskImageId,
     string? tenantId,
@@ -513,6 +527,17 @@ internal sealed class RendererProvisioner
       );
     }
   }
+
+  /// <summary>
+  /// Retires the renderers of tenants under <paramref name="service"/>'s prefixes whose sandboxes
+  /// have been stopped (not disabled) for longer than its <c>RetireAfterIdle</c>: deletes each record,
+  /// then its sandboxes, as <see cref="DeleteAsync"/> does. Does nothing when <c>RetireAfterIdle</c>
+  /// is zero.
+  /// </summary>
+  public Task<RetireResult> RetireIdleAsync(
+    ProvisioningServiceOptions service,
+    CancellationToken cancellationToken
+  ) => throw new NotImplementedException();
 
   /// <summary>
   /// Deletes the renderer sandboxes, of every tenant or of <paramref name="tenantId"/>, that no
@@ -1101,6 +1126,17 @@ internal sealed record RolloutResult(
 /// <summary>What a prune did.</summary>
 /// <param name="Deleted">The leftover renderer sandboxes deleted.</param>
 /// <param name="Failures">Each tenant whose leftover could not be deleted, with the reason.</param>
+/// <param name="Record">The tenant's record.</param>
+/// <param name="Created">Whether the call created the renderer rather than finding it.</param>
+internal sealed record EnsureResult(RendererRecord Record, bool Created);
+
+/// <param name="Retired">Tenants whose renderers were retired.</param>
+/// <param name="Failures">Tenants whose retirement failed, with why.</param>
+internal sealed record RetireResult(
+  IReadOnlyList<string> Retired,
+  IReadOnlyDictionary<string, string> Failures
+);
+
 internal sealed record PruneResult(
   IReadOnlyList<string> Deleted,
   IReadOnlyDictionary<string, string> Failures

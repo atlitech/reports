@@ -50,14 +50,24 @@ internal static class ProvisionerCli
           .Build()
       );
       if (
-        command is CreateCommand or RolloutCommand
+        command is CreateCommand or RolloutCommand or ServeCommand
         && string.IsNullOrWhiteSpace(options.DiskImageId)
       )
       {
         throw new UsageException(
           "No disk image: pass --disk-image or set Provisioner:DiskImageId.",
-          command is CreateCommand ? CommandLine.CreateUsage : CommandLine.RolloutUsage
+          command switch
+          {
+            CreateCommand => CommandLine.CreateUsage,
+            ServeCommand => CommandLine.ServeUsage,
+            _ => CommandLine.RolloutUsage,
+          }
         );
+      }
+
+      if (command is ServeCommand or RetireCommand)
+      {
+        options.Service.Validate(requireApiKeys: command is ServeCommand);
       }
 
       services = createServices(options);
@@ -126,6 +136,20 @@ internal static class ProvisionerCli
         case EnableCommand enable:
           await provisioner.EnableAsync(enable.TenantId, cancellationToken);
           return 0;
+
+        case ServeCommand:
+          return await ProvisioningService.RunAsync(
+            options,
+            services,
+            provisioner,
+            time,
+            output,
+            cancellationToken
+          );
+
+        case RetireCommand:
+          var retired = await provisioner.RetireIdleAsync(options.Service, cancellationToken);
+          return retired.Failures.Count == 0 ? 0 : 1;
 
         case PruneCommand prune:
           var pruned = await provisioner.PruneAsync(

@@ -44,7 +44,18 @@ internal sealed class TenantMembership(GatewayOptions options)
   }
 }
 
-internal readonly record struct TenantResolution(string? TenantId, TenantRejection Rejection);
+/// <param name="TenantId">The verified tenant, or <see langword="null"/> when rejected.</param>
+/// <param name="Rejection">Why the tenant was rejected, or <see cref="TenantRejection.None"/>.</param>
+/// <param name="ViaPrefix">
+/// Whether the tenant is the caller's through one of its <c>TenantPrefixes</c> rather than listed in
+/// its <c>Tenants</c>: an application-managed tenant, whose renderer the gateway may ask the
+/// provisioning service to create or delete.
+/// </param>
+internal readonly record struct TenantResolution(
+  string? TenantId,
+  TenantRejection Rejection,
+  bool ViaPrefix = false
+);
 
 internal enum TenantRejection
 {
@@ -129,10 +140,12 @@ internal sealed class TenantAdmission
 /// The request's verified tenant, set by the gateway middleware for the converter, with the
 /// renderer record the middleware read for the tenant's limit, so the conversion does not read it
 /// again. <paramref name="RecordLoaded"/> is <see langword="false"/> when that read failed; the
-/// converter then reads the record itself and reports the failure.
+/// converter then reads the record itself and reports the failure. <paramref name="ViaPrefix"/> is
+/// <see cref="TenantResolution.ViaPrefix"/>.
 /// </summary>
 internal sealed record GatewayTenantFeature(
   string TenantId,
   RendererRecord? Record = null,
-  bool RecordLoaded = false
+  bool RecordLoaded = false,
+  bool ViaPrefix = false
 );

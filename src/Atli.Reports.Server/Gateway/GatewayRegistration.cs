@@ -266,7 +266,7 @@ internal static partial class GatewayRegistration
 
         using (lease)
         {
-          context.Features.Set(feature);
+          context.Features.Set(feature with { ViaPrefix = resolution.ViaPrefix });
           Activity.Current?.SetTag(TenantTag, tenantId);
           await next(context);
         }
