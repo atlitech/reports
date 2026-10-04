@@ -121,6 +121,9 @@ internal sealed class SandboxResponse
 
   public string? State { get; init; }
 
+  /// <summary>Present once the sandbox has stopped: <c>{"stoppedReason":"Disabled","stoppedAt":"..."}</c>.</summary>
+  public StateDetailsWire? StateDetails { get; init; }
+
   public Dictionary<string, string>? Labels { get; init; }
 
   public List<PortResponse>? Ports { get; init; }
@@ -130,6 +133,11 @@ internal sealed class SandboxResponse
   /// this client cannot parse leaves it unknown rather than failing the whole answer.
   /// </summary>
   public string? CreatedAt { get; init; }
+}
+
+internal sealed class StateDetailsWire
+{
+  public string? StoppedReason { get; init; }
 }
 
 internal sealed class PortResponse

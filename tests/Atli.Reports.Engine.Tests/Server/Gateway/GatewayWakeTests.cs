@@ -232,6 +232,69 @@ public class GatewayWakeTests
   }
 
   [Test]
+  public async Task A_disabled_sandbox_fails_at_once_without_a_resume()
+  {
+    const int requests = 4;
+    // The provisioner's kill switch: the platform stops the sandbox, answers its port with
+    // not-running, and refuses every resume (409 SandboxAdminDisabled) until it is enabled.
+    SleepingRenderer platform = new();
+    FakeSandboxesClient sandboxes = new(
+      _ => platform.State,
+      (_, _) =>
+        throw new SandboxesException(
+          "Sandboxes POST resume failed with 409 (Conflict): SandboxAdminDisabled.",
+          HttpStatusCode.Conflict
+        ),
+      _ => SandboxStoppedReasons.Disabled
+    );
+    await using var under = await StartAsync(platform, sandboxes, SandboxesWake());
+
+    var watch = Stopwatch.StartNew();
+    var problems = await Task.WhenAll(
+      Enumerable
+        .Range(0, requests)
+        .Select(async _ => await ReadProblemAsync(await under.PostAsync()))
+    );
+    watch.Stop();
+
+    foreach (var problem in problems)
+    {
+      await Assert.That(problem.Status).IsEqualTo(503);
+      await Assert.That(problem.Kind).IsEqualTo("BrowserUnavailable");
+      await Assert.That(problem.Detail).IsEqualTo("The tenant's renderer is not running.");
+    }
+
+    // Not the whole 30-second wake window, and no resume the platform would refuse.
+    await Assert.That(watch.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
+    await Assert.That(sandboxes.Resumes).IsEqualTo(0);
+    await Assert.That(sandboxes.Gets).IsBetween(1, 2);
+    await Assert.That(under.Renderer.Requests.Count).IsEqualTo(requests);
+    var disabled = under.Logs.WithEventId(59);
+    await Assert.That(disabled.Count).IsEqualTo(requests);
+    await Assert.That(disabled[0]["TenantId"]).IsEqualTo("acme");
+    await Assert.That(disabled[0]["SandboxId"]).IsEqualTo(SandboxId);
+  }
+
+  [Test]
+  public async Task A_sandbox_enabled_again_is_resumed()
+  {
+    // After enable the data plane reports the stopped sandbox UserStopped.
+    SleepingRenderer platform = new();
+    FakeSandboxesClient sandboxes = new(
+      _ => platform.State,
+      (_, _) => platform.Wake(),
+      _ => SandboxStoppedReasons.UserStopped
+    );
+    await using var under = await StartAsync(platform, sandboxes, SandboxesWake());
+
+    using var response = await under.PostAsync();
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(sandboxes.Resumes).IsEqualTo(1);
+    await Assert.That(under.Logs.WithEventId(59)).IsEmpty();
+  }
+
+  [Test]
   public async Task A_connection_that_stalls_while_the_renderer_wakes_is_retried()
   {
     SleepingRenderer platform = new();

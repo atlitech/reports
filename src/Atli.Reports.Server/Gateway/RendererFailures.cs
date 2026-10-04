@@ -28,6 +28,18 @@ internal static class RendererFailures
   /// </summary>
   private const string SandboxNotRunning = "Sandbox is not running";
 
+  /// <summary>
+  /// What the proxy answers, with <c>404</c>, for a sandbox or port that does not exist, such as a
+  /// renderer deleted since the gateway read its record.
+  /// </summary>
+  private const string SandboxNotFound = "Not found";
+
+  /// <summary>
+  /// The proxy's <c>errorCode</c>, with <c>403</c>, for a source address the port's allow-list does
+  /// not admit: <c>{"error":"Access denied by IP access control policy","errorCode":"IpAccessDenied"}</c>.
+  /// </summary>
+  private const string AddressDenied = "IpAccessDenied";
+
   /// <summary>The kinds a renderer's problem may name, by name.</summary>
   private static readonly (string Name, ConversionErrorKind Kind)[] Kinds =
   [
@@ -50,7 +62,7 @@ internal static class RendererFailures
     var body = await ReadBodyAsync(response, cancellationToken);
     if (body is null)
     {
-      return new RendererFailure(status, isProblem, null, null, false);
+      return new RendererFailure(status, isProblem, null, null, ProxyAnswer.None);
     }
 
     JsonDocument document;
@@ -60,7 +72,7 @@ internal static class RendererFailures
     }
     catch (JsonException)
     {
-      return new RendererFailure(status, isProblem, null, null, false);
+      return new RendererFailure(status, isProblem, null, null, ProxyAnswer.None);
     }
 
     using (document)
@@ -68,18 +80,31 @@ internal static class RendererFailures
       var root = document.RootElement;
       if (root.ValueKind != JsonValueKind.Object)
       {
-        return new RendererFailure(status, isProblem, null, null, false);
+        return new RendererFailure(status, isProblem, null, null, ProxyAnswer.None);
       }
 
       if (isProblem)
       {
-        return new RendererFailure(status, true, ReadKind(root), ReadString(root, "detail"), false);
+        return new RendererFailure(
+          status,
+          true,
+          ReadKind(root),
+          ReadString(root, "detail"),
+          ProxyAnswer.None
+        );
       }
 
-      var notRunning =
-        response.StatusCode == HttpStatusCode.Forbidden
-        && StringEquals(root, "error", SandboxNotRunning);
-      return new RendererFailure(status, false, null, null, notRunning);
+      var proxy = response.StatusCode switch
+      {
+        HttpStatusCode.Forbidden when StringEquals(root, "error", SandboxNotRunning) =>
+          ProxyAnswer.SandboxNotRunning,
+        HttpStatusCode.Forbidden when StringEquals(root, "errorCode", AddressDenied) =>
+          ProxyAnswer.AddressDenied,
+        HttpStatusCode.NotFound when StringEquals(root, "error", SandboxNotFound) =>
+          ProxyAnswer.SandboxNotFound,
+        _ => ProxyAnswer.None,
+      };
+      return new RendererFailure(status, false, null, null, proxy);
     }
   }
 
@@ -227,15 +252,22 @@ internal static class RendererFailures
 /// <see cref="ConversionErrorKind.Canceled"/>; <see langword="null"/> for any other <c>kind</c>.
 /// </param>
 /// <param name="Detail">The problem's <c>detail</c>, unsanitized.</param>
-/// <param name="SandboxNotRunning">Whether this is the Sandboxes proxy's answer for a suspended sandbox.</param>
+/// <param name="Proxy">
+/// Which of the Azure Container Apps Sandboxes proxy's own answers this is, if any. The renderer
+/// answers every error with problem details, so these come from the platform, or from a
+/// compromised renderer imitating it.
+/// </param>
 internal sealed record RendererFailure(
   int Status,
   bool IsProblem,
   ConversionErrorKind? Kind,
   string? Detail,
-  bool SandboxNotRunning
+  ProxyAnswer Proxy
 )
 {
+  /// <summary>Whether this is the Sandboxes proxy's answer for a suspended sandbox.</summary>
+  public bool SandboxNotRunning => Proxy == ProxyAnswer.SandboxNotRunning;
+
   /// <summary>
   /// The renderer had no room for the conversion: its per-caller limit (<c>429</c>) or its own
   /// capacity (<c>503</c> with the kind <c>Busy</c>).
@@ -243,4 +275,26 @@ internal sealed record RendererFailure(
   public bool IsBusy =>
     Status == StatusCodes.Status429TooManyRequests
     || (Status == StatusCodes.Status503ServiceUnavailable && Kind == ConversionErrorKind.Busy);
+}
+
+/// <summary>The Azure Container Apps Sandboxes proxy's own answers that the gateway tells apart.</summary>
+internal enum ProxyAnswer
+{
+  /// <summary>None of the answers below.</summary>
+  None,
+
+  /// <summary><c>403 {"error":"Sandbox is not running"}</c>: the sandbox is suspended.</summary>
+  SandboxNotRunning,
+
+  /// <summary>
+  /// <c>404 {"error":"Not found"}</c>: no sandbox or port at the record's URL, such as a renderer
+  /// deleted since the gateway read its record.
+  /// </summary>
+  SandboxNotFound,
+
+  /// <summary>
+  /// <c>403</c> with the <c>errorCode</c> <c>IpAccessDenied</c>: the port's allow-list does not
+  /// admit the gateway's address.
+  /// </summary>
+  AddressDenied,
 }

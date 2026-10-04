@@ -39,7 +39,10 @@ which it deletes afterwards; it needs an Azure subscription and the `aca` CLI. T
 [hosted renderer design](../docs/hosted-renderers.md#azure-container-apps-sandboxes) records what it
 changes. The [follow-up](results/2026-10-04-5d557b4-azure-sandboxes-followup-amd64.md) tests port
 authentication, a resume-only role, DNS, concurrent load, and on-demand activation, with
-[`followup.py`](azure-sandboxes/followup.py) and the probes beside it.
+[`followup.py`](azure-sandboxes/followup.py) and the probes beside it. The
+[end-to-end run](results/2026-10-04-b9c51da-hosted-renderers-e2e-amd64.md) puts the provisioner
+and the gateway together on real sandboxes: waking, the allow-list, a rollout under load, the kill
+switch, and deleting a tenant, with [`e2e.py`](azure-sandboxes/e2e.py).
 
 ## What runs
 

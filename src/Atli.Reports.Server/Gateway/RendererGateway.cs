@@ -252,6 +252,9 @@ internal sealed partial class RendererGateway(
               LogNoSandbox(logger, attempt.TenantId, record.SandboxId);
               directory.Evict(attempt.TenantId, record);
               return Unavailable("The tenant's renderer is not running.");
+            case WakeResult.Disabled:
+              LogDisabled(logger, attempt.TenantId, record.SandboxId);
+              return Unavailable("The tenant's renderer is not running.");
             default:
               if (await BackOffAsync())
               {
@@ -465,6 +468,23 @@ internal sealed partial class RendererGateway(
     {
       LogNotRunning(logger, tenantId, record.SandboxId);
       return Unavailable("The tenant's renderer is not running.");
+    }
+
+    // The platform has no renderer at the record's URL: it was deleted, or replaced since the
+    // record was read. Not the document's failure; the next conversion reads the record again.
+    if (failure.Proxy == ProxyAnswer.SandboxNotFound)
+    {
+      LogNotFound(logger, tenantId, record.SandboxId);
+      directory.Evict(tenantId, record);
+      return Unavailable("The tenant's renderer is unavailable.");
+    }
+
+    // The renderer's port does not admit the gateway's address: the gateway's configuration
+    // problem, never the caller's or the document's.
+    if (failure.Proxy == ProxyAnswer.AddressDenied)
+    {
+      LogAddressDenied(logger, tenantId, record.SandboxId);
+      return Unavailable("The tenant's renderer is unavailable.");
     }
 
     // The renderer's body limit. The gateway accepted the caller's body, but re-encodes it for the
@@ -712,6 +732,27 @@ internal sealed partial class RendererGateway(
     Message = "The renderer record of tenant {TenantId} names sandbox {SandboxId}, which does not exist."
   )]
   private static partial void LogNoSandbox(ILogger logger, string tenantId, string? sandboxId);
+
+  [LoggerMessage(
+    EventId = 57,
+    Level = LogLevel.Warning,
+    Message = "The platform found no renderer at the record of tenant {TenantId} (sandbox {SandboxId}): it was deleted or replaced. The record is read again."
+  )]
+  private static partial void LogNotFound(ILogger logger, string tenantId, string? sandboxId);
+
+  [LoggerMessage(
+    EventId = 58,
+    Level = LogLevel.Error,
+    Message = "The port of tenant {TenantId}'s renderer (sandbox {SandboxId}) refused the gateway's address (IpAccessDenied). Its allowed source ranges must include the gateway's outbound addresses."
+  )]
+  private static partial void LogAddressDenied(ILogger logger, string tenantId, string? sandboxId);
+
+  [LoggerMessage(
+    EventId = 59,
+    Level = LogLevel.Warning,
+    Message = "The renderer of tenant {TenantId} (sandbox {SandboxId}) is disabled; its conversions fail until it is enabled."
+  )]
+  private static partial void LogDisabled(ILogger logger, string tenantId, string? sandboxId);
 
   [LoggerMessage(
     EventId = 56,

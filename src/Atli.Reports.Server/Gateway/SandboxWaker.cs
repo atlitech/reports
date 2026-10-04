@@ -7,7 +7,7 @@ namespace Atli.Reports.Server.Gateway;
 /// Wakes suspended renderer sandboxes. A not-running answer is only a claim: it reaches the gateway
 /// through the renderer's port, so a compromised renderer can send it too. Before resuming, the
 /// waker asks the Sandboxes data plane for the sandbox's state, and resumes only a sandbox that
-/// exists and is not running.
+/// exists, is not running, and is not disabled.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -88,6 +88,12 @@ internal sealed partial class SandboxWaker(
         return Task.FromResult(WakeResult.Running);
       }
 
+      // Disabled moments ago: the platform would refuse the resume.
+      if (Fresh(entry.StateAt) && entry.Disabled)
+      {
+        return Task.FromResult(WakeResult.Disabled);
+      }
+
       started = new TaskCompletionSource<WakeResult>(
         TaskCreationOptions.RunContinuationsAsynchronously
       );
@@ -110,13 +116,16 @@ internal sealed partial class SandboxWaker(
     try
     {
       using var timeout = new CancellationTokenSource(options.Wake.Timeout, timeProvider);
-      var (read, state) = await ReadStateAsync(tenantId, sandboxId, entry, timeout.Token);
+      var (read, state, disabled) = await ReadStateAsync(tenantId, sandboxId, entry, timeout.Token);
       if (read)
       {
         outcome = state switch
         {
           null => WakeResult.Missing,
           SandboxStates.Running => WakeResult.Running,
+          // The kill switch: resuming fails until the sandbox is enabled, so fail now rather than
+          // retry for the whole wake window.
+          _ when disabled => WakeResult.Disabled,
           _ => await ResumeAsync(tenantId, sandboxId, entry, timeout.Token),
         };
       }
@@ -133,10 +142,11 @@ internal sealed partial class SandboxWaker(
   }
 
   /// <summary>
-  /// The sandbox's state, reused while fresh, with <see langword="null"/> for a sandbox that does
-  /// not exist; or <c>Read</c> <see langword="false"/> when the data plane failed, which is logged.
+  /// The sandbox's state and whether it is disabled, reused while fresh, with
+  /// <see langword="null"/> for a sandbox that does not exist; or <c>Read</c>
+  /// <see langword="false"/> when the data plane failed, which is logged.
   /// </summary>
-  private async Task<(bool Read, string? State)> ReadStateAsync(
+  private async Task<(bool Read, string? State, bool Disabled)> ReadStateAsync(
     string tenantId,
     string sandboxId,
     SandboxEntry entry,
@@ -147,7 +157,7 @@ internal sealed partial class SandboxWaker(
     {
       if (Fresh(entry.StateAt))
       {
-        return (true, entry.State);
+        return (true, entry.State, entry.Disabled);
       }
     }
 
@@ -159,16 +169,18 @@ internal sealed partial class SandboxWaker(
     catch (Exception exception)
     {
       LogReadFailed(logger, tenantId, sandboxId, exception);
-      return (false, null);
+      return (false, null, false);
     }
 
+    var disabled = sandbox?.IsDisabled ?? false;
     lock (_gate)
     {
       entry.State = sandbox?.State;
+      entry.Disabled = disabled;
       entry.StateAt = timeProvider.GetTimestamp();
     }
 
-    return (true, sandbox?.State);
+    return (true, sandbox?.State, disabled);
   }
 
   private async Task<WakeResult> ResumeAsync(
@@ -215,6 +227,7 @@ internal sealed partial class SandboxWaker(
       var now = timeProvider.GetTimestamp();
       entry.ResumedAt = now;
       entry.State = sandbox.State;
+      entry.Disabled = sandbox.IsDisabled;
       entry.StateAt = now;
     }
 
@@ -277,6 +290,9 @@ internal sealed partial class SandboxWaker(
     /// <summary>The state the data plane last reported; <see langword="null"/> for no sandbox.</summary>
     public string? State { get; set; }
 
+    /// <summary>Whether the data plane last reported the sandbox disabled.</summary>
+    public bool Disabled { get; set; }
+
     /// <summary>When <see cref="State"/> was read, as a <see cref="TimeProvider"/> timestamp.</summary>
     public long? StateAt { get; set; }
 
@@ -302,6 +318,12 @@ internal enum WakeResult
 
   /// <summary>The sandbox does not exist: the tenant's record is stale.</summary>
   Missing,
+
+  /// <summary>
+  /// The sandbox is disabled (the provisioner's kill switch): the platform refuses to resume it
+  /// until it is enabled, so the conversion fails at once.
+  /// </summary>
+  Disabled,
 
   /// <summary>
   /// The check or the resume failed, or the sandbox was resumed too recently to resume again: wait,

@@ -242,8 +242,13 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   gateway logs an error. A renderer `413` is the caller's `400` `InvalidRequest` with a fixed
   message: the document is larger than the renderer accepts once the gateway has encoded it. The
   wire format escapes characters outside the Basic Multilingual Plane, so an emoji's 4 UTF-8 bytes
-  take 12, and a body under the gateway's own limit can exceed the renderer's. Other answers are
-  `Busy` for `429`, `BrowserUnavailable` for `5xx`, and `RenderFailed` otherwise.
+  take 12, and a body under the gateway's own limit can exceed the renderer's. Two answers of the
+  Sandboxes port proxy (plain JSON, never the renderer's problem details) are `503`
+  `BrowserUnavailable` too: `404 {"error":"Not found"}`, a renderer deleted or replaced since the
+  gateway read its record, which the next conversion reads again; and `403` with the `errorCode`
+  `IpAccessDenied`, a port whose allow-list does not admit the gateway's address, which the gateway
+  logs as an error. Other answers are `Busy` for `429`, `BrowserUnavailable` for `5xx`, and
+  `RenderFailed` otherwise.
 - **Waking renderers.** A renderer port with on-demand activation, which the
   [provisioner](../../src/Atli.Reports.Provisioner/README.md) creates by default, wakes its
   suspended sandbox on the conversion request itself, so the gateway needs no wake settings and no
@@ -254,7 +259,10 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   the renderer's port, so a compromised renderer can send it too: before resuming, the gateway
   reads the sandbox's state from the Sandboxes data plane. A sandbox reported `Running` means the
   answer did not come from the platform, which the caller gets as `503` `BrowserUnavailable` with
-  no resume and no resend; a sandbox that no longer exists is `503` `BrowserUnavailable` too.
+  no resume and no resend; a sandbox that no longer exists is `503` `BrowserUnavailable` too, and
+  so, at once and with no resume, is a sandbox the data plane reports stopped because it was
+  disabled (the provisioner's kill switch), which the platform would not resume until it is
+  enabled.
   Concurrent requests share one state read and one resume per sandbox, a state read is reused for
   2 seconds, and a sandbox is resumed at most once every 5 seconds. Within `Wake:Timeout` the
   gateway also resends after `502`, `503` (other than `Busy`), a renderer it cannot reach, a
@@ -271,7 +279,8 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   tokens: events 40 to 51 for forwarding (44, an error, is a rejected credential), 52 and 53 for
   refused tenants and full tenants, 54 for a not-running answer from a running sandbox, 55 for a
   record that names a sandbox that does not exist, 56 (at `Debug`) for a resend to a busy
-  renderer, and 60 to 63 for state reads and resumes. The request span carries the tenant as
+  renderer, 57 for a renderer the port proxy does not find, 58 (an error) for a port that refuses
+  the gateway's address, 59 for a disabled sandbox, and 60 to 63 for state reads and resumes. The request span carries the tenant as
   `atli.reports.tenant`. Record lookups and sandbox checks are shared by the requests waiting for
   them, so they run without any request's trace context, and neither the renderer client nor the
   Sandboxes client sends trace headers or baggage.

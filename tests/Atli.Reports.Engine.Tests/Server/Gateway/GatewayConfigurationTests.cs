@@ -408,6 +408,78 @@ public class GatewayConfigurationTests
   }
 
   [Test]
+  public async Task A_record_whose_renderer_the_platform_no_longer_finds_is_read_again()
+  {
+    // The Sandboxes proxy's answer for a deleted sandbox, observed on 2026-10-04.
+    await using var deleted = await FakeRenderer.StartAsync(async context =>
+    {
+      context.Response.StatusCode = StatusCodes.Status404NotFound;
+      context.Response.ContentType = "application/json; charset=utf-8";
+      await context.Response.WriteAsync("""{"error":"Not found"}""", context.RequestAborted);
+    });
+    await using var replacement = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", deleted.BaseUrl);
+    LogCollector logs = new();
+    await using var gateway = await StartWithStoreAsync(
+      store,
+      [],
+      builder => builder.Logging.AddProvider(logs)
+    );
+
+    var gone = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+    // The provisioner recreated the renderer and wrote its record; the cached one must not stay.
+    store.Records["acme"] = Record("acme", replacement.BaseUrl);
+    using var moved = await gateway.PostAsync("""{"html":"<p>x</p>"}""");
+
+    await Assert.That(gone.Status).IsEqualTo(503);
+    await Assert.That(gone.Kind).IsEqualTo("BrowserUnavailable");
+    await Assert.That(moved.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(store.Gets).IsEqualTo(2);
+    var notFound = logs.WithEventId(57).Single();
+    await Assert.That(notFound.Level).IsEqualTo(LogLevel.Warning);
+    await Assert.That(notFound["TenantId"]).IsEqualTo("acme");
+  }
+
+  [Test]
+  public async Task A_port_that_refuses_the_gateways_address_is_the_gateways_error()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(async context =>
+    {
+      context.Response.StatusCode = StatusCodes.Status403Forbidden;
+      context.Response.ContentType = "application/json; charset=utf-8";
+      await context.Response.WriteAsync(
+        """{"error":"Access denied by IP access control policy","errorCode":"IpAccessDenied"}""",
+        context.RequestAborted
+      );
+    });
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    LogCollector logs = new();
+    await using var gateway = await StartWithStoreAsync(
+      store,
+      [],
+      builder => builder.Logging.AddProvider(logs)
+    );
+
+    var first = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+    var second = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+
+    // Not the document's failure (500 RenderFailed): the renderer is unreachable for the gateway.
+    await Assert.That(first.Status).IsEqualTo(503);
+    await Assert.That(first.Kind).IsEqualTo("BrowserUnavailable");
+    await Assert.That(second.Status).IsEqualTo(503);
+    // The record is right; only the port's allow-list is not, so the record stays cached.
+    await Assert.That(store.Gets).IsEqualTo(1);
+    var denied = logs.WithEventId(58);
+    await Assert.That(denied.Count).IsEqualTo(2);
+    await Assert.That(denied.All(entry => entry.Level == LogLevel.Error)).IsTrue();
+    await Assert.That(logs.WithEventId(45)).IsEmpty();
+  }
+
+  [Test]
   public async Task Shared_lookups_carry_none_of_the_callers_trace_context()
   {
     ConcurrentQueue<Activity> requests = new();
