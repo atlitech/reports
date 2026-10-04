@@ -27,7 +27,9 @@ internal sealed class TenantMembership(GatewayOptions options)
       return new(null, TenantRejection.HeaderRepeated);
     }
 
-    if (header.Count == 0)
+    // An empty value names no tenant, as if the header were absent: a client that always sends the
+    // header, empty when it has nothing to name, gets the same answer as one that omits it.
+    if (header.Count == 0 || string.IsNullOrEmpty(header[0]))
     {
       return tenants.Length == 1
         ? new(tenants[0], TenantRejection.None)
@@ -53,7 +55,7 @@ internal enum TenantRejection
   /// <summary>The header names a tenant the caller does not belong to: 403.</summary>
   NotMember,
 
-  /// <summary>The caller belongs to several tenants and named none: 400.</summary>
+  /// <summary>The caller belongs to several tenants and named none (or an empty one): 400.</summary>
   HeaderRequired,
 
   /// <summary>The header appears more than once, so which tenant is meant is ambiguous: 400.</summary>

@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
 using Atli.Reports.Client.Http;
 using Atli.Reports.Engine;
 using Atli.Reports.Hosting.Renderers;
@@ -29,6 +30,11 @@ namespace Atli.Reports.Server.Gateway;
 /// error, and <c>/convert</c> aborts the connection, so the caller never gets a truncated
 /// <c>200</c>. Error bodies are read only up to a cap; see <see cref="RendererFailures"/>.
 /// </para>
+/// <para>
+/// A conversion is sent again only while its renderer wakes (see <see cref="SandboxWaker"/>) or is
+/// busy, a few times with a short random pause, so a burst does not fail for a renderer that frees
+/// up within moments.
+/// </para>
 /// </remarks>
 internal sealed partial class RendererGateway(
   IHttpContextAccessor httpContextAccessor,
@@ -48,9 +54,25 @@ internal sealed partial class RendererGateway(
 
   private const int CopyBufferSize = 81920;
 
+  /// <summary>
+  /// The caller's message for a renderer's <c>413</c>. The gateway sends the HTML in the client's
+  /// wire format, which escapes characters outside the Basic Multilingual Plane (an emoji's 4 UTF-8
+  /// bytes become a 12-byte <c>\uD83D\uDE00</c>) and a few others, so a body under the gateway's
+  /// limit can exceed the renderer's.
+  /// </summary>
+  private const string TooLargeForRenderer =
+    "The document is larger than the tenant's renderer accepts once encoded for it. Emoji and other characters outside the Basic Multilingual Plane count up to three times their size; send a smaller document.";
+
   private static readonly TimeSpan FirstWakeBackoff = TimeSpan.FromMilliseconds(250);
 
   private static readonly TimeSpan MaxWakeBackoff = TimeSpan.FromSeconds(1);
+
+  /// <summary>How many times one conversion is resent to a busy renderer.</summary>
+  private const int MaxBusyRetries = 8;
+
+  private static readonly TimeSpan MinBusyBackoff = TimeSpan.FromMilliseconds(100);
+
+  private static readonly TimeSpan MaxBusyBackoff = TimeSpan.FromMilliseconds(500);
 
   /// <inheritdoc />
   /// <remarks>The server only streams; nothing calls this overload.</remarks>
@@ -132,7 +154,8 @@ internal sealed partial class RendererGateway(
   }
 
   /// <summary>
-  /// Sends the conversion, resending it while a suspended sandbox wakes, and relays the answer.
+  /// Sends the conversion, resending it while a suspended sandbox wakes or while the renderer is
+  /// busy, and relays the answer.
   /// </summary>
   private async Task<OneOf<Success, ConversionError>> ForwardAsync(
     Attempt attempt,
@@ -143,8 +166,8 @@ internal sealed partial class RendererGateway(
     var convertUri = new Uri(record.Url.AbsoluteUri.TrimEnd('/') + "/convert", UriKind.Absolute);
     var canWake = waker is not null && record.SandboxId is not null;
     long? wakeStarted = null;
-    var resumed = false;
     var backoff = FirstWakeBackoff;
+    var busyRetries = 0;
 
     while (true)
     {
@@ -161,15 +184,29 @@ internal sealed partial class RendererGateway(
             attempt.CancellationToken
           );
         }
-        catch (HttpRequestException exception)
-          when (!attempt.CancellationToken.IsCancellationRequested)
+        // A refused or reset connection, or one that did not open within the handler's connect
+        // timeout (a stalled TCP or TLS handshake), which surfaces as a cancellation that the
+        // conversion's own token did not cause.
+        catch (Exception exception)
+          when (exception is HttpRequestException or OperationCanceledException
+            && !attempt.CancellationToken.IsCancellationRequested
+          )
         {
           if (wakeStarted is not null && await BackOffAsync())
           {
             continue;
           }
 
-          LogUnreachable(logger, attempt.TenantId, record.SandboxId, exception.HttpRequestError);
+          LogUnreachable(
+            logger,
+            attempt.TenantId,
+            record.SandboxId,
+            exception is HttpRequestException { HttpRequestError: var error }
+              ? error.ToString()
+              : "ConnectTimeout"
+          );
+          // The record may be stale (a renderer recreated elsewhere): read it again next time.
+          directory.Evict(attempt.TenantId, record);
           return wakeStarted is null
             ? Unavailable("The tenant's renderer could not be reached.")
             : WakeTimedOut(attempt, record);
@@ -187,29 +224,41 @@ internal sealed partial class RendererGateway(
         if (failure.SandboxNotRunning && canWake)
         {
           wakeStarted ??= timeProvider.GetTimestamp();
-          if (!resumed && WakeWindowLeft() > TimeSpan.Zero)
+          if (WakeWindowLeft() <= TimeSpan.Zero)
           {
-            // The first resume goes straight to a resend; a failed one is retried after a pause.
-            resumed = await waker!.ResumeAsync(
+            return WakeTimedOut(attempt, record);
+          }
+
+          switch (
+            await waker!.WakeAsync(
               attempt.TenantId,
               record.SandboxId!,
               sentAt,
               attempt.CancellationToken
-            );
-            if (resumed || await BackOffAsync())
-            {
-              continue;
-            }
-          }
-          else if (await BackOffAsync())
+            )
+          )
           {
-            continue;
-          }
+            case WakeResult.Resumed:
+              // Straight to a resend.
+              continue;
+            case WakeResult.Running:
+              LogNotRunningWhileRunning(logger, attempt.TenantId, record.SandboxId);
+              return Unavailable("The tenant's renderer is unavailable.");
+            case WakeResult.Missing:
+              LogNoSandbox(logger, attempt.TenantId, record.SandboxId);
+              directory.Evict(attempt.TenantId, record);
+              return Unavailable("The tenant's renderer is not running.");
+            default:
+              if (await BackOffAsync())
+              {
+                continue;
+              }
 
-          return WakeTimedOut(attempt, record);
+              return WakeTimedOut(attempt, record);
+          }
         }
 
-        if (wakeStarted is not null && failure.Status is 502 or 503)
+        if (wakeStarted is not null && failure.Status is 502 or 503 && !failure.IsBusy)
         {
           if (await BackOffAsync())
           {
@@ -217,6 +266,28 @@ internal sealed partial class RendererGateway(
           }
 
           return WakeTimedOut(attempt, record);
+        }
+
+        // A renderer at capacity (its caller limit, or its queue) frees up within moments, and
+        // after a wake every waiting request resends at once: spread the resends out.
+        if (failure.IsBusy && busyRetries < MaxBusyRetries)
+        {
+          busyRetries++;
+          var delay = TimeSpan.FromMilliseconds(
+            RandomNumberGenerator.GetInt32(
+              (int)MinBusyBackoff.TotalMilliseconds,
+              (int)MaxBusyBackoff.TotalMilliseconds + 1
+            )
+          );
+          LogBusyRetry(
+            logger,
+            attempt.TenantId,
+            record.SandboxId,
+            busyRetries,
+            delay.TotalMilliseconds
+          );
+          await Task.Delay(delay, timeProvider, attempt.CancellationToken);
+          continue;
         }
 
         return Map(attempt.TenantId, record, failure);
@@ -370,7 +441,7 @@ internal sealed partial class RendererGateway(
   /// <summary>Maps a renderer's error response onto the caller's error.</summary>
   private ConversionError Map(string tenantId, RendererRecord record, RendererFailure failure)
   {
-    var kind = failure.IsProblem ? RendererFailures.ParseKind(failure.Kind) : null;
+    var kind = failure.Kind;
 
     // The renderer refusing the gateway is the gateway's credential problem, never the caller's:
     // telling the caller Unauthorized would send it after its own valid credentials.
@@ -381,6 +452,8 @@ internal sealed partial class RendererGateway(
     )
     {
       LogCredentialRejected(logger, tenantId, record.SandboxId, failure.Status);
+      // A rotated credential or a replaced renderer reaches the store first: read it again.
+      directory.Evict(tenantId, record);
       return Unavailable("The tenant's renderer is unavailable.");
     }
 
@@ -390,10 +463,27 @@ internal sealed partial class RendererGateway(
       return Unavailable("The tenant's renderer is not running.");
     }
 
-    kind ??=
-      failure.Status >= 500
-        ? ConversionErrorKind.BrowserUnavailable
-        : ConversionErrorKind.RenderFailed;
+    // The renderer's body limit. The gateway accepted the caller's body, but re-encodes it for the
+    // renderer, which can make it larger (see TooLargeForRenderer); the renderer's own words about
+    // its request body would only confuse the caller.
+    if (failure.Status == StatusCodes.Status413PayloadTooLarge)
+    {
+      LogRendererFailed(
+        logger,
+        tenantId,
+        record.SandboxId,
+        failure.Status,
+        ConversionErrorKind.InvalidRequest
+      );
+      return new ConversionError(ConversionErrorKind.InvalidRequest, TooLargeForRenderer);
+    }
+
+    kind ??= failure.Status switch
+    {
+      StatusCodes.Status429TooManyRequests => ConversionErrorKind.Busy,
+      >= 500 => ConversionErrorKind.BrowserUnavailable,
+      _ => ConversionErrorKind.RenderFailed,
+    };
     LogRendererFailed(logger, tenantId, record.SandboxId, failure.Status, kind.Value);
 
     // Only the request's own problems carry the renderer's words to the caller, sanitized and cut
@@ -501,13 +591,13 @@ internal sealed partial class RendererGateway(
   [LoggerMessage(
     EventId = 43,
     Level = LogLevel.Warning,
-    Message = "The renderer of tenant {TenantId} (sandbox {SandboxId}) could not be reached ({HttpRequestError})."
+    Message = "The renderer of tenant {TenantId} (sandbox {SandboxId}) could not be reached ({Reason})."
   )]
   private static partial void LogUnreachable(
     ILogger logger,
     string tenantId,
     string? sandboxId,
-    HttpRequestError httpRequestError
+    string reason
   );
 
   [LoggerMessage(
@@ -599,6 +689,37 @@ internal sealed partial class RendererGateway(
     string tenantId,
     string? sandboxId,
     double wakeTimeoutSeconds
+  );
+
+  [LoggerMessage(
+    EventId = 54,
+    Level = LogLevel.Warning,
+    Message = "The renderer of tenant {TenantId} answered that sandbox {SandboxId} is not running, but the platform reports it running: the answer did not come from the platform's proxy."
+  )]
+  private static partial void LogNotRunningWhileRunning(
+    ILogger logger,
+    string tenantId,
+    string? sandboxId
+  );
+
+  [LoggerMessage(
+    EventId = 55,
+    Level = LogLevel.Error,
+    Message = "The renderer record of tenant {TenantId} names sandbox {SandboxId}, which does not exist."
+  )]
+  private static partial void LogNoSandbox(ILogger logger, string tenantId, string? sandboxId);
+
+  [LoggerMessage(
+    EventId = 56,
+    Level = LogLevel.Debug,
+    Message = "The renderer of tenant {TenantId} (sandbox {SandboxId}) was busy; resend {Retry} in {DelayMilliseconds} ms."
+  )]
+  private static partial void LogBusyRetry(
+    ILogger logger,
+    string tenantId,
+    string? sandboxId,
+    int retry,
+    double delayMilliseconds
   );
 
   /// <summary>

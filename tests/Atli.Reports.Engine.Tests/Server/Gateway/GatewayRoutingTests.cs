@@ -122,6 +122,34 @@ public class GatewayRoutingTests
   }
 
   [Test]
+  public async Task An_empty_tenant_header_counts_as_absent()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 acme")
+    );
+    await using var gateway = await GatewayHost.StartAsync([
+      .. Callers(),
+      .. Renderer(0, "acme", renderer.BaseUrl, TestKey),
+      .. Renderer(1, "globex", renderer.BaseUrl, TestKey),
+    ]);
+
+    // One tenant: an empty header is no header.
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, ""), "%PDF-1.7 acme");
+    await Assert
+      .That(await SendRawAsync(gateway, AlphaKey, "X-Reports-Tenant:"))
+      .StartsWith("HTTP/1.1 200 ");
+    // Several tenants: an empty header names none of them.
+    var missing = await ReadProblemAsync(await SendAsync(gateway, BetaKey, ""));
+    await Assert.That(missing.Status).IsEqualTo(400);
+    await Assert.That(missing.Kind).IsEqualTo("InvalidRequest");
+    await Assert.That(missing.Detail).Contains("X-Reports-Tenant");
+    // Two lines, even if one is empty, stay ambiguous.
+    await Assert
+      .That(await SendRawAsync(gateway, AlphaKey, "X-Reports-Tenant:", "X-Reports-Tenant: acme"))
+      .StartsWith("HTTP/1.1 400 ");
+  }
+
+  [Test]
   public async Task A_renderer_that_rejects_the_gateways_key_makes_the_renderer_unavailable()
   {
     var acmeKey = RendererCredential.Generate();
