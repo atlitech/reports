@@ -4,8 +4,11 @@ Status: agreed design, partly built. The shared API is the server's
 [gateway mode](engine/server.md#gateway-mode); the
 [provisioner](../src/Atli.Reports.Provisioner/README.md) creates, rolls out, and deletes renderers
 on Azure Container Apps Sandboxes; both share [`Atli.Reports.Hosting`](../src/Atli.Reports.Hosting).
-The [production acceptance gates](#production-acceptance-gates) are not met yet, so no hosted
-service runs on them. The default server remains the integrated engine for self-hosted,
+An [end-to-end run](../benchmarks/results/2026-10-04-b9c51da-hosted-renderers-e2e-amd64.md) on
+Azure Container Apps Sandboxes exercised them together: routing, on-demand and resumed wakes, the
+ports' address allow-list, a rollout under load without a failed request, the kill switch, and
+deletion. The [production acceptance gates](#production-acceptance-gates) are not met yet, so no
+hosted service runs on them. The default server remains the integrated engine for self-hosted,
 application-owned reports. The
 [isolated renderer experiment](isolated-workers.md) records why a sandbox launched by the API for
 every request is not this design, and holds the measurements behind the numbers below.

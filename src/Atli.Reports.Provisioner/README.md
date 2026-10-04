@@ -99,7 +99,10 @@ gateway, the rest waiting in its queue, and its record says so, so the gateway s
 each new renderer whether it is ready through the port, so the address it runs from must be in the
 list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. A changed list
 applies to renderers created from then on; `rollout` does not replace renderers on the current disk
-image, so recreate them (`delete`, then `create`) to apply it to existing ones.
+image, so recreate them (`delete`, then `create`) to apply it to existing ones. The same holds for
+`PortActivation`, and a rollout's replacements take the settings it runs with, not their
+predecessors': a tenant created with a one-off `Manual` override comes back `OnDemand` unless the
+rollout runs with the same override.
 
 ## Commands
 
