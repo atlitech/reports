@@ -400,18 +400,24 @@ public class EnsureTests
   }
 
   [Test]
-  public async Task Find_returns_only_a_renderer_whose_sandbox_exists()
+  public async Task A_lookup_finds_only_a_renderer_whose_sandbox_exists_and_says_whether_a_record_does()
   {
     using Provisioning provisioning = new();
     var existing = provisioning.AddRenderer("a", "disk-1");
-    provisioning.AddRenderer("b", "disk-1");
+    var gone = provisioning.AddRenderer("b", "disk-1");
     provisioning.Sandboxes.Remove("old-b");
 
-    await Assert
-      .That(await provisioning.Provisioner.FindAsync("a", TestToken))
-      .IsSameReferenceAs(existing);
-    await Assert.That(await provisioning.Provisioner.FindAsync("b", TestToken)).IsNull();
-    await Assert.That(await provisioning.Provisioner.FindAsync("c", TestToken)).IsNull();
+    var a = await provisioning.Provisioner.LookUpAsync("a", TestToken);
+    var b = await provisioning.Provisioner.LookUpAsync("b", TestToken);
+    var c = await provisioning.Provisioner.LookUpAsync("c", TestToken);
+
+    await Assert.That(a.Found).IsTrue();
+    await Assert.That(a.Record).IsSameReferenceAs(existing);
+    // A record whose sandbox is gone: not found, but the tenant has a record.
+    await Assert.That(b.Found).IsFalse();
+    await Assert.That(b.Record).IsSameReferenceAs(gone);
+    await Assert.That(c.Found).IsFalse();
+    await Assert.That(c.Record).IsNull();
     await Assert.That(provisioning.Journal.Entries).IsEmpty();
   }
 }

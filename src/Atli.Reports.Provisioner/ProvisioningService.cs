@@ -127,7 +127,14 @@ internal static class ProvisioningService
       options,
       provider.GetRequiredService<TenantGate>()
     ));
-    builder.Services.AddSingleton(_ => new TenantCensus(services.Records, time));
+    // Lists the store in the background, from the start, for the quotas and readiness.
+    builder.Services.AddSingleton(provider => new TenantCensus(
+      services.Records,
+      options.Service,
+      time,
+      provider.GetRequiredService<ILogger<TenantCensus>>()
+    ));
+    builder.Services.AddHostedService(provider => provider.GetRequiredService<TenantCensus>());
     builder.Services.AddSingleton(provider => new ManagedRenderers(
       options,
       provider.GetRequiredService<RendererProvisioner>(),
@@ -164,14 +171,11 @@ internal static class ProvisioningService
           : StatusCodes.Status503ServiceUnavailable
     );
 
-    // Liveness asks only that the service answers; readiness, that the record store does too.
+    // Liveness asks only that the service answers; readiness, that the record store answered the
+    // census lately. Neither calls the store.
     builder
       .Services.AddHealthChecks()
-      .AddCheck<RecordStoreHealthCheck>(
-        "records",
-        tags: ["ready"],
-        timeout: TimeSpan.FromSeconds(10)
-      );
+      .AddCheck<RecordStoreHealthCheck>("records", tags: ["ready"]);
 
     configure?.Invoke(builder);
     var app = builder.Build();

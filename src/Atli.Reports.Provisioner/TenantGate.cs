@@ -77,25 +77,6 @@ internal sealed class TenantGate
     }
   }
 
-  /// <summary>How many creations are in flight for tenants that <paramref name="counts"/> picks.</summary>
-  public int CountCreating(Func<string, bool> counts)
-  {
-    ArgumentNullException.ThrowIfNull(counts);
-    lock (_lock)
-    {
-      return _creating.Keys.Count(counts);
-    }
-  }
-
-  /// <summary>The tenants whose creations are in flight.</summary>
-  public IReadOnlyList<string> Creating()
-  {
-    lock (_lock)
-    {
-      return [.. _creating.Keys];
-    }
-  }
-
   /// <summary>Every creation in flight, as after stopping, when each cleans up.</summary>
   public IReadOnlyList<Task> Creations()
   {

@@ -197,23 +197,15 @@ internal sealed class RendererProvisioner
   }
 
   /// <summary>
-  /// The tenant's record when <see cref="EnsureAsync"/> would return it as found: it names a
-  /// sandbox that exists (disabled or not), or no sandbox at all, as a renderer that is not a
-  /// sandbox. <see langword="null"/> when there is no record or its sandbox is gone. Throws
-  /// <see cref="ProvisioningException"/> for a record that cannot be read, or that names a sandbox
-  /// labeled for another tenant.
-  /// </summary>
-  public async Task<RendererRecord?> FindAsync(
-    string tenantId,
-    CancellationToken cancellationToken
-  ) => await LookUpAsync(tenantId, cancellationToken) is (var record, true) ? record : null;
-
-  /// <summary>
   /// Reads the tenant's record and, when it names a sandbox, whether that sandbox exists: a
-  /// data-plane read that does not answer <c>404</c>. <c>Found</c> is <see langword="false"/> when
-  /// there is no record, or when <c>Record</c> names a sandbox that is gone.
+  /// data-plane read that does not answer <c>404</c>. <c>Record</c> is the record, or
+  /// <see langword="null"/> when the tenant has none. <c>Found</c> is whether
+  /// <see cref="EnsureAsync"/> would return it as found: it names a sandbox that exists (disabled or
+  /// not), or no sandbox at all, as a renderer that is not a sandbox; not when there is no record,
+  /// or its sandbox is gone. Throws <see cref="ProvisioningException"/> for a record that cannot be
+  /// read, or that names a sandbox labeled for another tenant.
   /// </summary>
-  private async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
+  public async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
     string tenantId,
     CancellationToken cancellationToken
   )

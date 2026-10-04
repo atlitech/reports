@@ -45,6 +45,10 @@ internal sealed partial class ManagedRenderers
   // one step.
   private readonly Lock _lock = new();
 
+  // By prefix: the creations in flight for tenants without a record, which the census does not
+  // count yet.
+  private readonly Dictionary<string, int> _creatingNew = new(StringComparer.Ordinal);
+
   public ManagedRenderers(
     ProvisionerOptions options,
     RendererProvisioner provisioner,
@@ -105,23 +109,58 @@ internal sealed partial class ManagedRenderers
         continue;
       }
 
-      try
+      // Whether the tenant has a record. A current census that does not list it answers without
+      // reading the store, so a new tenant is refused, if it is, before any read; a record written
+      // since the listing is still found by the creation, which reads the record first.
+      var recorded = false;
+      if (_census.HasRecord(tenantId) != false)
       {
-        if (await _provisioner.FindAsync(tenantId, cancellationToken) is not null)
+        try
         {
-          _census.Recorded(tenantId);
-          return new RendererOutcome(RendererAnswer.Found);
-        }
+          var (record, found) = await _provisioner.LookUpAsync(tenantId, cancellationToken);
+          if (found)
+          {
+            _census.Recorded(tenantId);
+            return new RendererOutcome(RendererAnswer.Found);
+          }
 
-        await _census.RefreshAsync(cancellationToken);
+          recorded = record is not null;
+          if (!recorded)
+          {
+            _census.Deleted(tenantId);
+          }
+        }
+        catch (Exception exception)
+          when (exception is not OperationCanceledException
+            || !cancellationToken.IsCancellationRequested
+          )
+        {
+          LogEnsureFailed(_logger, tenantId, exception);
+          return new RendererOutcome(RendererAnswer.Failed);
+        }
       }
-      catch (Exception exception)
-        when (exception is not OperationCanceledException
-          || !cancellationToken.IsCancellationRequested
-        )
+
+      // A new tenant counts toward its prefix's quota, which needs a listing; at the start, the
+      // first may not have ended yet.
+      if (!recorded && !_census.HasListed)
       {
-        LogEnsureFailed(_logger, tenantId, exception);
-        return new RendererOutcome(RendererAnswer.Failed);
+        await _census.FirstListing.WaitAsync(cancellationToken);
+        if (!_census.HasListed)
+        {
+          var failure = _census.LastFailure;
+          var reason =
+            $"The renderers under prefix {prefix.Prefix} cannot be counted: the record store's "
+            + "tenants have not been listed"
+            + (failure is null ? "." : $" ({failure.Message}).");
+          LogEnsureFailed(
+            _logger,
+            tenantId,
+            failure is null
+              ? new ProvisioningException(reason)
+              : new ProvisioningException(reason, failure)
+          );
+          return new RendererOutcome(RendererAnswer.Failed);
+        }
       }
 
       lock (_lock)
@@ -129,53 +168,26 @@ internal sealed partial class ManagedRenderers
         (creation, removal) = _gate.InFlight(tenantId);
         if (creation is null && removal is null)
         {
-          // The tenant itself is not counted: replacing its missing sandbox adds no renderer.
-          if (_census.CountUnder(prefix.Prefix, tenantId, _gate.Creating()) >= prefix.MaxTenants)
-          {
-            LogQuotaExceeded(_logger, tenantId, prefix.Prefix, prefix.MaxTenants);
-            return new RendererOutcome(RendererAnswer.QuotaExceeded);
-          }
-
-          // Both the prefix's budget and the service's must have room, and a create refused by
-          // either takes from neither.
           var now = _time.GetTimestamp();
-          var prefixRateLimit = _prefixRateLimits[prefix.Prefix];
-          var prefixHasRoom = prefixRateLimit.HasRoom(now, out var prefixRetryAfter);
-          var serviceHasRoom = _rateLimit.HasRoom(now, out var serviceRetryAfter);
-          if (!prefixHasRoom || !serviceHasRoom)
+          // A tenant with a record is never refused: replacing its missing sandbox adds no
+          // renderer, and creates no workspace.
+          if (!recorded && Refuse(tenantId, prefix, now) is { } refusal)
           {
-            if (!prefixHasRoom)
-            {
-              LogRateLimited(
-                _logger,
-                tenantId,
-                $"prefix {prefix.Prefix}",
-                prefix.MaxCreatesPerMinute
-              );
-            }
-
-            if (!serviceHasRoom)
-            {
-              LogRateLimited(_logger, tenantId, "the service", _rateLimit.PerMinute);
-            }
-
-            return new RendererOutcome(
-              RendererAnswer.RateLimited,
-              prefixRetryAfter > serviceRetryAfter ? prefixRetryAfter : serviceRetryAfter
-            );
+            return refusal;
           }
 
           if (
             _gate.TryStartCreation(
               tenantId,
-              () => Start(tenantId, prefix),
+              () => Start(tenantId, prefix, counted: !recorded),
               out creation,
               out removal
-            )
+            ) && !recorded
           )
           {
-            prefixRateLimit.Take(now);
+            _prefixRateLimits[prefix.Prefix].Take(now);
             _rateLimit.Take(now);
+            _creatingNew[prefix.Prefix] = _creatingNew.GetValueOrDefault(prefix.Prefix) + 1;
           }
         }
       }
@@ -267,19 +279,71 @@ internal sealed partial class ManagedRenderers
     return prefix;
   }
 
+  /// <summary>
+  /// Refuses a new tenant whose prefix has its most renderers, counting the creations in flight
+  /// for new tenants, or when the prefix's or the service's creates per minute are used up; a
+  /// create refused by either budget takes from neither. <see langword="null"/> when the create
+  /// may start. Called under the lock.
+  /// </summary>
+  private RendererOutcome? Refuse(string tenantId, ManagedTenantPrefix prefix, long now)
+  {
+    if (
+      _census.CountUnder(prefix.Prefix, except: tenantId)
+        + _creatingNew.GetValueOrDefault(prefix.Prefix)
+      >= prefix.MaxTenants
+    )
+    {
+      LogQuotaExceeded(_logger, tenantId, prefix.Prefix, prefix.MaxTenants);
+      return new RendererOutcome(RendererAnswer.QuotaExceeded);
+    }
+
+    var prefixHasRoom = _prefixRateLimits[prefix.Prefix].HasRoom(now, out var prefixRetryAfter);
+    var serviceHasRoom = _rateLimit.HasRoom(now, out var serviceRetryAfter);
+    if (prefixHasRoom && serviceHasRoom)
+    {
+      return null;
+    }
+
+    if (!prefixHasRoom)
+    {
+      LogRateLimited(_logger, tenantId, $"prefix {prefix.Prefix}", prefix.MaxCreatesPerMinute);
+    }
+
+    if (!serviceHasRoom)
+    {
+      LogRateLimited(_logger, tenantId, "the service", _rateLimit.PerMinute);
+    }
+
+    return new RendererOutcome(
+      RendererAnswer.RateLimited,
+      prefixRetryAfter > serviceRetryAfter ? prefixRetryAfter : serviceRetryAfter
+    );
+  }
+
   /// <summary>Starts creating the tenant's renderer; the gate calls it under its lock.</summary>
-  private Task<EnsureResult> Start(string tenantId, ManagedTenantPrefix prefix)
+  /// <param name="tenantId">The tenant.</param>
+  /// <param name="prefix">The tenant's prefix.</param>
+  /// <param name="counted">Whether the creation counts toward the prefix's quota while in flight.</param>
+  private Task<EnsureResult> Start(string tenantId, ManagedTenantPrefix prefix, bool counted)
   {
     var size = prefix.Size.Length > 0 ? RendererSize.Parse(prefix.Size) : _options.RendererSize;
     // Without the starting request's execution context: the creation is everyone's, so neither
     // that request's logging scopes nor its trace may follow it.
     using (ExecutionContext.SuppressFlow())
     {
-      return Task.Run(() => CreateAsync(tenantId, size), CancellationToken.None);
+      return Task.Run(
+        () => CreateAsync(tenantId, prefix.Prefix, size, counted),
+        CancellationToken.None
+      );
     }
   }
 
-  private async Task<EnsureResult> CreateAsync(string tenantId, RendererSize size)
+  private async Task<EnsureResult> CreateAsync(
+    string tenantId,
+    string prefix,
+    RendererSize size,
+    bool counted
+  )
   {
     try
     {
@@ -304,6 +368,15 @@ internal sealed partial class ManagedRenderers
     }
     finally
     {
+      // The census counts the record now, if there is one.
+      if (counted)
+      {
+        lock (_lock)
+        {
+          _creatingNew[prefix]--;
+        }
+      }
+
       _gate.EndCreation(tenantId);
     }
   }

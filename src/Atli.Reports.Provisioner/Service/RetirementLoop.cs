@@ -11,7 +11,7 @@ namespace Atli.Reports.Provisioner.Service;
 /// </summary>
 /// <param name="service">The prefixes and the retirement settings.</param>
 /// <param name="retire">One run, <see cref="RendererProvisioner.RetireIdleAsync"/> in the service.</param>
-/// <param name="census">Lists the store again after each run, since renderers may be gone.</param>
+/// <param name="census">Told of each retired tenant, whose record is gone, so its place is free at once.</param>
 /// <param name="time">The clock the interval is measured on.</param>
 /// <param name="logger">Where runs are reported.</param>
 internal sealed partial class RetirementLoop(
@@ -43,6 +43,11 @@ internal sealed partial class RetirementLoop(
     try
     {
       var result = await retire(stoppingToken);
+      foreach (var tenantId in result.Retired)
+      {
+        census.Deleted(tenantId);
+      }
+
       LogRun(logger, result.Retired.Count, result.Failures.Count);
       foreach (var (tenantId, reason) in result.Failures)
       {
@@ -53,10 +58,6 @@ internal sealed partial class RetirementLoop(
       when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
     {
       LogRunFailed(logger, exception, service.RetireCheckInterval);
-    }
-    finally
-    {
-      census.Invalidate();
     }
   }
 
