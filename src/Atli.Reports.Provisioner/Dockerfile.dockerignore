@@ -1,0 +1,11 @@
+# The build context is the repository root; send only what the provisioner's build needs.
+*
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!src/Atli.Reports.Hosting/
+!src/Atli.Reports.Provisioner/
+**/bin/
+**/obj/
+**/*.md
+**/Dockerfile*

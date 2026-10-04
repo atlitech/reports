@@ -31,6 +31,7 @@ address, so its `/32` is the gateway's entry.
 | --- | --- | --- |
 | Provisioner | Container Apps SandboxGroup Data Owner | The renderer sandbox group |
 | Provisioner, with `Records:Store` set to `KeyVault` | Key Vault Secrets Officer | The record vault |
+| [Provisioning service](#the-provisioning-service) (`serve`), an identity of its own | The provisioner's two roles: Container Apps SandboxGroup Data Owner, and Key Vault Secrets Officer with a `KeyVault` store | The renderer sandbox group, and the record vault |
 | Gateway | Key Vault Secrets User | The record vault |
 | Gateway, only with `Wake:Mode=Sandboxes` (renderers with `Manual` ports) | A custom role with only `Microsoft.App/sandboxGroups/sandboxes/read` and `Microsoft.App/sandboxGroups/sandboxes/resume/action` | The renderer sandbox group |
 
@@ -70,6 +71,11 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
 | `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
 | `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
+| `Provisioner:Service:TenantPrefixes` | Required for `serve`, `retire`, and `rollout --stopped retire` | The prefixes whose tenants' renderers the [provisioning service](#the-provisioning-service) creates on demand and retires when idle. Each has a `Prefix`, such as `myapp-` (2 to 27 lowercase letters, digits, and hyphens, ending with a hyphen; no prefix may start with another); `MaxTenants`, the most renderers under it (`1000` by default, at most 100000); and `Size`, `S`, `M`, or `L`, or empty for `Provisioner:Size` |
+| `Provisioner:Service:ApiKeys` | Required for `serve` | The gateway's keys for the service: each an `Id`, the part of the key before the dot, and a `Hash`, the base64 SHA-256 of the whole key. Two allow rotation |
+| `Provisioner:Service:MaxCreatesPerMinute` | `60` | Renderers `serve` creates per minute at most, across all prefixes, failed creates included; at most 10000 |
+| `Provisioner:Service:RetireAfterIdle` | `7.00:00:00` | How long a managed tenant's renderer may stay stopped before it is retired; `00:00:00` never retires, and otherwise at least a minute and at most 365 days |
+| `Provisioner:Service:RetireCheckInterval` | `01:00:00` | How long `serve` waits after starting, and after each retirement run, before the next; a minute to a day |
 
 ```json
 {
@@ -304,6 +310,119 @@ whether its `Wake:Mode` is `None` or `Sandboxes`. Every sandbox is tried even wh
 fails, and the command then exits with `1`. A sandbox the record names that is labeled for another
 tenant is left alone. `enable` lets the tenant's sandboxes start again; they stay stopped until a
 request or a resume starts them.
+
+## The provisioning service
+
+```bash
+atli-reports-provisioner serve
+```
+
+`serve` runs the provisioner as a service of its own: an HTTP API that the gateway calls to create
+a renderer for a tenant under one of `Provisioner:Service:TenantPrefixes` on the tenant's first
+conversion, and to delete one when the application deletes the tenant. It holds the provisioner's
+roles, which the gateway never does, and serves only the managed prefixes within their limits. A
+compromised gateway can therefore create renderers under those prefixes and delete their tenants,
+but cannot change, reassign, or enter a renderer, nor touch a tenant outside the prefixes. See
+[Applications with many tenants](../../docs/hosted-renderers.md#applications-with-many-tenants) in
+the design.
+
+Every request but the health probes carries one of the gateway's keys in `X-Reports-Api-Key`.
+
+| Request | Answer |
+| --- | --- |
+| `PUT /tenants/{id}/renderer` | `200` with `{"tenantId": "<id>", "created": false}` when the tenant's record names a sandbox that exists, disabled or not: a disabled renderer stays disabled. Otherwise, once a renderer is ready, `200` with `"created": true`: the service creates one as `create` does for a tenant without a record, or replaces the record's missing sandbox as `rollout` does, deleting nothing else |
+| `DELETE /tenants/{id}/renderer` | `204` once the tenant's record, then every sandbox labeled for it, are deleted, as `delete` without `--drain` does; also when there was nothing to delete |
+| `GET /health/live` | `200` while the service answers; no key needed |
+| `GET /health/ready` | `200` while the record store answers, `503` otherwise; no key needed |
+
+Failures are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details with a `kind`:
+
+| Status | `kind` | When |
+| --- | --- | --- |
+| `400` | `InvalidRequest` | The tenant ID is not one; also an unknown route (`404`) or method (`405`) |
+| `401` | `Unauthorized` | No key, or not one of `Provisioner:Service:ApiKeys` |
+| `403` | `NotAllowed` | The tenant is under none of the prefixes, which also means that the gateway's `TenantPrefixes` and the service's disagree |
+| `429` | `QuotaExceeded` | A new renderer would put more than `MaxTenants` under the tenant's prefix. No `Retry-After`: it lasts until tenants under the prefix are deleted or retired |
+| `429` | `RateLimited` | `MaxCreatesPerMinute` creates started in the last minute. `Retry-After` says in how many seconds one may start |
+| `503` | `Failed` | The renderer could not be created (the data plane, the record store, or its readiness failed), the delete failed, the tenant's record cannot be read, or the service is stopping. The log says why; the answer never does |
+
+Creating a renderer on demand:
+
+- A tenant whose renderer exists is answered at once, and counts toward no limit.
+- Concurrent requests for one tenant share one creation and its answer. A request that gives up,
+  such as one past the gateway's `Provisioning:Timeout`, leaves the creation running, and the next
+  request finds its renderer.
+- The quota counts the tenants under the prefix that have a record, and the creations in flight.
+  The service lists the store's tenants (with Key Vault, the secret names alone) at most once
+  every 30 seconds, and counts its own creates and deletes since on top; a tenant created or
+  deleted from the command line or by another replica counts from the next listing. Replacing a
+  missing sandbox adds no renderer, so the quota never refuses it.
+- The rate limit counts every create started in the last minute, across all prefixes, failed ones
+  included. Finding a renderer is never limited.
+- The new renderer has the prefix's `Size`, or `Provisioner:Size`, and starts from
+  `Provisioner:DiskImageId`, which `serve` requires; every other setting applies as for `create`.
+- A `DELETE` while the tenant's renderer is being created waits for the creation to finish first,
+  so that it cannot write its record after the delete.
+
+With `RetireAfterIdle` above zero, `serve` also retires idle renderers as `retire` does: the first
+time `RetireCheckInterval` after it starts, then `RetireCheckInterval` after each run ends. A run
+that fails is logged, and the next one runs as planned. With `RetireAfterIdle` at `00:00:00` it
+retires nothing.
+
+### Keys
+
+Generate a key as for the server, with `scripts/create-reports-api-key.sh`. Give the service the
+`Id` and `Hash` from its `server.env`, as `Provisioner__Service__ApiKeys__0__Id` and
+`Provisioner__Service__ApiKeys__0__Hash`, and give the gateway the credential from `client.env`, as
+`ReportsServer__Gateway__Provisioning__ApiKey`; the rest of `server.env` does not apply. The service
+compares the SHA-256 of the whole key with the `Hash` of the key its ID names, in constant time. To
+rotate, add the new key as `ApiKeys__1`, move the gateway to it, then remove the old one.
+
+### Deployment
+
+- **Internal ingress, TLS at the platform.** The service listens on plain HTTP, where
+  `ASPNETCORE_URLS` or `ASPNETCORE_HTTP_PORTS` says, and on `http://+:8080` when neither is set.
+  Expose it on internal ingress only, behind TLS that the platform terminates; the gateway's
+  `Provisioning:Url` is its `https` address. Nothing else should reach it.
+- **An identity of its own**, with the roles in [Azure roles](#azure-roles). Data Owner stays off
+  the request path: the gateway reaches the service only through this API, which can neither run
+  commands in a renderer nor read its files. The service asks each new renderer whether it is ready
+  through the renderer's port, so its outbound address belongs in `Provisioner:AllowedSourceCidrs`.
+- **One replica.** Concurrent requests share a creation within one process only. Two replicas that
+  create one tenant's renderer at once are still kept apart by the record check every command
+  makes (see [One command at a time](#one-command-at-a-time)): the replica that finds the other's
+  record when its own renderer is ready discards its sandbox and answers as found, so the cost is
+  a sandbox created for nothing, or, when both check before either writes, one that `prune`
+  deletes. But each replica keeps its own rate limit and counts only its own creations in flight,
+  so replicas together can create more than `MaxCreatesPerMinute`, and briefly exceed
+  `MaxTenants`. Commands from the command line may run while the service does; the same check
+  keeps them apart from it.
+- **Probes.** Liveness on `/health/live`. Readiness on `/health/ready`, which lists the store's
+  tenants, at most once every 30 seconds, as the quota does.
+- **Shutdown.** The first `SIGTERM` stops taking requests and cancels the creations in flight; each
+  deletes the sandbox it made, for at most two minutes, the requests waiting for it are answered
+  `503`, and the service exits with `0`. Allow for that in the platform's termination grace period;
+  a second signal stops the service at once, and `prune` deletes what it leaves behind.
+- **Logs.** The service logs through ASP.NET Core's console logger, which the usual environment
+  variables configure, such as `Logging__LogLevel__Default` and `Logging__Console__FormatterName=json`.
+  ASP.NET Core's own entries for each request are left out (`Logging__LogLevel__Microsoft.AspNetCore`
+  is `Warning` unless set). The provisioner's progress lines become log entries with the tenant as
+  `TenantId`. Entries name tenants, sandboxes, and disk images; never a key, a renderer's credential,
+  or a verifier, and nothing a refused request sent.
+
+### Container image
+
+[`Dockerfile`](Dockerfile) builds an image that runs `serve`: framework-dependent on the chiseled
+ASP.NET Core runtime image, which has no shell or package manager, as the non-root user `app`
+(UID 1654), on port 8080. Settings come from `Provisioner__*` environment variables.
+
+```bash
+docker build -f src/Atli.Reports.Provisioner/Dockerfile -t atli-reports-provisioner .
+```
+
+Run from the repository root. CI does not build the image. The other commands run from the same
+image with its entrypoint replaced:
+`docker run --entrypoint dotnet <image> atli-reports-provisioner.dll list`.
 
 ## Incident response
 
