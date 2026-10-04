@@ -335,7 +335,10 @@ application chooses the level, the workspace or the person, by where its users' 
   caller's, such as `myapp-<workspace id>`, and the caller names one in the tenant header on every
   request. A prefix is 2 to 27 lowercase letters, digits, and hyphens and ends with a hyphen, so a
   36-character GUID fits in a tenant ID's 63, and `acme-` cannot own `acmecorp-1`. Prefixes of
-  different callers may not overlap.
+  different callers may not overlap, and no caller may list a tenant under any prefix: everything
+  under a prefix is the application's, which the provisioning service creates, retires, and
+  deletes. Records are not tied to the caller that made them, so a prefix must not move to another
+  caller while tenants remain under it.
 - **The application decides which of its users may use a workspace.** The gateway knows that the
   application may use every tenant under its prefix, and nothing of the application's users. The
   application must check that the signed-in user may use a workspace before naming it.
@@ -347,19 +350,26 @@ application chooses the level, the workspace or the person, by where its users' 
   service to create one (`PUT /tenants/{id}/renderer`), waits, and then converts. Concurrent first
   conversions of a tenant share one creation.
 - **The service limits what the gateway can ask for.** It serves only the prefixes it is
-  configured with, at most `MaxTenants` renderers under each and `MaxCreatesPerMinute` creates in
-  all, and it authenticates the gateway with an API key of its own. A compromised gateway can
-  therefore create renderers there and delete the application's tenants, but cannot change,
-  reassign, or enter a renderer.
+  configured with, at most `MaxTenants` renderers under each, a number of creates per minute for
+  each prefix within a ceiling for all of them, so one application cannot use up another's, and it
+  authenticates the gateway with an API key of its own. A compromised gateway can therefore create
+  renderers there and delete the application's tenants, but cannot change, reassign, or enter a
+  renderer, nor delete one the operator has disabled. Creating, deleting, and retiring one
+  tenant's renderer take turns in the service, and each deletes only the sandboxes it decided on.
+- **The gateway limits each application.** Lookups of tenants it has no answer for cost each
+  caller from a budget per second, so one application naming new tenants cannot exhaust the record
+  vault's request limits for every tenant, and each caller has only a few deletions in flight.
 - **The application deletes a workspace's renderer** with `DELETE /tenants/{id}` on the gateway,
   which needs the permission `reports.tenants` and removes the renderer, its record, and with them
-  its memory snapshot. Only tenants under the caller's prefixes can be deleted this way; listed
-  tenants stay the operator's.
+  its memory snapshot. Only tenants under the caller's prefixes can be deleted this way. A tenant
+  whose renderer the operator disabled is refused with `409`, so the kill switch keeps the
+  renderer for investigation.
 - **Idle renderers retire.** A renderer under a managed prefix stopped for longer than
   `RetireAfterIdle` (7 days by default) is deleted with its record and snapshot, and the tenant's
   next conversion creates a new one from the current disk image. A rollout can retire such stopped
   renderers instead of replacing them (`rollout --stopped retire`), so only running renderers are
-  replaced, and the rest come back on the new image when they are next used.
+  replaced, and the rest come back on the new image when they are next used. The service also
+  deletes sandboxes of its prefixes that no record points to, left by an interrupted command.
 - **Cost and latency.** A workspace costs only while its renderer runs: each burst of use plus the
   idle time before it suspends. The first conversion of a new workspace waits for a renderer to be
   created, and the first after a quiet period for one to wake.
