@@ -213,7 +213,12 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   or its record's `MaxConcurrentRequests` (the requests its renderer admits) when that is lower; a
   tenant at its limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway.
   The limit holds per replica, so several replicas can still send a renderer more than it admits;
-  the renderer's `Busy` is retried as described below.
+  the renderer's `Busy` is retried as described below. In a
+  [measured run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md)
+  at twice the admitted concurrency, two replicas made renderers refuse 8,031 requests in
+  5 minutes, which the gateway resent, and 388 conversions still ended in `Busy`. Caller admission
+  (`Limits:MaxConcurrentRequestsPerCaller`, 4 by default) applies before the tenant limits, so a
+  caller that serves several tenants needs it raised to their combined limits.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
   record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
   the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no
@@ -277,7 +282,8 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `/health/live` is unchanged.
 - **Logs and traces.** The gateway logs tenant and sandbox IDs, never HTML, PDFs, credentials, or
   tokens: events 40 to 51 for forwarding (44, an error, is a rejected credential), 52 and 53 for
-  refused tenants and full tenants, 54 for a not-running answer from a running sandbox, 55 for a
+  refused tenants and full tenants (a line per refused request: about 16 a second for six tenants
+  at twice their limits), 54 for a not-running answer from a running sandbox, 55 for a
   record that names a sandbox that does not exist, 56 (at `Debug`) for a resend to a busy
   renderer, 57 for a renderer the port proxy does not find, 58 (an error) for a port that refuses
   the gateway's address, 59 for a disabled sandbox, and 60 to 63 for state reads and resumes. The request span carries the tenant as

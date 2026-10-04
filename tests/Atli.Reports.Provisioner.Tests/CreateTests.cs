@@ -33,6 +33,7 @@ public class CreateTests
     await Assert.That(spec.Entrypoint).IsEquivalentTo(RendererServerEnvironment.Entrypoint);
     await Assert.That(spec.EgressDefaultAction).IsEqualTo("Deny");
     await Assert.That(spec.AutoSuspendAfter).IsEqualTo(TimeSpan.FromMinutes(5));
+    await Assert.That(spec.NetworkConnectionName).IsNull();
     await Assert
       .That(spec.Labels)
       .IsEquivalentTo(
@@ -129,6 +130,19 @@ public class CreateTests
       .IsEquivalentTo([
         "port sandbox-1 8080 anonymous OnDemand from 203.0.113.7/32,198.51.100.0/24",
       ]);
+  }
+
+  [Test]
+  public async Task Starts_the_renderer_in_the_configured_network_connection()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Options.NetworkConnection = " renderers ";
+
+    await provisioning.Provisioner.CreateAsync("contoso", RendererSize.Medium, "disk-1", TestToken);
+
+    await Assert
+      .That(provisioning.Sandboxes.Created[0].NetworkConnectionName)
+      .IsEqualTo("renderers");
   }
 
   [Test]

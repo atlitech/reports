@@ -32,6 +32,13 @@ public sealed record SandboxSpec
 
   /// <summary>Suspends the sandbox after this long without traffic; <see langword="null"/> never does.</summary>
   public TimeSpan? AutoSuspendAfter { get; init; }
+
+  /// <summary>
+  /// The group's virtual network connection (<c>aca sandboxgroup network create --name</c>) to start
+  /// the sandbox in, so that its DNS goes through that network and the network's rules apply to it;
+  /// <see langword="null"/> for none. Fixed at creation.
+  /// </summary>
+  public string? NetworkConnectionName { get; init; }
 }
 
 /// <summary>A sandbox as the data plane reports it.</summary>

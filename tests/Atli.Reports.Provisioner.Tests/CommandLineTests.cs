@@ -172,6 +172,7 @@ public class CommandLineTests
             ["Provisioner:PortActivation"] = "manual",
             ["Provisioner:AllowedSourceCidrs:0"] = "203.0.113.7/32",
             ["Provisioner:AllowedSourceCidrs:1"] = "2001:db8::/48",
+            ["Provisioner:NetworkConnection"] = "renderers",
           }
         )
         .Build(),
@@ -194,6 +195,7 @@ public class CommandLineTests
     await Assert
       .That(options.PortOptions.AllowedSourceCidrs)
       .IsEquivalentTo(["203.0.113.7/32", "2001:db8::/48"]);
+    await Assert.That(options.NetworkConnectionName).IsEqualTo("renderers");
   }
 
   [Test]

@@ -223,7 +223,7 @@ the profile lets processes hold belong to an unprivileged range of host user IDs
 | Aspire, local runs | `AddReportsServer` passes the profile to Docker or Podman |
 | Aspire deployment targets | Configure the profile on the target, or opt out explicitly; see [the Aspire guide](aspire.md#deploy) |
 | Azure Container Apps | No seccomp setting; [the template](../deploy/azure/reports.bicep) opts out explicitly. Whether its runtime permits user namespaces is unverified. |
-| Azure Container Apps Sandboxes | Nothing to configure: each sandbox is a microVM with its own kernel, no platform seccomp filter, and unprivileged user namespaces allowed. The sandbox ran there in [one recorded run](../benchmarks/results/2026-10-03-5b667b4-azure-sandboxes-amd64.md). |
+| Azure Container Apps Sandboxes | Nothing to configure: each sandbox is a microVM with its own kernel, no platform seccomp filter, and unprivileged user namespaces allowed. The sandbox ran there in the [first recorded run](../benchmarks/results/2026-10-03-5b667b4-azure-sandboxes-amd64.md) and again in a [sandbox group without DNS](../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md). |
 | gVisor | On arm64, Chromium's own seccomp filter crashed under gVisor in a probe of the worker image, and the browser then hung instead of exiting at startup, so the engine does not report it as a sandbox failure. The [experiment](isolated-workers.md) kept the worker's browser unsandboxed inside the gVisor boundary. The server image under gVisor was not tested; on arm64, opt out there too. amd64 was not tested. |
 
 **AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces

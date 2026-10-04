@@ -740,6 +740,7 @@ internal sealed class RendererProvisioner
       Labels = RendererLabels.For(tenantId, size, launchId),
       EgressDefaultAction = "Deny",
       AutoSuspendAfter = _options.AutoSuspendAfter,
+      NetworkConnectionName = _options.NetworkConnectionName,
     };
     Log(
       tenantId,

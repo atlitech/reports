@@ -23,6 +23,9 @@ internal sealed class CreateSandboxRequest
   public required IReadOnlyDictionary<string, string> Labels { get; init; }
 
   public required LifecycleWire Lifecycle { get; init; }
+
+  /// <summary>The group's virtual network connection to start in; omitted for none.</summary>
+  public string? CustomerVnetConnectionName { get; init; }
 }
 
 internal sealed class SourcesRefWire
