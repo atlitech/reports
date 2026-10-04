@@ -1,0 +1,677 @@
+{
+  "setup": {
+    "commit": "b9c51da",
+    "resource_group": "rg-atli-reports-e2e-20261004040814",
+    "sandbox_group": "reports-e2e-20261004040814",
+    "started_utc": "2026-10-04T04:08:16Z",
+    "group_create_s": 4.0,
+    "role_propagation_s": 46.9,
+    "disk_a_name": "reports-server-b9c51da-a",
+    "disk_a_build_s": 152.9,
+    "disk_b_name": "reports-server-b9c51da-b",
+    "disk_b_build_s": 163.1,
+    "aca_cli": "aca 1.0.0-preview.4",
+    "location": "eastus2"
+  },
+  "run": {
+    "tenants": {
+      "acme": {
+        "create_s": 2.92,
+        "sandbox": "2e3e832c-5e7a-456f-b159-22cc4972de12",
+        "max_concurrent_requests": 2,
+        "list": {
+          "sandbox": "2e3e832c-5e7a-456f-b159-22cc4972de12",
+          "state": "Running",
+          "size": "S",
+          "disk": "bd2e6fb1-8871-4902-af07-f3c7dc8c6609"
+        },
+        "port": {
+          "activationMode": "OnDemand",
+          "anonymous": true,
+          "ip_default_action": "Deny",
+          "ip_rules": 1
+        },
+        "create_lines": [
+          "[acme] Creating a sandbox from disk image bd2e6fb1-8871-4902-af07-f3c7dc8c6609, size S (500m CPU, 1024Mi memory).",
+          "[acme] Created sandbox 2e3e832c-5e7a-456f-b159-22cc4972de12; exposing port 8080.",
+          "[acme] Waiting for <port URL> to be ready.",
+          "[acme] Ready 2.8 s after the create call.",
+          "Tenant:      acme",
+          "Sandbox:     2e3e832c-5e7a-456f-b159-22cc4972de12",
+          "State:       Running",
+          "Size:        S",
+          "Disk image:  bd2e6fb1-8871-4902-af07-f3c7dc8c6609"
+        ]
+      },
+      "globex": {
+        "create_s": 2.79,
+        "sandbox": "664be9fe-782c-438a-9454-b0320af5070f",
+        "max_concurrent_requests": 2,
+        "list": {
+          "sandbox": "664be9fe-782c-438a-9454-b0320af5070f",
+          "state": "Running",
+          "size": "S",
+          "disk": "bd2e6fb1-8871-4902-af07-f3c7dc8c6609"
+        },
+        "port": {
+          "activationMode": "Manual",
+          "anonymous": true,
+          "ip_default_action": "Deny",
+          "ip_rules": 1
+        },
+        "create_lines": [
+          "[globex] Creating a sandbox from disk image bd2e6fb1-8871-4902-af07-f3c7dc8c6609, size S (500m CPU, 1024Mi memory).",
+          "[globex] Created sandbox 664be9fe-782c-438a-9454-b0320af5070f; exposing port 8080.",
+          "[globex] Waiting for <port URL> to be ready.",
+          "[globex] Ready 2.7 s after the create call.",
+          "Tenant:      globex",
+          "Sandbox:     664be9fe-782c-438a-9454-b0320af5070f",
+          "State:       Running",
+          "Size:        S",
+          "Disk image:  bd2e6fb1-8871-4902-af07-f3c7dc8c6609"
+        ]
+      }
+    },
+    "gateway_ready_s": 0.29,
+    "a_basic": {
+      "acme_invoice": [
+        {
+          "status": 200,
+          "s": 0.53,
+          "bytes": 69600,
+          "pdf": true
+        },
+        {
+          "status": 200,
+          "s": 0.17,
+          "bytes": 69600,
+          "pdf": true
+        },
+        {
+          "status": 200,
+          "s": 0.12,
+          "bytes": 69600,
+          "pdf": true
+        }
+      ],
+      "acme_long_table": {
+        "status": 200,
+        "s": 3.64,
+        "bytes": 7186708,
+        "pdf": true
+      },
+      "globex_invoice": [
+        {
+          "status": 200,
+          "s": 0.48,
+          "bytes": 69600,
+          "pdf": true
+        },
+        {
+          "status": 200,
+          "s": 0.15,
+          "bytes": 69600,
+          "pdf": true
+        },
+        {
+          "status": 200,
+          "s": 0.11,
+          "bytes": 69600,
+          "pdf": true
+        }
+      ],
+      "globex_long_table": {
+        "status": 200,
+        "s": 4.1,
+        "bytes": 7186708,
+        "pdf": true
+      },
+      "missing_header": {
+        "status": 400,
+        "s": 0.01,
+        "bytes": 310,
+        "kind": "InvalidRequest",
+        "detail": "The caller belongs to several product tenants. Name one in the X-Reports-Tenant header."
+      },
+      "other_tenant": {
+        "status": 403,
+        "s": 0.0,
+        "bytes": 252,
+        "kind": "Forbidden",
+        "detail": "The caller does not belong to the requested product tenant."
+      },
+      "wrong_key": {
+        "status": 401,
+        "s": 0.0,
+        "bytes": 249,
+        "kind": "Unauthorized",
+        "detail": "Valid conversion service credentials are required."
+      },
+      "no_key": {
+        "status": 401,
+        "s": 0.0,
+        "bytes": 249,
+        "kind": "Unauthorized",
+        "detail": "Valid conversion service credentials are required."
+      },
+      "renderer_direct_no_key": {
+        "status": 401,
+        "s": 0.17,
+        "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.2\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Valid conversion service credentials are required.\",\"traceId\":\"00-6b6a0acb5c0b7766460bd12d56f"
+      },
+      "renderer_direct_caller_key": {
+        "status": 401,
+        "s": 0.18,
+        "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.2\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Valid conversion service credentials are required.\",\"traceId\":\"00-134589a80050c424e3264f13b6f"
+      }
+    },
+    "client_sandbox_create_s": 1.2,
+    "auto_suspend": {
+      "acme": {
+        "after_last_request_s": 125.3,
+        "stopped_reason": "Idle"
+      },
+      "globex": {
+        "after_last_request_s": 128.0,
+        "stopped_reason": "Idle"
+      }
+    },
+    "b_ondemand_wake": {
+      "invoice": {
+        "status": 200,
+        "s": 1.74,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "state_after": "Running",
+      "long_table_right_after": {
+        "status": 200,
+        "s": 3.55,
+        "bytes": 7186708,
+        "pdf": true
+      },
+      "invoice_warm": {
+        "status": 200,
+        "s": 0.13,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "long_table_as_waking_request": {
+        "status": 200,
+        "s": 5.48,
+        "bytes": 7186708,
+        "pdf": true
+      }
+    },
+    "c_manual_wake": {
+      "direct_while_stopped": {
+        "status": 403,
+        "s": 0.17,
+        "body": "{\"error\":\"Sandbox is not running\"}"
+      },
+      "state_after_direct": "Stopped",
+      "invoice": {
+        "status": 200,
+        "s": 3.38,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "invoice_warm": {
+        "status": 200,
+        "s": 0.16,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "gateway_log": [
+        "04:14:28.619 info: Atli.Reports.Server.Gateway.SandboxWaker[60] Resuming sandbox 664be9fe-782c-438a-9454-b0320af5070f, the renderer of tenant globex.",
+        "04:14:29.046 info: Atli.Reports.Server.Gateway.SandboxWaker[61] Sandbox 664be9fe-782c-438a-9454-b0320af5070f, the renderer of tenant globex, resumed (Running) in 426.5884 ms."
+      ]
+    },
+    "auto_suspend_2": {
+      "acme": {
+        "after_last_request_s": 142.1,
+        "stopped_reason": "Idle"
+      }
+    },
+    "d_ip_allow_list": {
+      "client_lines": [
+        "403 0.051275",
+        "{\"error\":\"Access denied by IP access control policy\",\"errorCode\":\"IpAccessDenied\"}",
+        "403",
+        "{\"error\":\"Access denied by IP access control policy\",\"errorCode\":\"IpAccessDenied\"}"
+      ],
+      "acme_state_10s_later": "Stopped"
+    },
+    "e_rollout": {
+      "exit": 0,
+      "seconds": 44.53,
+      "loop_rollout_started_at_s": 5.01,
+      "loop_rollout_ended_at_s": 49.55,
+      "rollout_lines": [
+        "[   1.73] Rollout of disk image c631f31d-5fc9-4135-901b-5d26c85fb934: 2 to replace, 0 already on it. 4 at a time; old sandboxes are deleted 00:00:40 after their record moves.",
+        "[   1.85] [acme] Replacing sandbox 2e3e832c-5e7a-456f-b159-22cc4972de12 (disk image bd2e6fb1-8871-4902-af07-f3c7dc8c6609, size S).",
+        "[   1.85] [acme] Creating a sandbox from disk image c631f31d-5fc9-4135-901b-5d26c85fb934, size S (500m CPU, 1024Mi memory).",
+        "[   1.90] [globex] Replacing sandbox 664be9fe-782c-438a-9454-b0320af5070f (disk image bd2e6fb1-8871-4902-af07-f3c7dc8c6609, size S).",
+        "[   1.90] [globex] Creating a sandbox from disk image c631f31d-5fc9-4135-901b-5d26c85fb934, size S (500m CPU, 1024Mi memory).",
+        "[   2.64] [acme] Created sandbox 466aa398-f66f-4093-9636-a894941c09aa; exposing port 8080.",
+        "[   2.66] [globex] Created sandbox 71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9; exposing port 8080.",
+        "[   2.80] [acme] Waiting for <port URL> to be ready.",
+        "[   2.81] [globex] Waiting for <port URL> to be ready.",
+        "[   3.07] [acme] Ready 1.2 s after the create call.",
+        "[   3.07] [globex] Ready 1.2 s after the create call.",
+        "[   3.08] [acme] The record now points to sandbox 466aa398-f66f-4093-9636-a894941c09aa.",
+        "[   3.08] [globex] The record now points to sandbox 71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9.",
+        "[  43.47] [globex] Deleted the old sandbox 664be9fe-782c-438a-9454-b0320af5070f.",
+        "[  44.45] [acme] Deleted the old sandbox 2e3e832c-5e7a-456f-b159-22cc4972de12.",
+        "[  44.53] No renderer sandboxes are left over.",
+        "[  44.53] Replaced 2, already on the image 0, failed 0."
+      ],
+      "requests": 167,
+      "statuses": {
+        "200": 167
+      },
+      "non_200": [],
+      "latency_s": {
+        "min": 0.12,
+        "median": 0.16,
+        "max": 0.48
+      },
+      "slowest": [
+        {
+          "status": 200,
+          "s": 0.48,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 24.89
+        },
+        {
+          "status": 200,
+          "s": 0.3,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 6.62
+        },
+        {
+          "status": 200,
+          "s": 0.21,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 38.6
+        },
+        {
+          "status": 200,
+          "s": 0.19,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 15.76
+        },
+        {
+          "status": 200,
+          "s": 0.19,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 70.04
+        }
+      ],
+      "records": {
+        "acme": {
+          "before": "2e3e832c-5e7a-456f-b159-22cc4972de12",
+          "after": "466aa398-f66f-4093-9636-a894941c09aa",
+          "disk_after_is_b": true,
+          "old_sandbox_state": "missing",
+          "new_sandbox_state": "Running"
+        },
+        "globex": {
+          "before": "664be9fe-782c-438a-9454-b0320af5070f",
+          "after": "71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9",
+          "disk_after_is_b": true,
+          "old_sandbox_state": "missing",
+          "new_sandbox_state": "Stopped"
+        }
+      },
+      "prune": {
+        "exit": 0,
+        "lines": [
+          "No renderer sandboxes are left over.",
+          "Deleted 0, failed 0."
+        ]
+      },
+      "list": [
+        "TENANT  SANDBOX                               STATE    SIZE  DISK IMAGE                            CREATED",
+        "acme    466aa398-f66f-4093-9636-a894941c09aa  Running  S     c631f31d-5fc9-4135-901b-5d26c85fb934  2026-10-04 04:17:13Z",
+        "globex  71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9  Stopped  S     c631f31d-5fc9-4135-901b-5d26c85fb934  2026-10-04 04:17:13Z"
+      ]
+    },
+    "f_kill_switch": {
+      "warm_before": {
+        "status": 200,
+        "s": 0.21,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "disable_s": 5.2,
+      "during_disable": [
+        {
+          "status": 503,
+          "s": 0.28,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is not running.",
+          "t": 0.28
+        },
+        {
+          "status": 503,
+          "s": 0.08,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is not running.",
+          "t": 1.37
+        },
+        {
+          "status": 503,
+          "s": 0.12,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is not running.",
+          "t": 2.49
+        }
+      ],
+      "sandbox_while_disabled": {
+        "state": "Stopped",
+        "stopped_reason": "Disabled"
+      },
+      "direct_while_disabled": {
+        "status": 403,
+        "s": 0.18,
+        "body": "{\"error\":\"Sandbox is not running\"}"
+      },
+      "enable_s": 0.83,
+      "after_enable": [
+        {
+          "status": 200,
+          "s": 0.62,
+          "bytes": 69600,
+          "pdf": true,
+          "t": 0.62
+        },
+        {
+          "status": 200,
+          "s": 0.16,
+          "bytes": 69600,
+          "pdf": true
+        }
+      ],
+      "gateway_log": [
+        "04:18:40.564 warn: Atli.Reports.Server.Gateway.RendererGateway[59] The renderer of tenant acme (sandbox 466aa398-f66f-4093-9636-a894941c09aa) is disabled; its conversions fail until it is enabled.",
+        "04:18:41.650 warn: Atli.Reports.Server.Gateway.RendererGateway[59] The renderer of tenant acme (sandbox 466aa398-f66f-4093-9636-a894941c09aa) is disabled; its conversions fail until it is enabled.",
+        "04:18:42.776 warn: Atli.Reports.Server.Gateway.RendererGateway[59] The renderer of tenant acme (sandbox 466aa398-f66f-4093-9636-a894941c09aa) is disabled; its conversions fail until it is enabled."
+      ]
+    },
+    "g_delete": {
+      "convert_before": {
+        "status": 200,
+        "s": 1.41,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "delete_s": 7.64,
+      "delete_lines": [
+        "[globex] Deleted the record; the gateway stops routing to the renderer once its cached copy expires.",
+        "[globex] Deleted sandbox 71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9."
+      ],
+      "after_delete": [
+        {
+          "status": 503,
+          "s": 0.05,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is unavailable.",
+          "t": 0.06
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 2.07
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 4.08
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 6.1
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 8.11
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 10.13
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 12.14
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 14.16
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 16.17
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 18.18
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 20.19
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 22.21
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 24.22
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 26.23
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 28.24
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 30.25
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 32.26
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 34.27
+        },
+        {
+          "status": 503,
+          "s": 0.0,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 36.28
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 38.3
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 40.32
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 42.33
+        },
+        {
+          "status": 503,
+          "s": 0.01,
+          "bytes": 270,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant has no renderer.",
+          "t": 44.34
+        }
+      ],
+      "old_sandbox_state": "missing",
+      "list": [
+        "TENANT  SANDBOX                               STATE    SIZE  DISK IMAGE                            CREATED",
+        "acme    466aa398-f66f-4093-9636-a894941c09aa  Running  S     c631f31d-5fc9-4135-901b-5d26c85fb934  2026-10-04 04:17:13Z"
+      ],
+      "acme_still_converts": {
+        "status": 200,
+        "s": 0.37,
+        "bytes": 69600,
+        "pdf": true
+      },
+      "gateway_log": [
+        "04:14:28.619 info: Atli.Reports.Server.Gateway.SandboxWaker[60] Resuming sandbox 664be9fe-782c-438a-9454-b0320af5070f, the renderer of tenant globex.",
+        "04:14:29.046 info: Atli.Reports.Server.Gateway.SandboxWaker[61] Sandbox 664be9fe-782c-438a-9454-b0320af5070f, the renderer of tenant globex, resumed (Running) in 426.5884 ms.",
+        "04:18:53.845 warn: Atli.Reports.Server.Gateway.RendererGateway[57] The platform found no renderer at the record of tenant globex (sandbox 71d5dabf-a6a0-4b54-add3-9f6a64ae2ff9): it was deleted or replaced. The record is read again."
+      ]
+    },
+    "h_address_refused": {
+      "port_add_status": 200,
+      "converts": [
+        {
+          "status": 503,
+          "s": 0.05,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is unavailable."
+        },
+        {
+          "status": 503,
+          "s": 0.05,
+          "bytes": 280,
+          "kind": "BrowserUnavailable",
+          "detail": "The tenant's renderer is unavailable."
+        }
+      ],
+      "acme_state": "Running",
+      "gateway_log": [
+        "04:19:48.000 fail: Atli.Reports.Server.Gateway.RendererGateway[58] The port of tenant acme's renderer (sandbox 466aa398-f66f-4093-9636-a894941c09aa) refused the gateway's address (IpAccessDenied). Its allowed source ranges must include the gateway's outbound addresses.",
+        "04:19:48.049 fail: Atli.Reports.Server.Gateway.RendererGateway[58] The port of tenant acme's renderer (sandbox 466aa398-f66f-4093-9636-a894941c09aa) refused the gateway's address (IpAccessDenied). Its allowed source ranges must include the gateway's outbound addresses."
+      ]
+    },
+    "final_list": [
+      "No renderers."
+    ],
+    "renderer_sandboxes_left": 0,
+    "secrets_in_logs_and_results": "none",
+    "renderer_keys_checked": 4,
+    "verdicts": {
+      "a_convert_and_refusals": "pass",
+      "b_ondemand_wake": "pass",
+      "c_manual_wake": "pass",
+      "d_ip_allow_list": "pass",
+      "e_rollout": "pass",
+      "f_kill_switch": "pass",
+      "g_delete": "pass",
+      "h_address_refused": "pass",
+      "cleanup_by_provisioner": "pass",
+      "no_secrets_in_logs": "pass"
+    }
+  },
+  "cleanup": {
+    "sandbox_group_delete": {
+      "exit": 0,
+      "seconds": 16.6
+    },
+    "resource_group_deleted_after_s": 1.7,
+    "resource_group_exists": false,
+    "finished_utc": "2026-10-04T04:20:12Z"
+  }
+}
