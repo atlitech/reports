@@ -42,7 +42,12 @@ authentication, a resume-only role, DNS, concurrent load, and on-demand activati
 [`followup.py`](azure-sandboxes/followup.py) and the probes beside it. The
 [end-to-end run](results/2026-10-04-b9c51da-hosted-renderers-e2e-amd64.md) puts the provisioner
 and the gateway together on real sandboxes: waking, the allow-list, a rollout under load, the kill
-switch, and deleting a tenant, with [`e2e.py`](azure-sandboxes/e2e.py).
+switch, and deleting a tenant, with [`e2e.py`](azure-sandboxes/e2e.py). The
+[production-shaped run](results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md) deploys
+the gateway as a Container App behind a NAT gateway, with Key Vault records, a managed identity,
+and renderers in a virtual network without DNS, and measures hardening, creates, wakes, warm
+latency, 15 minutes of load with one and two gateway replicas, and a rollout under load, with
+[`production.py`](azure-sandboxes/production.py).
 
 ## What runs
 
