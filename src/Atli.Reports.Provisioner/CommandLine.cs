@@ -137,8 +137,9 @@ internal static class CommandLine
     Usage: atli-reports-provisioner delete --tenant <id> [--drain <hh:mm:ss>]
 
     Deletes the tenant's record, even one that cannot be read, so the gateway stops routing to it,
-    then every sandbox labeled for the tenant. A sandbox the record names that is labeled for another
-    tenant is not deleted. Deleting a tenant that has neither succeeds.
+    then every sandbox labeled for the tenant when the delete began, disabled ones included. A
+    sandbox the record names that is labeled for another tenant is not deleted. Deleting a tenant
+    that has neither succeeds.
 
     Options:
       --tenant <id>        The tenant.
@@ -197,9 +198,10 @@ internal static class CommandLine
     Runs the provisioning service until stopped: an HTTP API on internal ingress that the gateway
     calls to create a renderer for a tenant under one of Provisioner:Service:TenantPrefixes on its
     first conversion, and to delete one when the application deletes the tenant. It authenticates
-    the gateway with Provisioner:Service:ApiKeys, keeps each prefix within its MaxTenants and every
-    create within MaxCreatesPerMinute, and retires renderers stopped for longer than
-    RetireAfterIdle. Listens where ASPNETCORE_URLS says.
+    the gateway with Provisioner:Service:ApiKeys, keeps each prefix within its MaxTenants and
+    MaxCreatesPerMinute and all creates within the service's MaxCreatesPerMinute, retires renderers
+    stopped for longer than RetireAfterIdle, and deletes the managed tenants' leftover sandboxes.
+    Needs Provisioner:AllowedSourceCidrs. Listens where ASPNETCORE_URLS says.
     """;
 
   public const string RetireUsage = """
@@ -208,7 +210,8 @@ internal static class CommandLine
     Deletes, with their records, the renderers of tenants under Provisioner:Service:TenantPrefixes
     that have been stopped for longer than Provisioner:Service:RetireAfterIdle, as serve does every
     RetireCheckInterval. Each comes back from the current disk image on its tenant's next
-    conversion. Disabled renderers are kept.
+    conversion. Disabled renderers are kept, and so are stopped sandboxes that the tenant's record
+    does not name, which prune deletes.
     """;
 
   public static ProvisionerCommand Parse(IReadOnlyList<string> arguments)

@@ -6,9 +6,11 @@ namespace Atli.Reports.Provisioner.Service;
 
 /// <summary>
 /// The renderers of tenants under the managed prefixes, as the service ensures and deletes them. A
-/// renderer that exists is found without counting toward any limit. A new one, or one replacing a
-/// sandbox that is gone, is created once at a time per tenant, within its prefix's
-/// <c>MaxTenants</c> and the service's <c>MaxCreatesPerMinute</c>.
+/// renderer that exists is found without counting toward any limit, and so is a replacement for a
+/// tenant's sandbox that is gone. A new tenant's renderer is created within its prefix's
+/// <c>MaxTenants</c> and <c>MaxCreatesPerMinute</c> and the service's <c>MaxCreatesPerMinute</c>,
+/// each refused before the tenant's record is read when the census does not list it. One creation
+/// runs at a time per tenant.
 /// </summary>
 /// <remarks>
 /// <para>
