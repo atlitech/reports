@@ -86,7 +86,7 @@ internal static class ServerOpenApi
           In = ParameterLocation.Header,
           Name = ApiKeyAuthenticationHandler.HeaderName,
           Description =
-            "A scoped API credential in the form key-id.random-secret. Requires reports.convert permission.",
+            "A scoped API credential in the form key-id.random-secret. Converting requires the reports.convert permission; deleting a tenant, reports.tenants.",
         }
         : new OpenApiSecurityScheme
         {

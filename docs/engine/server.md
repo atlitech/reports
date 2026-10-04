@@ -77,8 +77,9 @@ unexpectedly) abort the connection. The client sees a broken response, never a t
   the `ConversionErrorKind` names as the values of `kind`, and the `Retry-After` header of the
   `429` and `503` responses.
 
-Its `info.version` is the server's release. The `/health` endpoints are left out: they serve
-probes, not clients.
+In gateway mode with `Provisioning:Mode=OnDemand` it also describes `DELETE /tenants/{tenantId}`
+(see [Gateway mode](#gateway-mode)). Its `info.version` is the server's release. The `/health`
+endpoints are left out: they serve probes, not clients.
 
 ## Health
 
