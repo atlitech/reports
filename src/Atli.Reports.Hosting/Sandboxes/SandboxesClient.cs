@@ -1,5 +1,7 @@
-// Stub: the implementation replaces this file, and this pragma with it.
-#pragma warning disable CS9113
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Azure.Core;
 
 namespace Atli.Reports.Hosting.Sandboxes;
@@ -8,44 +10,675 @@ namespace Atli.Reports.Hosting.Sandboxes;
 /// <see cref="ISandboxesClient"/> over the data plane's REST API, authenticated with Microsoft Entra
 /// tokens for <see cref="SandboxesOptions.TokenScope"/>, cached until shortly before they expire.
 /// </summary>
-/// <param name="httpClient">The client to send requests with; its base address is ignored.</param>
-/// <param name="credential">The credential tokens come from.</param>
-/// <param name="options">The sandbox group.</param>
-public sealed class SandboxesClient(
-  HttpClient httpClient,
-  TokenCredential credential,
-  SandboxesOptions options
-) : ISandboxesClient
+/// <remarks>
+/// <para>
+/// Every call but creation is retried up to three times after a <c>429</c>, <c>502</c>, <c>503</c>,
+/// or <c>504</c>, a transport failure, or the HTTP client's timeout: after the
+/// response's <c>Retry-After</c> (at most 30 seconds), or else after 1, 2, then 4 seconds. Creation
+/// is never retried: a create whose response was lost may still have made a sandbox, and a second
+/// attempt would leave a running renderer nobody records.
+/// </para>
+/// <para>
+/// Failures throw <see cref="SandboxesException"/> with the status and the data plane's own
+/// description of the error, never a request's body or headers: a create's body holds the
+/// renderer's environment, credentials among them. The client logs nothing.
+/// </para>
+/// </remarks>
+public sealed class SandboxesClient : ISandboxesClient
 {
-  /// <inheritdoc />
-  public Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  /// <summary>Retries after the first attempt, for every call but creation.</summary>
+  internal const int MaxRetries = 3;
+
+  /// <summary>The longest <c>Retry-After</c> the client waits; longer ones are cut to this.</summary>
+  internal static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(30);
+
+  /// <summary>The first back-off without a <c>Retry-After</c>; each retry doubles it.</summary>
+  internal static readonly TimeSpan FirstBackOff = TimeSpan.FromSeconds(1);
+
+  /// <summary>How much of the data plane's error description an exception message carries.</summary>
+  internal const int MaxErrorLength = 500;
+
+  /// <summary>
+  /// Environment values at least this long are scrubbed from a failed create's error. Shorter ones
+  /// (a concurrency of <c>2</c>, a mode such as <c>ApiKey</c>) hold no credential, and replacing
+  /// them would garble the message.
+  /// </summary>
+  internal const int MinRedactedLength = 8;
+
+  private const string Redacted = "[redacted]";
+
+  private static readonly byte[] EmptyObject = "{}"u8.ToArray();
+
+  private readonly HttpClient _httpClient;
+  private readonly AccessTokenCache _tokens;
+  private readonly Uri _groupUri;
+  private readonly TimeProvider _time;
+
+  /// <summary>Creates the client.</summary>
+  /// <param name="httpClient">The client to send requests with; its base address is ignored.</param>
+  /// <param name="credential">The credential tokens come from.</param>
+  /// <param name="options">The sandbox group.</param>
+  public SandboxesClient(
+    HttpClient httpClient,
+    TokenCredential credential,
+    SandboxesOptions options
+  )
+    : this(httpClient, credential, options, TimeProvider.System) { }
+
+  /// <summary>Creates the client with its retry delays and token expiry on <paramref name="time"/>.</summary>
+  internal SandboxesClient(
+    HttpClient httpClient,
+    TokenCredential credential,
+    SandboxesOptions options,
+    TimeProvider time
+  )
+  {
+    ArgumentNullException.ThrowIfNull(httpClient);
+    ArgumentNullException.ThrowIfNull(credential);
+    ArgumentNullException.ThrowIfNull(options);
+    ArgumentNullException.ThrowIfNull(time);
+    options.Validate();
+    _httpClient = httpClient;
+    _tokens = new AccessTokenCache(credential, SandboxesOptions.TokenScope, time);
+    _groupUri = options.GroupUri;
+    _time = time;
+  }
 
   /// <inheritdoc />
-  public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  /// <remarks>The data plane answers once the sandbox is running.</remarks>
+  public async Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken)
+  {
+    ArgumentNullException.ThrowIfNull(spec);
+    var body = JsonSerializer.SerializeToUtf8Bytes(
+      ToRequest(spec),
+      SandboxesJsonContext.Default.CreateSandboxRequest
+    );
+    // Should the data plane ever echo the request in an error, the environment's values are
+    // scrubbed from the message.
+    Call call = new(
+      HttpMethod.Put,
+      "sandboxes",
+      body,
+      Retry: false,
+      Secrets: spec.Environment.Values
+    );
+    using var response = await SendAsync(call, cancellationToken);
+    await EnsureSuccessAsync(call, response, cancellationToken);
+    return await ReadSandboxAsync(call, response, cancellationToken);
+  }
 
   /// <inheritdoc />
-  public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  public async Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    Call call = new(HttpMethod.Get, SandboxPath(sandboxId));
+    using var response = await SendAsync(call, cancellationToken);
+    if (response.StatusCode == HttpStatusCode.NotFound)
+    {
+      return null;
+    }
+
+    await EnsureSuccessAsync(call, response, cancellationToken);
+    return await ReadSandboxAsync(call, response, cancellationToken);
+  }
 
   /// <inheritdoc />
-  public Task DeleteAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  /// <remarks>The data plane answers with every sandbox in one JSON array, unpaged.</remarks>
+  public async Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken)
+  {
+    Call call = new(HttpMethod.Get, "sandboxes");
+    using var response = await SendAsync(call, cancellationToken);
+    await EnsureSuccessAsync(call, response, cancellationToken);
+    var sandboxes = await ReadAsync(
+      call,
+      response,
+      SandboxesJsonContext.Default.ListSandboxResponse,
+      cancellationToken
+    );
+    return [.. sandboxes.Select(sandbox => ToView(call, sandbox))];
+  }
 
   /// <inheritdoc />
-  public Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  public async Task DeleteAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    Call call = new(HttpMethod.Delete, SandboxPath(sandboxId));
+    using var response = await SendAsync(call, cancellationToken);
+    // The data plane answers 204 for a sandbox that does not exist; a 404 means the same.
+    if (response.StatusCode != HttpStatusCode.NotFound)
+    {
+      await EnsureSuccessAsync(call, response, cancellationToken);
+    }
+  }
 
   /// <inheritdoc />
-  public Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotImplementedException();
+  /// <remarks>
+  /// Returns once the sandbox is stopped, which takes several seconds. Stopping a stopped sandbox
+  /// succeeds.
+  /// </remarks>
+  public async Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/stop", EmptyObject);
+    using (var response = await SendAsync(call, cancellationToken))
+    {
+      if (
+        await AlreadyDoneAsync(
+          response,
+          sandboxId,
+          sandbox => sandbox.State == SandboxStates.Stopped,
+          cancellationToken
+        ) is
+        { } stopped
+      )
+      {
+        return stopped;
+      }
+
+      await EnsureSuccessAsync(call, response, cancellationToken);
+    }
+
+    // The response describes the memory snapshot the stop took (its "id" is the snapshot's), not
+    // the sandbox, so the sandbox is read afresh.
+    return await GetRequiredAsync(call, sandboxId, cancellationToken);
+  }
 
   /// <inheritdoc />
-  public Task<SandboxView> AddPortAsync(
+  /// <remarks>Takes a second or two. Resuming a running sandbox succeeds.</remarks>
+  public async Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/resume", EmptyObject);
+    using var response = await SendAsync(call, cancellationToken);
+    if (
+      await AlreadyDoneAsync(
+        response,
+        sandboxId,
+        sandbox => sandbox.State == SandboxStates.Running,
+        cancellationToken
+      ) is
+      { } running
+    )
+    {
+      return running;
+    }
+
+    await EnsureSuccessAsync(call, response, cancellationToken);
+    return await ReadSandboxAsync(call, response, cancellationToken);
+  }
+
+  /// <inheritdoc />
+  /// <remarks>
+  /// Adding a port the sandbox already exposes with the same access succeeds. A port that is not
+  /// anonymous needs another way in (one user's email), which this call does not set, so the data
+  /// plane refuses <paramref name="anonymous"/> <see langword="false"/> with <c>400</c>. The port's
+  /// activation mode is the data plane's default, <c>Manual</c>: a request to a stopped sandbox
+  /// gets <c>403</c> until it is resumed.
+  /// </remarks>
+  public async Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
     bool anonymous,
     CancellationToken cancellationToken
-  ) => throw new NotImplementedException();
+  )
+  {
+    ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+    ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+    var body = JsonSerializer.SerializeToUtf8Bytes(
+      new AddPortRequest
+      {
+        Port = port,
+        Auth = new PortAuthWire { Anonymous = anonymous },
+      },
+      SandboxesJsonContext.Default.AddPortRequest
+    );
+    Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/ports/add", body);
+    SandboxResponse added;
+    using (var response = await SendAsync(call, cancellationToken))
+    {
+      if (
+        await AlreadyDoneAsync(
+          response,
+          sandboxId,
+          sandbox =>
+            sandbox.Ports.Any(exposed => exposed.Port == port && exposed.Anonymous == anonymous),
+          cancellationToken
+        ) is
+        { } exposed
+      )
+      {
+        return exposed;
+      }
+
+      await EnsureSuccessAsync(call, response, cancellationToken);
+      added = await ReadAsync(
+        call,
+        response,
+        SandboxesJsonContext.Default.SandboxResponse,
+        cancellationToken
+      );
+    }
+
+    // The data plane answers with the sandbox's ports alone, so the sandbox is read afresh unless
+    // the answer is a whole sandbox.
+    return added is { Id: not null, State: not null }
+      ? ToView(call, added)
+      : await GetRequiredAsync(call, sandboxId, cancellationToken);
+  }
+
+  private static CreateSandboxRequest ToRequest(SandboxSpec spec)
+  {
+    AutoSuspendPolicyWire autoSuspend = new() { Enabled = false };
+    if (spec.AutoSuspendAfter is { } idle)
+    {
+      ArgumentOutOfRangeException.ThrowIfLessThan(idle, TimeSpan.FromSeconds(1), nameof(spec));
+      autoSuspend = new AutoSuspendPolicyWire
+      {
+        Enabled = true,
+        Interval = checked((int)Math.Ceiling(idle.TotalSeconds)),
+        // Suspends with the memory snapshot, so the renderer resumes with its browser warm.
+        Mode = "Memory",
+      };
+    }
+
+    return new CreateSandboxRequest
+    {
+      SourcesRef = new SourcesRefWire
+      {
+        DiskImage = new DiskImageWire { Id = spec.DiskImageId, IsPublic = false },
+      },
+      Resources = new ResourcesWire { Cpu = spec.Cpu, Memory = spec.Memory },
+      EgressPolicy = new EgressPolicyWire { DefaultAction = spec.EgressDefaultAction },
+      Entrypoint = spec.Entrypoint,
+      Environment = spec.Environment,
+      Labels = spec.Labels,
+      Lifecycle = new LifecycleWire { AutoSuspendPolicy = autoSuspend },
+    };
+  }
+
+  private static string SandboxPath(
+    string sandboxId,
+    [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(sandboxId))]
+      string? parameterName = null
+  )
+  {
+    ArgumentException.ThrowIfNullOrWhiteSpace(sandboxId, parameterName);
+    // Sandbox IDs are UUIDs. Anything but letters, digits, and hyphens ("..", "/", "?") could turn
+    // the request into one for another path.
+    if (!sandboxId.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+    {
+      throw new ArgumentException("A sandbox ID is letters, digits, and hyphens.", parameterName);
+    }
+
+    return "sandboxes/" + sandboxId;
+  }
+
+  /// <summary>
+  /// The data plane refuses with <c>409</c> to stop a stopped sandbox (<c>SandboxNotRunning</c>), to
+  /// resume a running one (<c>InvalidSandboxState</c>), and to add a port it already exposes
+  /// (<c>PortAlreadyExists</c>), as on a retry after an answer that was lost. Returns the sandbox when
+  /// it is already <paramref name="done"/>, so such a call succeeds; otherwise
+  /// <see langword="null"/>, and the refusal stands.
+  /// </summary>
+  private async Task<SandboxView?> AlreadyDoneAsync(
+    HttpResponseMessage response,
+    string sandboxId,
+    Func<SandboxView, bool> done,
+    CancellationToken cancellationToken
+  )
+  {
+    if (response.StatusCode != HttpStatusCode.Conflict)
+    {
+      return null;
+    }
+
+    var sandbox = await GetAsync(sandboxId, cancellationToken);
+    return sandbox is not null && done(sandbox) ? sandbox : null;
+  }
+
+  private async Task<SandboxView> GetRequiredAsync(
+    Call call,
+    string sandboxId,
+    CancellationToken cancellationToken
+  ) =>
+    await GetAsync(sandboxId, cancellationToken)
+    ?? throw new SandboxesException(
+      $"{call} succeeded, but the sandbox no longer exists.",
+      HttpStatusCode.NotFound
+    );
+
+  /// <summary>Sends <paramref name="call"/>, retrying it as the remarks on the class describe.</summary>
+  private async Task<HttpResponseMessage> SendAsync(Call call, CancellationToken cancellationToken)
+  {
+    Uri uri = new(_groupUri, call.Path + "?api-version=" + SandboxesOptions.ApiVersion);
+    for (var attempt = 0; ; attempt++)
+    {
+      var mayRetry = call.Retry && attempt < MaxRetries;
+      HttpResponseMessage response;
+      try
+      {
+        response = await SendOnceAsync(call, uri, cancellationToken);
+      }
+      catch (Exception exception) when (IsTransportFailure(exception, cancellationToken))
+      {
+        if (!mayRetry)
+        {
+          throw new SandboxesException($"{call} failed: {exception.Message}", exception);
+        }
+
+        await Task.Delay(BackOff(attempt), _time, cancellationToken);
+        continue;
+      }
+
+      if (!mayRetry || !IsTransient(response.StatusCode))
+      {
+        return response;
+      }
+
+      var delay = RetryDelay(response, attempt);
+      response.Dispose();
+      await Task.Delay(delay, _time, cancellationToken);
+    }
+  }
+
+  private async Task<HttpResponseMessage> SendOnceAsync(
+    Call call,
+    Uri uri,
+    CancellationToken cancellationToken
+  )
+  {
+    var token = await GetTokenAsync(call, cancellationToken);
+    using HttpRequestMessage request = new(call.Method, uri);
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    if (call.Body is { } body)
+    {
+      request.Content = new ByteArrayContent(body);
+      request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json")
+      {
+        CharSet = "utf-8",
+      };
+    }
+
+    // Responses are small JSON documents; reading them whole frees the connection at once.
+    return await _httpClient.SendAsync(
+      request,
+      HttpCompletionOption.ResponseContentRead,
+      cancellationToken
+    );
+  }
+
+  private async ValueTask<string> GetTokenAsync(Call call, CancellationToken cancellationToken)
+  {
+    try
+    {
+      return await _tokens.GetTokenAsync(cancellationToken);
+    }
+    catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+    {
+      throw new SandboxesException(
+        $"{call} could not get an access token for {SandboxesOptions.TokenScope}: {exception.Message}",
+        exception
+      );
+    }
+  }
+
+  /// <summary>
+  /// A failure another attempt may not meet: the request never got an answer, or
+  /// <see cref="HttpClient.Timeout"/> elapsed. The caller's own cancellation is not one.
+  /// </summary>
+  private static bool IsTransportFailure(
+    Exception exception,
+    CancellationToken cancellationToken
+  ) =>
+    exception is HttpRequestException
+    || (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested);
+
+  private static bool IsTransient(HttpStatusCode status) =>
+    status
+      is HttpStatusCode.TooManyRequests
+        or HttpStatusCode.BadGateway
+        or HttpStatusCode.ServiceUnavailable
+        or HttpStatusCode.GatewayTimeout;
+
+  private TimeSpan RetryDelay(HttpResponseMessage response, int attempt)
+  {
+    TimeSpan? retryAfter = response.Headers.RetryAfter switch
+    {
+      { Delta: { } delta } => delta,
+      { Date: { } date } => date - _time.GetUtcNow(),
+      _ => null,
+    };
+    if (retryAfter is not { } wait)
+    {
+      return BackOff(attempt);
+    }
+
+    return wait < TimeSpan.Zero ? TimeSpan.Zero
+      : wait > MaxRetryDelay ? MaxRetryDelay
+      : wait;
+  }
+
+  private static TimeSpan BackOff(int attempt) => FirstBackOff * Math.Pow(2, attempt);
+
+  private static async Task EnsureSuccessAsync(
+    Call call,
+    HttpResponseMessage response,
+    CancellationToken cancellationToken
+  )
+  {
+    if (response.IsSuccessStatusCode)
+    {
+      return;
+    }
+
+    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+    // Scrubbed before it is cut short, so no cut leaves part of a secret behind.
+    var description = Truncate(Redact(DescribeError(body), call.Secrets));
+    var status = response.StatusCode;
+    throw new SandboxesException(
+      $"{call} failed with {(int)status} ({status})"
+        + (description.Length > 0 ? ": " + description : "."),
+      status
+    );
+  }
+
+  /// <summary>
+  /// The data plane's description of an error. It answers with RFC 9457 problem details
+  /// (<c>{"title":"SandboxNotFound","detail":"..."}</c>), and for invalid requests adds
+  /// <c>errors</c>, a list of messages per field. Other shapes (<c>{"error":"..."}</c> from the port
+  /// proxy, <c>{"error":{"code","message"}}</c> from Azure Resource Manager) are read too, and
+  /// anything else is taken as text.
+  /// </summary>
+  internal static string DescribeError(string body)
+  {
+    if (string.IsNullOrWhiteSpace(body))
+    {
+      return "";
+    }
+
+    try
+    {
+      using var document = JsonDocument.Parse(body);
+      var root = document.RootElement;
+      if (root.ValueKind == JsonValueKind.Object)
+      {
+        List<string> parts = [];
+        AddString(parts, root, "title");
+        AddString(parts, root, "detail");
+        AddString(parts, root, "message");
+        if (root.TryGetProperty("error", out var error))
+        {
+          if (error.ValueKind == JsonValueKind.String)
+          {
+            parts.Add(error.GetString()!);
+          }
+          else if (error.ValueKind == JsonValueKind.Object)
+          {
+            AddString(parts, error, "code");
+            AddString(parts, error, "message");
+          }
+        }
+
+        List<string> fields = [];
+        if (
+          root.TryGetProperty("errors", out var errors)
+          && errors.ValueKind == JsonValueKind.Object
+        )
+        {
+          foreach (var field in errors.EnumerateObject())
+          {
+            if (field.Value.ValueKind != JsonValueKind.Array)
+            {
+              continue;
+            }
+
+            foreach (var message in field.Value.EnumerateArray())
+            {
+              if (message.ValueKind == JsonValueKind.String)
+              {
+                fields.Add($"{field.Name}: {message.GetString()}");
+              }
+            }
+          }
+        }
+
+        if (parts.Count > 0 || fields.Count > 0)
+        {
+          var description = string.Join(": ", parts);
+          return fields.Count == 0 ? description
+            : parts.Count == 0 ? string.Join("; ", fields)
+            : $"{description} ({string.Join("; ", fields)})";
+        }
+      }
+    }
+    catch (JsonException)
+    {
+      // Not JSON: the text itself is the description.
+    }
+
+    return body.Trim();
+  }
+
+  private static void AddString(List<string> parts, JsonElement element, string name)
+  {
+    if (
+      element.TryGetProperty(name, out var value)
+      && value.ValueKind == JsonValueKind.String
+      && value.GetString() is { Length: > 0 } text
+    )
+    {
+      parts.Add(text);
+    }
+  }
+
+  private static string Redact(string text, IEnumerable<string>? secrets)
+  {
+    if (secrets is null)
+    {
+      return text;
+    }
+
+    foreach (var secret in secrets)
+    {
+      if (secret is null || secret.Length < MinRedactedLength)
+      {
+        continue;
+      }
+
+      // As sent, and as a JSON string would escape it, should the error quote the request's JSON.
+      text = text.Replace(secret, Redacted, StringComparison.Ordinal);
+      var escaped = JsonEncodedText.Encode(secret).Value;
+      if (escaped != secret)
+      {
+        text = text.Replace(escaped, Redacted, StringComparison.Ordinal);
+      }
+    }
+
+    return text;
+  }
+
+  private static string Truncate(string text) =>
+    text.Length <= MaxErrorLength ? text : string.Concat(text.AsSpan(0, MaxErrorLength), "…");
+
+  private static async Task<SandboxView> ReadSandboxAsync(
+    Call call,
+    HttpResponseMessage response,
+    CancellationToken cancellationToken
+  ) =>
+    ToView(
+      call,
+      await ReadAsync(
+        call,
+        response,
+        SandboxesJsonContext.Default.SandboxResponse,
+        cancellationToken
+      )
+    );
+
+  private static async Task<T> ReadAsync<T>(
+    Call call,
+    HttpResponseMessage response,
+    JsonTypeInfo<T> typeInfo,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+      return await JsonSerializer.DeserializeAsync(stream, typeInfo, cancellationToken)
+        ?? throw Unexpected(call);
+    }
+    catch (JsonException exception)
+    {
+      throw Unexpected(call, exception);
+    }
+  }
+
+  private static SandboxView ToView(Call call, SandboxResponse sandbox)
+  {
+    if (string.IsNullOrEmpty(sandbox.Id) || string.IsNullOrEmpty(sandbox.State))
+    {
+      throw Unexpected(call);
+    }
+
+    List<SandboxPort> ports = [];
+    foreach (var port in sandbox.Ports ?? [])
+    {
+      // A port the proxy has no address for yet cannot be called; it is left out.
+      if (Uri.TryCreate(port.Url, UriKind.Absolute, out var url))
+      {
+        ports.Add(new SandboxPort(port.Port, url, port.Auth?.Anonymous ?? false));
+      }
+    }
+
+    return new SandboxView
+    {
+      Id = sandbox.Id,
+      State = sandbox.State,
+      Labels = sandbox.Labels ?? [],
+      Ports = ports,
+    };
+  }
+
+  private static SandboxesException Unexpected(Call call) =>
+    new($"{call} answered with a sandbox this client cannot read.");
+
+  private static SandboxesException Unexpected(Call call, JsonException exception) =>
+    new($"{call} answered with a sandbox this client cannot read.", exception);
+
+  /// <summary>
+  /// One data-plane call. Its string form names the call for messages: the method and the path
+  /// within the group, never the body.
+  /// </summary>
+  /// <param name="Method">The HTTP method.</param>
+  /// <param name="Path">The path relative to the group's address.</param>
+  /// <param name="Body">The JSON body, if any.</param>
+  /// <param name="Retry">Whether the call may be retried.</param>
+  /// <param name="Secrets">Values to scrub from error messages.</param>
+  private sealed record Call(
+    HttpMethod Method,
+    string Path,
+    byte[]? Body = null,
+    bool Retry = true,
+    IEnumerable<string>? Secrets = null
+  )
+  {
+    public override string ToString() => $"Sandboxes {Method} {Path}";
+  }
 }

@@ -1,4 +1,5 @@
 using Azure.Core;
+using Azure.Identity;
 
 namespace Atli.Reports.Hosting;
 
@@ -10,6 +11,16 @@ public static class AzureCredentials
   /// otherwise the default chain (a system-assigned managed identity in Azure, the Azure CLI
   /// locally).
   /// </summary>
+  /// <remarks>
+  /// Neither ever prompts: a service has nobody to answer a browser sign-in, so the default chain
+  /// leaves interactive credentials out and fails instead.
+  /// </remarks>
   public static TokenCredential Create(string? managedIdentityClientId) =>
-    throw new NotImplementedException();
+    string.IsNullOrWhiteSpace(managedIdentityClientId)
+      ? new DefaultAzureCredential(
+        new DefaultAzureCredentialOptions { ExcludeInteractiveBrowserCredential = true }
+      )
+      : new ManagedIdentityCredential(
+        ManagedIdentityId.FromUserAssignedClientId(managedIdentityClientId.Trim())
+      );
 }

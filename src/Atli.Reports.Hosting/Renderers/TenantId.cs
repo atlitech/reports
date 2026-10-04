@@ -20,6 +20,7 @@ public static partial class TenantId
         parameterName
       );
 
-  [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,62}$", RegexOptions.CultureInvariant)]
+  // \z, not $: $ also matches before a final newline, and "acme\n" would name another file and secret.
+  [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,62}\\z", RegexOptions.CultureInvariant)]
   private static partial Regex Pattern();
 }
