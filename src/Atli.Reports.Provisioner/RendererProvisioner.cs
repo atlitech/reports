@@ -112,6 +112,141 @@ internal sealed class RendererProvisioner
   }
 
   /// <summary>
+  /// Makes sure <paramref name="tenantId"/> has a ready renderer and record, for the provisioning
+  /// service: returns the existing record when it names a sandbox that exists (disabled or not), and
+  /// otherwise creates a renderer as <see cref="CreateAsync"/> does, or replaces the record's missing
+  /// sandbox as a rollout does. A create that another command or replica finished first counts as
+  /// found, not failed.
+  /// </summary>
+  public async Task<EnsureResult> EnsureAsync(
+    string tenantId,
+    RendererSize size,
+    string diskImageId,
+    CancellationToken cancellationToken
+  )
+  {
+    var (record, found) = await LookUpAsync(tenantId, cancellationToken);
+    if (found)
+    {
+      return new EnsureResult(record!, Created: false);
+    }
+
+    if (record is not null)
+    {
+      Log(tenantId, $"Sandbox {record.SandboxId} of the record no longer exists; replacing it.");
+    }
+
+    try
+    {
+      // A missing sandbox is replaced as a rollout replaces one, but there is nothing to retire.
+      var (created, _) = await LaunchAsync(
+        tenantId,
+        size,
+        diskImageId,
+        replacing: record,
+        cancellationToken
+      );
+      Log(tenantId, $"The record now points to sandbox {created.SandboxId}.");
+      return new EnsureResult(created, Created: true);
+    }
+    catch (Exception exception)
+      when (exception is not OperationCanceledException
+        || !cancellationToken.IsCancellationRequested
+      )
+    {
+      // The launch deleted its own sandbox. If another command or replica gave the tenant a
+      // renderer meanwhile (the record's compare-and-swap is what discarded this launch), that
+      // renderer is the answer.
+      if (await LookUpWinnerAsync(tenantId, record, cancellationToken) is { } winner)
+      {
+        Log(
+          tenantId,
+          $"Another command or replica gave the tenant sandbox {winner.SandboxId} meanwhile; "
+            + "this launch was discarded."
+        );
+        return new EnsureResult(winner, Created: false);
+      }
+
+      throw;
+    }
+  }
+
+  /// <summary>
+  /// The tenant's record when <see cref="EnsureAsync"/> would return it as found: it names a
+  /// sandbox that exists (disabled or not), or no sandbox at all, as a renderer that is not a
+  /// sandbox. <see langword="null"/> when there is no record or its sandbox is gone. Throws
+  /// <see cref="ProvisioningException"/> for a record that cannot be read.
+  /// </summary>
+  public async Task<RendererRecord?> FindAsync(
+    string tenantId,
+    CancellationToken cancellationToken
+  ) => await LookUpAsync(tenantId, cancellationToken) is (var record, true) ? record : null;
+
+  /// <summary>
+  /// Reads the tenant's record and, when it names a sandbox, whether that sandbox exists: a
+  /// data-plane read that does not answer <c>404</c>. <c>Found</c> is <see langword="false"/> when
+  /// there is no record, or when <c>Record</c> names a sandbox that is gone.
+  /// </summary>
+  private async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
+    string tenantId,
+    CancellationToken cancellationToken
+  )
+  {
+    RendererRecord? record;
+    try
+    {
+      record = await _records.GetAsync(tenantId, cancellationToken);
+    }
+    catch (InvalidDataException exception)
+    {
+      throw new ProvisioningException(
+        $"Tenant {tenantId} has a record that cannot be read ({exception.Message}); fix it, or "
+          + "delete the tenant.",
+        exception
+      );
+    }
+
+    if (record?.SandboxId is not { } sandboxId)
+    {
+      return (record, record is not null);
+    }
+
+    return (record, await _sandboxes.GetAsync(sandboxId, cancellationToken) is not null);
+  }
+
+  /// <summary>
+  /// After a launch for <see cref="EnsureAsync"/> failed: the renderer another command or replica
+  /// recorded for the tenant meanwhile, or <see langword="null"/> when there is none, or it cannot
+  /// be read. <paramref name="read"/> is the record the launch meant to replace.
+  /// </summary>
+  private async Task<RendererRecord?> LookUpWinnerAsync(
+    string tenantId,
+    RendererRecord? read,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      return
+        await LookUpAsync(tenantId, cancellationToken) is (var current, true)
+        && (
+          read is null
+          || !string.Equals(current!.SandboxId, read.SandboxId, StringComparison.Ordinal)
+        )
+        ? current
+        : null;
+    }
+    catch (Exception exception)
+      when (exception is not OperationCanceledException
+        || !cancellationToken.IsCancellationRequested
+      )
+    {
+      // The launch's own failure is the one to report.
+      return null;
+    }
+  }
+
+  /// <summary>
   /// Replaces every renderer, or <paramref name="tenantId"/>'s, that runs another disk image than
   /// <paramref name="diskImageId"/> or whose sandbox no longer exists, suspended ones included. Each
   /// replacement is created as <see cref="CreateAsync"/> creates one, with a new credential and the
@@ -135,20 +270,6 @@ internal sealed class RendererProvisioner
   /// </param>
   /// <param name="drain">How long an old renderer stays after its record moves.</param>
   /// <param name="cancellationToken">Cancels the rollout; replacements not yet recorded are deleted.</param>
-  /// <summary>
-  /// Makes sure <paramref name="tenantId"/> has a ready renderer and record, for the provisioning
-  /// service: returns the existing record when it names a sandbox that exists (disabled or not), and
-  /// otherwise creates a renderer as <see cref="CreateAsync"/> does, or replaces the record's missing
-  /// sandbox as a rollout does. A create that another command or replica finished first counts as
-  /// found, not failed.
-  /// </summary>
-  public Task<EnsureResult> EnsureAsync(
-    string tenantId,
-    RendererSize size,
-    string diskImageId,
-    CancellationToken cancellationToken
-  ) => throw new NotImplementedException();
-
   public async Task<RolloutResult> RolloutAsync(
     string diskImageId,
     string? tenantId,
@@ -1401,9 +1522,7 @@ internal sealed record RolloutResult(
   IReadOnlyList<string> Pruned
 );
 
-/// <summary>What a prune did.</summary>
-/// <param name="Deleted">The leftover renderer sandboxes deleted.</param>
-/// <param name="Failures">Each tenant whose leftover could not be deleted, with the reason.</param>
+/// <summary>What ensuring a tenant's renderer did.</summary>
 /// <param name="Record">The tenant's record.</param>
 /// <param name="Created">Whether the call created the renderer rather than finding it.</param>
 internal sealed record EnsureResult(RendererRecord Record, bool Created);
@@ -1415,6 +1534,9 @@ internal sealed record RetireResult(
   IReadOnlyDictionary<string, string> Failures
 );
 
+/// <summary>What a prune did.</summary>
+/// <param name="Deleted">The leftover renderer sandboxes deleted.</param>
+/// <param name="Failures">Each tenant whose leftover could not be deleted, with the reason.</param>
 internal sealed record PruneResult(
   IReadOnlyList<string> Deleted,
   IReadOnlyDictionary<string, string> Failures
