@@ -85,6 +85,12 @@ internal sealed class LogCapture : ILoggerProvider
 
   public void Dispose() { }
 
+  /// <summary>
+  /// Called with each entry as it is logged, on the logging thread, before the code that logged it
+  /// goes on: a test can act at exactly that point.
+  /// </summary>
+  public Action<LogEntry>? Logged { get; set; }
+
   private void Add(LogEntry entry)
   {
     lock (_lock)
@@ -93,6 +99,8 @@ internal sealed class LogCapture : ILoggerProvider
       _added.SetResult();
       _added = NewSignal();
     }
+
+    Logged?.Invoke(entry);
   }
 
   private void AddScope(string? scope)

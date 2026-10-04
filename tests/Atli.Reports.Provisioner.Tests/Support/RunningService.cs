@@ -45,6 +45,9 @@ internal sealed class RunningService : IAsyncDisposable
 
   public LogCapture Logs { get; }
 
+  /// <summary>The service's own services, such as its <see cref="ManagedRenderers"/>.</summary>
+  public IServiceProvider Services => _app.Services;
+
   /// <summary>What <see cref="ProvisioningService.ServeAsync"/> returned, once stopped.</summary>
   public Task<int> Serving => _serving;
 
