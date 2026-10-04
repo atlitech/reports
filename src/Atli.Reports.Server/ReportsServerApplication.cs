@@ -1,5 +1,6 @@
 using Atli.Reports.Engine;
 using Atli.Reports.Server.Endpoints;
+using Atli.Reports.Server.Gateway;
 using Atli.Reports.Server.Health;
 using Atli.Reports.Server.OpenApi;
 using Atli.Reports.Server.Security;
@@ -12,7 +13,8 @@ namespace Atli.Reports.Server;
 /// <summary>
 /// Builds the reports server: the <c>/convert</c> endpoint and the health endpoints over the reports
 /// engine, the OpenAPI document that describes <c>/convert</c>, and the OTLP export of its telemetry
-/// when an endpoint is configured.
+/// when an endpoint is configured. In gateway mode (<c>ReportsServer:Mode=Gateway</c>) the same
+/// endpoints route each conversion to the caller's tenant's renderer instead, and no engine runs.
 /// </summary>
 public static class ReportsServerApplication
 {
@@ -41,14 +43,19 @@ public static class ReportsServerApplication
       )
       .ValidateOnStart();
 
-    // These are server defaults, even if appsettings.json is absent or the content root changes.
-    // Configuration binding below can explicitly opt into a different network policy.
-    builder.Services.Configure<ReportsEngineOptions>(options =>
-      options.Network.Mode = ReportsEngineNetworkMode.Disabled
-    );
-    builder.Services.AddReportsEngine(
-      builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
-    );
+    // Gateway mode registers neither the engine nor its browser checks; everything else is shared.
+    var mode = GatewayOptions.ReadMode(builder.Configuration);
+    if (mode == ReportsServerMode.Integrated)
+    {
+      // These are server defaults, even if appsettings.json is absent or the content root changes.
+      // Configuration binding below can explicitly opt into a different network policy.
+      builder.Services.Configure<ReportsEngineOptions>(options =>
+        options.Network.Mode = ReportsEngineNetworkMode.Disabled
+      );
+      builder.Services.AddReportsEngine(
+        builder.Configuration.GetSection(ReportsEngineOptions.SectionName)
+      );
+    }
 
     // Kestrel binds its endpoints from the Kestrel section but not its limits, so
     // Kestrel__Limits__MaxRequestBodySize and the other KestrelServerLimits need binding here.
@@ -82,17 +89,25 @@ public static class ReportsServerApplication
 
     // Both checks gate readiness only. A browser that cannot start takes the server out of rotation
     // while the engine retries the launch in the background; restarting the process would not repair
-    // it, so liveness asks no more than that the server answers.
-    builder
-      .Services.AddHealthChecks()
-      .AddReportsEngineBrowserCheck("browser", tags: ["ready"])
-      .AddReportsEngineConversionCheck("conversion_health", tags: ["ready"]);
+    // it, so liveness asks no more than that the server answers. Gateway mode adds its own check.
+    var healthChecks = builder.Services.AddHealthChecks();
+    if (mode == ReportsServerMode.Integrated)
+    {
+      healthChecks
+        .AddReportsEngineBrowserCheck("browser", tags: ["ready"])
+        .AddReportsEngineConversionCheck("conversion_health", tags: ["ready"]);
+    }
 
     builder.AddServerTelemetry();
 
     builder.Services.AddServerOpenApi();
 
     configure?.Invoke(builder);
+    if (mode == ReportsServerMode.Gateway)
+    {
+      builder.AddReportsGateway();
+    }
+
     builder.AddReportsSecurity();
 
     var app = builder.Build();
@@ -106,6 +121,11 @@ public static class ReportsServerApplication
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseReportsAdmission();
+    if (mode == ReportsServerMode.Gateway)
+    {
+      // After caller admission: the caller's limits and deadline cover the tenant's too.
+      app.UseReportsGateway();
+    }
 
     app.MapConvertEndpoints();
 

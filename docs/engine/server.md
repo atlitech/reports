@@ -159,6 +159,89 @@ Authenticated admission defaults to 10 MiB per request and four in-flight reques
   `Kestrel__Limits__MaxRequestHeadersTotalSize`, `Kestrel__Limits__KeepAliveTimeout`, or
   `Kestrel__Limits__Http2__MaxStreamsPerConnection`.
 
+## Gateway mode
+
+`ReportsServer:Mode=Gateway` makes the server the shared API of the
+[hosted renderer design](../hosted-renderers.md). It authenticates callers as usual, resolves each
+conversion's product tenant from the caller's identity, and relays the conversion to that tenant's
+own renderer: this server in integrated mode, admitting only the gateway's credential for it. The
+gateway registers no engine and starts no browser. `POST /convert` and its problem details,
+authentication, caller admission and deadline, OpenAPI, `/health/*`, and telemetry work as described
+above, so clients do not change. `Integrated`, the default, is everything else on this page; any
+other mode fails at startup.
+
+The settings bind once from `ReportsServer:Gateway` and are validated at startup, like the
+security settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None`) and its product tenants: 1 to 63 lowercase letters, digits, and hyphens |
+| `TenantHeader` | `X-Reports-Tenant` | The header a caller with several tenants names one in |
+| `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
+| `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, and its sandbox ID if it is a sandbox |
+| `Records:CacheDuration` | `00:00:30` | How long a record lookup is reused; a missing record is reused for 5 seconds at most |
+| `Wake:Mode` | `None` | `Sandboxes` resumes suspended Azure Container Apps sandboxes |
+| `Wake:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region`, `ManagedIdentityClientId` | | The renderers' sandbox group, for `Sandboxes` |
+| `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
+| `RendererTimeout` | `00:01:30` | The deadline of one forwarded conversion, from the record lookup to the PDF's last byte |
+| `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
+| `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers |
+| `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
+
+```text
+ReportsServer__Mode=Gateway
+ReportsServer__Gateway__Tenants__0__CallerId=billing-app
+ReportsServer__Gateway__Tenants__0__Tenants__0=contoso
+ReportsServer__Gateway__Records__Store=KeyVault
+ReportsServer__Gateway__Records__VaultUri=https://reports-renderers.vault.azure.net/
+ReportsServer__Gateway__Wake__Mode=Sandboxes
+ReportsServer__Gateway__Wake__Sandboxes__SubscriptionId=<subscription-id>
+ReportsServer__Gateway__Wake__Sandboxes__ResourceGroup=reports
+ReportsServer__Gateway__Wake__Sandboxes__SandboxGroup=renderers
+ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
+```
+
+- **The tenant comes from the caller's identity, never from the body.** A caller with no tenant
+  gets the authorization `403` (`Forbidden`). A caller with one tenant needs no header, and a
+  header that names another tenant is a `403`. A caller with several must name one in
+  `TenantHeader`: a missing header (or the header sent twice) is a `400` (`InvalidRequest`), and a
+  tenant it does not belong to is a `403`. This runs after caller admission and before the body
+  is read. A tenant at `MaxConcurrentRequestsPerTenant` gets `503` `Busy` with `Retry-After: 1`;
+  nothing queues.
+- **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
+  record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
+  the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no
+  headers, credentials, cookies, or trace context. Redirects are not followed, and a conversion is
+  not retried except while a renderer wakes. A tenant without a record, a record store that fails,
+  and a renderer that cannot be reached are `503` `BrowserUnavailable`.
+- **The renderer's answer is untrusted.** A `200` counts only as `application/pdf` with framed
+  length (chunked or `Content-Length`) whose first bytes are `%PDF-`, checked before the caller's
+  response starts; otherwise the caller gets `500` `RenderFailed`. The PDF then streams through
+  with a byte count. A PDF over `MaxPdfBytes`, a body cut short or reset, and `RendererTimeout`
+  after the first byte abort the caller's connection, as any failure after the first byte does.
+  Before it, `RendererTimeout` is a `504` `Timeout`.
+- **Renderer errors.** The gateway reads at most 16 KiB of an error body. A problem's `kind` is
+  kept if it names a `ConversionErrorKind` other than `Canceled`, and the gateway's own status and
+  `Retry-After` follow from it. Only `InvalidRequest`, `SignalTimeout`, and `PolicyDenied` pass the
+  renderer's `detail` on, without control characters and cut to 512 characters; every other kind
+  gets the gateway's fixed message. A renderer `401`, or a `403` problem, means the gateway's
+  credential is wrong: the caller gets `503` `BrowserUnavailable`, and the gateway logs an error.
+  Other answers are `BrowserUnavailable` for `5xx` and `RenderFailed` otherwise.
+- **Waking renderers.** With `Wake:Mode=Sandboxes` and a record with a `SandboxId`, the platform's
+  `403 {"error":"Sandbox is not running"}` (not the renderer's own problem details) makes the
+  gateway resume the sandbox and send the conversion again. Concurrent requests share one resume
+  per sandbox. Within `Wake:Timeout` the gateway also resends after `502`, `503`, and further
+  not-running answers, waiting 250 ms and up to 1 s between them; after it the caller gets `503`
+  `BrowserUnavailable`. The gateway's identity needs only `sandboxes/read` and
+  `sandboxes/resume/action` on the group.
+- **Readiness.** `/health/ready` has one check, `renderer_records`: always healthy for the
+  `Configuration` store, and for the others healthy when the store listed its records within the
+  last 30 seconds. `/health/live` is unchanged.
+- **Logs and traces.** The gateway logs tenant and sandbox IDs, never HTML, PDFs, credentials, or
+  tokens: events 40 to 51 for forwarding (44, an error, is a rejected credential), 52 and 53 for
+  refused tenants and full tenants, and 60 to 62 for resumes. The request span carries the tenant
+  as `atli.reports.tenant`.
+
 ## Telemetry
 
 The server exports logs, metrics, and traces over OTLP once `OTEL_EXPORTER_OTLP_ENDPOINT` is set.

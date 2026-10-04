@@ -44,7 +44,11 @@ internal sealed class LogCollector : ILoggerProvider
           logLevel,
           eventId.Id,
           formatter(state, exception),
-          state as IReadOnlyList<KeyValuePair<string, object?>> ?? []
+          // Copied now: some generators (the server's, through Microsoft.Extensions.Telemetry)
+          // pool their state and clear it once Log returns.
+          state is IReadOnlyList<KeyValuePair<string, object?>> values
+            ? [.. values]
+            : []
         )
       );
   }
