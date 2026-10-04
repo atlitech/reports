@@ -5,20 +5,20 @@ namespace Atli.Reports.Server.Gateway;
 
 /// <summary>
 /// Resolves the product tenant of a conversion from the authenticated caller's configured
-/// membership. The tenant header is only a selector among the caller's own tenants; the body never
-/// takes part.
+/// membership: the tenants it lists, and every valid tenant ID under one of its tenant prefixes.
+/// The tenant header is only a selector among the caller's own tenants; the body never takes part.
 /// </summary>
 internal sealed class TenantMembership(GatewayOptions options)
 {
-  private readonly Dictionary<string, string[]> _tenants = options.Tenants.ToDictionary(
+  private readonly Dictionary<string, Membership> _callers = options.Tenants.ToDictionary(
     membership => membership.CallerId,
-    membership => membership.Tenants,
+    membership => new Membership(membership.Tenants, membership.TenantPrefixes),
     StringComparer.Ordinal
   );
 
   public TenantResolution Resolve(string callerId, StringValues header)
   {
-    if (!_tenants.TryGetValue(callerId, out var tenants))
+    if (!_callers.TryGetValue(callerId, out var membership))
     {
       return new(null, TenantRejection.NoTenants);
     }
@@ -29,19 +29,35 @@ internal sealed class TenantMembership(GatewayOptions options)
     }
 
     // An empty value names no tenant, as if the header were absent: a client that always sends the
-    // header, empty when it has nothing to name, gets the same answer as one that omits it.
+    // header, empty when it has nothing to name, gets the same answer as one that omits it. Only a
+    // caller with one tenant and no prefix has a tenant to fall back on.
     if (header.Count == 0 || string.IsNullOrEmpty(header[0]))
     {
-      return tenants.Length == 1
-        ? new(tenants[0], TenantRejection.None)
+      return membership is { Tenants.Length: 1, Prefixes.Length: 0 }
+        ? new(membership.Tenants[0], TenantRejection.None)
         : new(null, TenantRejection.HeaderRequired);
     }
 
+    // A listed tenant is the operator's even when it is also under one of the caller's prefixes.
     var requested = header[0];
-    return Array.IndexOf(tenants, requested) >= 0
-      ? new(requested, TenantRejection.None)
-      : new(null, TenantRejection.NotMember);
+    if (Array.IndexOf(membership.Tenants, requested) >= 0)
+    {
+      return new(requested, TenantRejection.None);
+    }
+
+    // A caller has few prefixes, so a linear scan is cheap.
+    foreach (var prefix in membership.Prefixes)
+    {
+      if (TenantPrefix.Owns(prefix, requested))
+      {
+        return new(requested, TenantRejection.None, ViaPrefix: true);
+      }
+    }
+
+    return new(null, TenantRejection.NotMember);
   }
+
+  private sealed record Membership(string[] Tenants, string[] Prefixes);
 }
 
 /// <param name="TenantId">The verified tenant, or <see langword="null"/> when rejected.</param>
@@ -67,7 +83,10 @@ internal enum TenantRejection
   /// <summary>The header names a tenant the caller does not belong to: 403.</summary>
   NotMember,
 
-  /// <summary>The caller belongs to several tenants and named none (or an empty one): 400.</summary>
+  /// <summary>
+  /// The caller belongs to several tenants, or has a tenant prefix, and named none (or an empty
+  /// one): 400.
+  /// </summary>
   HeaderRequired,
 
   /// <summary>The header appears more than once, so which tenant is meant is ambiguous: 400.</summary>

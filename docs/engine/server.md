@@ -176,7 +176,7 @@ security settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: 1 to 63 lowercase letters, digits, and hyphens. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers` |
+| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other), and no caller may list a tenant under another's prefix. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
 | `TenantHeader` | `X-Reports-Tenant` | The header a caller with several tenants names one in |
 | `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
 | `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId`, `MaxConcurrentRequests` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, its sandbox ID if it is a sandbox, and how many requests it admits at once |
@@ -205,11 +205,18 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
 ```
 
 - **The tenant comes from the caller's identity, never from the body.** A caller with no tenant
-  gets the authorization `403` (`Forbidden`). A caller with one tenant needs no header, and a
-  header that names another tenant is a `403`. A caller with several must name one in
-  `TenantHeader`: a missing header (or the header sent twice) is a `400` (`InvalidRequest`), and a
-  tenant it does not belong to is a `403`. An empty header counts as a missing one, so it selects
-  a single-tenant caller's tenant and is a `400` for a caller with several. This runs after caller
+  gets the authorization `403` (`Forbidden`). A caller with one listed tenant and no prefix needs
+  no header, and a header that names another tenant is a `403`. Any other caller, with several
+  tenants or a prefix, must name one in `TenantHeader`: a missing header (or the header sent
+  twice) is a `400` (`InvalidRequest`), and a tenant it does not belong to is a `403`. The header
+  names one of the caller's tenants when the caller lists it, or when one of its prefixes owns it:
+  a valid tenant ID that starts with the prefix and continues past it. The prefix alone, a tenant
+  under another caller's prefix, and an invalid tenant ID are all `403`s. A tenant that is both
+  listed and under one of the caller's prefixes counts as listed. An empty header counts as a
+  missing one, so it selects a single-tenant caller's tenant and is a `400` for any other caller.
+  The gateway lets a caller use every tenant under its prefixes and knows nothing of the caller's
+  own users, so an application that gives each of its workspaces a tenant must check that the
+  signed-in user may use a workspace before naming the workspace's tenant. This runs after caller
   admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
   or this replica's share of its record's `MaxConcurrentRequests` (the requests its renderer
   admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant at its
