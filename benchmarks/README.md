@@ -47,7 +47,13 @@ switch, and deleting a tenant, with [`e2e.py`](azure-sandboxes/e2e.py). The
 the gateway as a Container App behind a NAT gateway, with Key Vault records, a managed identity,
 and renderers in a virtual network without DNS, and measures hardening, creates, wakes, warm
 latency, 15 minutes of load with one and two gateway replicas, and a rollout under load, with
-[`production.py`](azure-sandboxes/production.py).
+[`production.py`](azure-sandboxes/production.py). The
+[workspaces run](results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md) adds the
+provisioning service, which creates a renderer on each workspace's first conversion, for two
+applications with tenant prefixes: isolation, a burst of new workspaces, quotas, fairness under a
+flood of new tenant IDs, steady use, deletes, the kill switch, retirement, a rollout that retires
+stopped renderers, and leftover cleanup, with [`workspaces.py`](azure-sandboxes/workspaces.py) and
+[`workspace-client.py`](azure-sandboxes/workspace-client.py).
 
 ## What runs
 
