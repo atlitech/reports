@@ -8,7 +8,8 @@ namespace Atli.Reports.Hosting.Tests.Sandboxes;
 
 /// <summary>
 /// What each call sends to the data plane, and how the client reads the answers. The answers are the
-/// shapes the data plane gave on api-version 2026-02-01-preview.
+/// shapes the data plane gave on api-version 2026-02-01-preview, and for listings on
+/// 2026-09-01-preview.
 /// </summary>
 public class SandboxesClientRequestTests
 {
@@ -16,6 +17,10 @@ public class SandboxesClientRequestTests
     "https://management.eastus2.azuredevcompute.io/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/";
 
   private const string Id = "98c01b65-b81b-4dca-b000-fdae0eb0939c";
+
+  /// <summary>The first page of a listing: the paged API version, a page of 100.</summary>
+  private const string FirstPage =
+    GroupUri + "sandboxes?api-version=2026-09-01-preview&pageSize=100";
 
   private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
 
@@ -278,11 +283,14 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
-  public async Task List_reads_the_array_of_sandboxes()
+  public async Task List_reads_a_page_of_sandboxes_on_the_paged_api_version()
   {
     using TestSandboxes sandboxes = new(
       FakeDataPlane.Ok(
-        $"[{FakeDataPlane.Sandbox(Id, "Running")}, {FakeDataPlane.Sandbox("other", "Stopped")}]"
+        $$"""{"value": [{{FakeDataPlane.Sandbox(Id, "Running")}}, {{FakeDataPlane.Sandbox(
+          "other",
+          "Stopped"
+        )}}]}"""
       )
     );
 
@@ -290,9 +298,8 @@ public class SandboxesClientRequestTests
 
     var request = sandboxes.Plane.Requests.Single();
     await Assert.That(request.Method).IsEqualTo(HttpMethod.Get);
-    await Assert
-      .That(request.Uri.ToString())
-      .IsEqualTo(GroupUri + "sandboxes?api-version=2026-02-01-preview");
+    await Assert.That(request.Uri.ToString()).IsEqualTo(FirstPage);
+    await Assert.That(request.Authorization).IsEqualTo("Bearer token-1");
     await Assert
       .That(listed.Select(sandbox => sandbox.Id))
       .IsEquivalentTo([Id, "other"], CollectionOrdering.Matching);
@@ -302,9 +309,178 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
+  public async Task List_follows_every_next_link_to_the_last_page()
+  {
+    var second = FirstPage + "&skipToken=page-2";
+    var third = FirstPage + "&skipToken=page-3";
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(Page(second, Id, "a")),
+      FakeDataPlane.Ok(Page(third, "b")),
+      FakeDataPlane.Ok(Page(null, "c"))
+    );
+
+    var listed = await sandboxes.Client.ListAsync(TestToken);
+
+    await Assert
+      .That(sandboxes.Plane.Requests.Select(request => request.Uri.ToString()))
+      .IsEquivalentTo([FirstPage, second, third], CollectionOrdering.Matching);
+    await Assert
+      .That(sandboxes.Plane.Requests.All(request => request.Authorization == "Bearer token-1"))
+      .IsTrue();
+    await Assert
+      .That(listed.Select(sandbox => sandbox.Id))
+      .IsEquivalentTo([Id, "a", "b", "c"], CollectionOrdering.Matching);
+  }
+
+  [Test]
+  public async Task List_lists_a_sandbox_on_two_pages_once_as_the_later_page_has_it()
+  {
+    var second = FirstPage + "&skipToken=page-2";
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(
+        $$"""{"value": [{{FakeDataPlane.Sandbox(Id, "Running")}}], "nextLink": "{{second}}"}"""
+      ),
+      FakeDataPlane.Ok(
+        $$"""{"value": [{{FakeDataPlane.Sandbox("other", "Running")}}, {{FakeDataPlane.Sandbox(
+          Id,
+          "Stopped"
+        )}}]}"""
+      )
+    );
+
+    var listed = await sandboxes.Client.ListAsync(TestToken);
+
+    await Assert
+      .That(listed.Select(sandbox => sandbox.Id))
+      .IsEquivalentTo([Id, "other"], CollectionOrdering.Matching);
+    await Assert.That(listed[0].State).IsEqualTo(SandboxStates.Stopped);
+  }
+
+  [Test]
+  [Arguments(
+    "https://elsewhere.example/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/sandboxes?skipToken=2"
+  )]
+  [Arguments(
+    "http://management.eastus2.azuredevcompute.io/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/sandboxes?skipToken=2"
+  )]
+  [Arguments(
+    "https://management.eastus2.azuredevcompute.io:8443/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/sandboxes?skipToken=2"
+  )]
+  [Arguments(
+    "https://management.eastus2.azuredevcompute.io/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-2/sandboxes?skipToken=2"
+  )]
+  [Arguments(
+    "/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/sandboxes?skipToken=2"
+  )]
+  public async Task List_fails_on_a_next_link_to_another_address_without_sending_the_token_there(
+    string nextLink
+  )
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok(Page(nextLink, Id)));
+
+    var exception = await Assert
+      .That(async () => await sandboxes.Client.ListAsync(TestToken))
+      .Throws<SandboxesException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "Sandboxes GET sandboxes answered with a next page at another address; the listing is not read whole."
+      );
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task List_fails_on_a_next_link_it_has_followed_before()
+  {
+    var second = FirstPage + "&skipToken=page-2";
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(Page(second, Id)),
+      FakeDataPlane.Ok(Page(second, "other"))
+    );
+
+    var exception = await Assert
+      .That(async () => await sandboxes.Client.ListAsync(TestToken))
+      .Throws<SandboxesException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "Sandboxes GET sandboxes answered with a next page it had already given; the listing is not read whole."
+      );
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task List_stops_after_the_most_pages()
+  {
+    var pages = 0;
+    using TestSandboxes sandboxes = new(_ =>
+    {
+      pages++;
+      return FakeDataPlane.Ok(Page(FirstPage + "&skipToken=" + pages, "s" + pages))(null!);
+    });
+
+    var exception = await Assert
+      .That(async () => await sandboxes.Client.ListAsync(TestToken))
+      .Throws<SandboxesException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        $"Sandboxes GET sandboxes answered with more than {SandboxesClient.MaxListPages} pages; the listing is not read whole."
+      );
+    await Assert.That(pages).IsEqualTo(SandboxesClient.MaxListPages);
+  }
+
+  [Test]
+  public async Task List_takes_a_bare_array_shorter_than_a_page_whole()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok($"[{FakeDataPlane.Sandbox(Id, "Running")}]")
+    );
+
+    var listed = await sandboxes.Client.ListAsync(TestToken);
+
+    await Assert.That(listed.Select(sandbox => sandbox.Id)).IsEquivalentTo([Id]);
+  }
+
+  [Test]
+  public async Task List_fails_on_a_bare_array_as_long_as_a_page()
+  {
+    var full = string.Join(
+      ", ",
+      Enumerable
+        .Range(0, SandboxesClient.ListPageSize)
+        .Select(index => FakeDataPlane.Sandbox("s" + index, "Running"))
+    );
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok($"[{full}]"));
+
+    var exception = await Assert
+      .That(async () => await sandboxes.Client.ListAsync(TestToken))
+      .Throws<SandboxesException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        $"Sandboxes GET sandboxes answered with a full page of {SandboxesClient.ListPageSize} sandboxes and no link to the next; the listing is not read whole."
+      );
+  }
+
+  [Test]
+  public async Task List_fails_on_a_page_without_its_sandboxes()
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok("""{"nextLink": null}"""));
+
+    await Assert
+      .That(async () => await sandboxes.Client.ListAsync(TestToken))
+      .Throws<SandboxesException>();
+  }
+
+  [Test]
   public async Task List_of_an_empty_group_is_empty()
   {
-    using TestSandboxes sandboxes = new(FakeDataPlane.Ok("[]"));
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok("""{"value": []}"""));
 
     var listed = await sandboxes.Client.ListAsync(TestToken);
 
@@ -1079,10 +1255,16 @@ public class SandboxesClientRequestTests
 
     await client.ListAsync(TestToken);
 
-    await Assert
-      .That(plane.Requests.Single().Uri.ToString())
-      .IsEqualTo(GroupUri + "sandboxes?api-version=2026-02-01-preview");
+    await Assert.That(plane.Requests.Single().Uri.ToString()).IsEqualTo(FirstPage);
   }
+
+  /// <summary>A page of the listing on the paged API version, with its next link if any.</summary>
+  private static string Page(string? nextLink, params string[] ids) =>
+    "{\"value\": ["
+    + string.Join(", ", ids.Select(id => FakeDataPlane.Sandbox(id, "Running")))
+    + "]"
+    + (nextLink is null ? "" : $", \"nextLink\": \"{nextLink}\"")
+    + "}";
 
   private static SandboxSpec Spec() =>
     new()

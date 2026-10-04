@@ -5,6 +5,7 @@ using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Service;
 using Atli.Reports.Provisioner.Tests.Support;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TUnit.Assertions.Enums;
 
@@ -480,6 +481,52 @@ public class ServiceTests
     await Assert.That(afterDeleting.StatusCode).IsEqualTo(HttpStatusCode.OK);
     // One listing served every count: it is kept for TenantCensus.MaxAge.
     await Assert.That(records.Listings).IsEqualTo(1);
+  }
+
+  [Test]
+  public async Task A_creation_that_ends_never_counts_its_tenant_twice_toward_the_quota()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.TenantPrefixes[0].MaxTenants = 2
+    );
+    var renderers = service.Services.GetRequiredService<ManagedRenderers>();
+    // The creation runs without the test's execution context, so the callback cannot read it.
+    var token = TestToken;
+    TaskCompletionSource<Task<RendererOutcome>> asked = new(
+      TaskCreationOptions.RunContinuationsAsynchronously
+    );
+    // A new tenant asked for at the moment myapp-a's creation reports its renderer: the prefix has
+    // one renderer and room for another. Measured on Azure, such a request was refused as over
+    // the quota while the census already counted the new record and the creation still counted
+    // as in flight.
+    service.Logs.Logged = entry =>
+    {
+      if (
+        entry.Category == typeof(ManagedRenderers).FullName
+        && entry.EventId.Id == 1
+        && entry.Message.Contains("myapp-a", StringComparison.Ordinal)
+      )
+      {
+        try
+        {
+          asked.TrySetResult(renderers.EnsureAsync("myapp-b", token));
+        }
+        catch (Exception exception)
+        {
+          asked.TrySetException(exception);
+        }
+      }
+    };
+
+    using var first = await service.PutAsync("myapp-a", token);
+    var meanwhile = await (await asked.Task.WaitAsync(token));
+    using var third = await service.PutAsync("myapp-c", token);
+
+    await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(meanwhile.Answer).IsEqualTo(RendererAnswer.Created);
+    await AssertProblemAsync(third, HttpStatusCode.TooManyRequests, "QuotaExceeded");
   }
 
   [Test]

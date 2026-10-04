@@ -368,7 +368,19 @@ internal sealed partial class ManagedRenderers : IDisposable
     try
     {
       var result = await _provisioner.EnsureAsync(tenantId, size, _options.DiskImageId, _stopping);
-      _census.Recorded(tenantId);
+      // The census counts the record from now on, and the creation stops counting as in flight, in
+      // one step under the lock the quota is checked under: otherwise a check in between would
+      // count the tenant twice, and refuse a new tenant while its prefix still has room.
+      lock (_lock)
+      {
+        _census.Recorded(tenantId);
+        if (counted)
+        {
+          _creatingNew[prefix]--;
+          counted = false;
+        }
+      }
+
       if (result.Created)
       {
         LogCreated(_logger, tenantId, result.Record.SandboxId, size.Name);
@@ -388,7 +400,8 @@ internal sealed partial class ManagedRenderers : IDisposable
     }
     finally
     {
-      // The census counts the record now, if there is one.
+      // A creation that failed or was canceled stops counting as in flight; a record it may still
+      // have written counts from the census's next listing.
       if (counted)
       {
         lock (_lock)
