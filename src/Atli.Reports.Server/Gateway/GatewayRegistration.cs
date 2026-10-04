@@ -135,7 +135,7 @@ internal static partial class GatewayRegistration
         )
       );
 
-    // Callers with several tenants name one in this header; the document says so.
+    // Callers name their tenant in this header, unless they have only one; the document says so.
     services.Configure<OpenApiOptions>(
       "v1",
       options =>
@@ -156,7 +156,7 @@ internal static partial class GatewayRegistration
                   In = ParameterLocation.Header,
                   Required = false,
                   Description =
-                    "The product tenant to convert for, when the caller belongs to several; it must be one of them. Callers with one tenant may omit it.",
+                    "The product tenant to convert for: one the caller lists, or one under one of its tenant prefixes. A caller with one listed tenant and no prefix may omit it.",
                   Schema = new OpenApiSchema
                   {
                     Type = JsonSchemaType.String,
@@ -237,7 +237,7 @@ internal static partial class GatewayRegistration
               new ConversionError(
                 ConversionErrorKind.InvalidRequest,
                 resolution.Rejection == TenantRejection.HeaderRequired
-                  ? $"The caller belongs to several product tenants. Name one in the {settings.TenantHeader} header."
+                  ? $"Name the product tenant in the {settings.TenantHeader} header."
                   : $"Send the {settings.TenantHeader} header once."
               )
             );
