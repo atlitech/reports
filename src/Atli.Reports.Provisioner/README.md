@@ -242,7 +242,8 @@ atli-reports-provisioner enable --tenant contoso
 `disable` disables every sandbox labeled for the tenant: the platform stops it and refuses to start
 it again, whether a request reaches its on-demand port (`403`) or something resumes it
 (`409 SandboxAdminDisabled`), until `enable`. The record and the sandbox's disk stay, for
-investigation; the tenant's conversions fail meanwhile. Every sandbox is tried even when one
+investigation; the tenant's conversions fail meanwhile, with `503` from the gateway at once,
+whether its `Wake:Mode` is `None` or `Sandboxes`. Every sandbox is tried even when one
 fails, and the command then exits with `1`. A sandbox the record names that is labeled for another
 tenant is left alone. `enable` lets the tenant's sandboxes start again; they stay stopped until a
 request or a resume starts them.

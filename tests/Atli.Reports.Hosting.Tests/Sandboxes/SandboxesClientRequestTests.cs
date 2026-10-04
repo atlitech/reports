@@ -142,6 +142,42 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
+  [Arguments("Stopped", "Disabled", true)]
+  [Arguments("Stopped", "UserStopped", false)]
+  [Arguments("Stopped", "Idle", false)]
+  // The data plane keeps the last reason after a resume.
+  [Arguments("Running", "Disabled", false)]
+  public async Task Get_reads_why_a_sandbox_stopped(string state, string reason, bool disabled)
+  {
+    // As the data plane answered for a disabled sandbox on 2026-10-04.
+    var json = $$"""
+      {
+        "id": "{{Id}}",
+        "state": "{{state}}",
+        "stateDetails": { "stoppedReason": "{{reason}}", "stoppedAt": "2026-10-04T03:58:04.6124235+00:00" },
+        "ports": []
+      }
+      """;
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok(json));
+
+    var sandbox = await sandboxes.Client.GetAsync(Id, TestToken);
+
+    await Assert.That(sandbox!.StoppedReason).IsEqualTo(reason);
+    await Assert.That(sandbox.IsDisabled).IsEqualTo(disabled);
+  }
+
+  [Test]
+  public async Task Get_without_state_details_has_no_stopped_reason()
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running")));
+
+    var sandbox = await sandboxes.Client.GetAsync(Id, TestToken);
+
+    await Assert.That(sandbox!.StoppedReason).IsNull();
+    await Assert.That(sandbox.IsDisabled).IsFalse();
+  }
+
+  [Test]
   public async Task Get_reads_the_sandbox_and_its_ports()
   {
     var ports = $$"""

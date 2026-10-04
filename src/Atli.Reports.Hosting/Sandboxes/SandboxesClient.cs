@@ -923,6 +923,7 @@ public sealed class SandboxesClient : ISandboxesClient
     {
       Id = sandbox.Id,
       State = sandbox.State,
+      StoppedReason = sandbox.StateDetails?.StoppedReason,
       Labels = sandbox.Labels ?? [],
       Ports = ports,
       CreatedAt = DateTimeOffset.TryParse(

@@ -244,11 +244,13 @@ internal sealed class FakeRecordStore : IRendererRecordStore
 /// A Sandboxes data plane that only reads and resumes sandboxes. <paramref name="state"/> is a
 /// sandbox's state (<see langword="null"/> for one that does not exist), or throws; each resume runs
 /// <paramref name="onResume"/>, which wakes the fake platform or fails, and answers with the state
-/// after it. Calls are counted and timed, and note the ambient activity they ran under.
+/// after it. <paramref name="stoppedReason"/>, when given, is why a sandbox last stopped. Calls are
+/// counted and timed, and note the ambient activity they ran under.
 /// </summary>
 internal sealed class FakeSandboxesClient(
   Func<string, string?> state,
-  Func<string, CancellationToken, Task> onResume
+  Func<string, CancellationToken, Task> onResume,
+  Func<string, string?>? stoppedReason = null
 ) : ISandboxesClient
 {
   private int _resumes;
@@ -274,6 +276,7 @@ internal sealed class FakeSandboxesClient(
     {
       Id = sandboxId,
       State = state(sandboxId) ?? throw new SandboxesException("Gone.", HttpStatusCode.NotFound),
+      StoppedReason = stoppedReason?.Invoke(sandboxId),
     };
   }
 
@@ -283,7 +286,12 @@ internal sealed class FakeSandboxesClient(
     Activities.Enqueue(Activity.Current);
     return Task.FromResult(
       state(sandboxId) is { } current
-        ? new SandboxView { Id = sandboxId, State = current }
+        ? new SandboxView
+        {
+          Id = sandboxId,
+          State = current,
+          StoppedReason = stoppedReason?.Invoke(sandboxId),
+        }
         : (SandboxView?)null
     );
   }

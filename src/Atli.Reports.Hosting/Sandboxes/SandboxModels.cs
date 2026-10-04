@@ -43,6 +43,20 @@ public sealed record SandboxView
   /// <summary>The lifecycle state, such as <see cref="SandboxStates.Running"/>.</summary>
   public required string State { get; init; }
 
+  /// <summary>
+  /// Why the sandbox last stopped, such as <see cref="SandboxStoppedReasons.Disabled"/>, or
+  /// <see langword="null"/> when the data plane did not say. The data plane keeps the reason after
+  /// a resume, so it means something only while the sandbox is stopped.
+  /// </summary>
+  public string? StoppedReason { get; init; }
+
+  /// <summary>
+  /// Whether the sandbox is stopped because it was disabled: the platform refuses to start it,
+  /// whether a request reaches an on-demand port or something resumes it, until it is enabled.
+  /// </summary>
+  public bool IsDisabled =>
+    State == SandboxStates.Stopped && StoppedReason == SandboxStoppedReasons.Disabled;
+
   /// <summary>The sandbox's labels.</summary>
   public IReadOnlyDictionary<string, string> Labels { get; init; } =
     new Dictionary<string, string>();
@@ -215,6 +229,22 @@ public static class SandboxStates
 
   /// <summary>Suspended or stopped; storage only.</summary>
   public const string Stopped = "Stopped";
+}
+
+/// <summary>
+/// Reasons the data plane gives for a stopped sandbox (its <c>stateDetails.stoppedReason</c>),
+/// as observed on 2026-10-04.
+/// </summary>
+public static class SandboxStoppedReasons
+{
+  /// <summary>Disabled: nothing can start it until it is enabled, after which it reads <see cref="UserStopped"/>.</summary>
+  public const string Disabled = "Disabled";
+
+  /// <summary>Suspended by its auto-suspend policy after an idle period.</summary>
+  public const string Idle = "Idle";
+
+  /// <summary>Stopped through the data plane, or enabled again after being disabled.</summary>
+  public const string UserStopped = "UserStopped";
 }
 
 /// <summary>A data-plane call failed.</summary>

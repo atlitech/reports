@@ -259,7 +259,10 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   the renderer's port, so a compromised renderer can send it too: before resuming, the gateway
   reads the sandbox's state from the Sandboxes data plane. A sandbox reported `Running` means the
   answer did not come from the platform, which the caller gets as `503` `BrowserUnavailable` with
-  no resume and no resend; a sandbox that no longer exists is `503` `BrowserUnavailable` too.
+  no resume and no resend; a sandbox that no longer exists is `503` `BrowserUnavailable` too, and
+  so, at once and with no resume, is a sandbox the data plane reports stopped because it was
+  disabled (the provisioner's kill switch), which the platform would not resume until it is
+  enabled.
   Concurrent requests share one state read and one resume per sandbox, a state read is reused for
   2 seconds, and a sandbox is resumed at most once every 5 seconds. Within `Wake:Timeout` the
   gateway also resends after `502`, `503` (other than `Busy`), a renderer it cannot reach, a
@@ -277,7 +280,7 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   refused tenants and full tenants, 54 for a not-running answer from a running sandbox, 55 for a
   record that names a sandbox that does not exist, 56 (at `Debug`) for a resend to a busy
   renderer, 57 for a renderer the port proxy does not find, 58 (an error) for a port that refuses
-  the gateway's address, and 60 to 63 for state reads and resumes. The request span carries the tenant as
+  the gateway's address, 59 for a disabled sandbox, and 60 to 63 for state reads and resumes. The request span carries the tenant as
   `atli.reports.tenant`. Record lookups and sandbox checks are shared by the requests waiting for
   them, so they run without any request's trace context, and neither the renderer client nor the
   Sandboxes client sends trace headers or baggage.

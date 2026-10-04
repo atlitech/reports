@@ -252,6 +252,9 @@ internal sealed partial class RendererGateway(
               LogNoSandbox(logger, attempt.TenantId, record.SandboxId);
               directory.Evict(attempt.TenantId, record);
               return Unavailable("The tenant's renderer is not running.");
+            case WakeResult.Disabled:
+              LogDisabled(logger, attempt.TenantId, record.SandboxId);
+              return Unavailable("The tenant's renderer is not running.");
             default:
               if (await BackOffAsync())
               {
@@ -743,6 +746,13 @@ internal sealed partial class RendererGateway(
     Message = "The port of tenant {TenantId}'s renderer (sandbox {SandboxId}) refused the gateway's address (IpAccessDenied). Its allowed source ranges must include the gateway's outbound addresses."
   )]
   private static partial void LogAddressDenied(ILogger logger, string tenantId, string? sandboxId);
+
+  [LoggerMessage(
+    EventId = 59,
+    Level = LogLevel.Warning,
+    Message = "The renderer of tenant {TenantId} (sandbox {SandboxId}) is disabled; its conversions fail until it is enabled."
+  )]
+  private static partial void LogDisabled(ILogger logger, string tenantId, string? sandboxId);
 
   [LoggerMessage(
     EventId = 56,
