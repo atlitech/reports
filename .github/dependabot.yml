@@ -22,3 +22,13 @@ updates:
     groups:
       server-base-images:
         patterns: [ "*" ]
+
+  # Keeps the provisioning service image's base images (dotnet/sdk and the chiseled dotnet/aspnet)
+  # current, pinned as tag@digest like the server's.
+  - package-ecosystem: docker
+    directory: /src/Atli.Reports.Provisioner
+    schedule:
+      interval: weekly
+    groups:
+      provisioner-base-images:
+        patterns: [ "*" ]

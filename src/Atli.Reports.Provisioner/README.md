@@ -3,7 +3,9 @@
 Creates, rolls out, and deletes the per-customer renderers of the
 [hosted renderer service](../../docs/hosted-renderers.md) on Azure Container Apps Sandboxes, and
 maintains the renderer records the gateway routes by. It runs off the request path, from an
-operator's shell or a release pipeline, with rights the gateway never holds.
+operator's shell or a release pipeline, or as the
+[provisioning service](#the-provisioning-service) that creates renderers on demand, with rights the
+gateway never holds.
 
 Each renderer is one sandbox that serves one tenant for its whole lifetime. The sandbox runs the
 unmodified server image with Chromium's sandbox on, denies egress, admits only a credential that

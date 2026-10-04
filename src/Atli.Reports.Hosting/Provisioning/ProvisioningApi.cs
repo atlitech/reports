@@ -22,7 +22,9 @@ namespace Atli.Reports.Hosting.Provisioning;
 /// <para><c>DELETE /tenants/{tenantId}/renderer</c> deletes the tenant's record and then every sandbox
 /// labeled for it, and answers <c>204</c>, also when there was nothing to delete.</para>
 /// <para>Failures are RFC 9457 problem details whose <c>kind</c> is one of
-/// <see cref="ProvisioningProblemKinds"/>: <c>400</c> for a tenant ID that is not one, <c>403</c>
+/// <see cref="ProvisioningProblemKinds"/>: <c>400</c>
+/// <see cref="ProvisioningProblemKinds.InvalidRequest"/> for a tenant ID that is not one, <c>401</c>
+/// <see cref="ProvisioningProblemKinds.Unauthorized"/>, <c>403</c>
 /// <see cref="ProvisioningProblemKinds.NotAllowed"/>, <c>429</c>
 /// <see cref="ProvisioningProblemKinds.QuotaExceeded"/> or
 /// <see cref="ProvisioningProblemKinds.RateLimited"/> (with <c>Retry-After</c>), and <c>503</c>
@@ -44,6 +46,12 @@ public static class ProvisioningApi
 /// <summary>The <c>kind</c> of a provisioning service's problem details.</summary>
 public static class ProvisioningProblemKinds
 {
+  /// <summary><c>400</c>: a tenant ID that is not one, or a route the service does not have.</summary>
+  public const string InvalidRequest = "InvalidRequest";
+
+  /// <summary><c>401</c>: no credential, or not one of the gateway's.</summary>
+  public const string Unauthorized = "Unauthorized";
+
   /// <summary>
   /// <c>403</c>: the tenant is under none of the prefixes the service manages. Also a sign that the
   /// gateway's and the service's configurations disagree.

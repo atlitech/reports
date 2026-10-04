@@ -139,14 +139,7 @@ internal static class ProvisionerCli
           return 0;
 
         case ServeCommand:
-          return await ProvisioningService.RunAsync(
-            options,
-            services,
-            provisioner,
-            time,
-            output,
-            cancellationToken
-          );
+          return await ProvisioningService.RunAsync(options, services, time, cancellationToken);
 
         case RetireCommand:
           var retired = await provisioner.RetireIdleAsync(options.Service, cancellationToken);

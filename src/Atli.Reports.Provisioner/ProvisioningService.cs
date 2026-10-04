@@ -36,20 +36,16 @@ internal static class ProvisioningService
 
   /// <summary>Runs the service; returns the process exit code once it has stopped.</summary>
   /// <param name="options">The provisioner's settings, <c>Service</c> validated with API keys.</param>
-  /// <param name="services">The data plane, the record store, and the readiness probe.</param>
-  /// <param name="provisioner">
-  /// Not used: the command line's provisioner writes to the console, so the service makes its own
-  /// over <paramref name="services"/>, which writes to the log.
+  /// <param name="services">
+  /// The data plane, the record store, and the readiness probe. The service makes its own
+  /// provisioner over them, which writes to the log rather than the console.
   /// </param>
   /// <param name="time">The clock of the limits, the retirement loop, and the provisioner.</param>
-  /// <param name="output">Not used: the service writes to the log.</param>
   /// <param name="cancellationToken">Stops the service gracefully.</param>
   public static async Task<int> RunAsync(
     ProvisionerOptions options,
     ProvisionerServices services,
-    RendererProvisioner provisioner,
     TimeProvider time,
-    TextWriter output,
     CancellationToken cancellationToken
   )
   {

@@ -38,6 +38,8 @@ public sealed class ProvisioningClient : IProvisioningClient
 
   private static readonly string[] Kinds =
   [
+    ProvisioningProblemKinds.InvalidRequest,
+    ProvisioningProblemKinds.Unauthorized,
     ProvisioningProblemKinds.NotAllowed,
     ProvisioningProblemKinds.QuotaExceeded,
     ProvisioningProblemKinds.RateLimited,

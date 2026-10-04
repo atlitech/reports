@@ -42,7 +42,7 @@ internal static class RendererEndpoints
       RendererAnswer.Deleted => TypedResults.NoContent(),
       RendererAnswer.InvalidTenantId => ServiceProblems.Problem(
         StatusCodes.Status400BadRequest,
-        ServiceProblems.InvalidRequest,
+        ProvisioningProblemKinds.InvalidRequest,
         "The tenant ID is not one.",
         "A tenant ID is 1 to 63 lowercase letters, digits, and hyphens, starting with a letter or "
           + "digit."
@@ -83,18 +83,11 @@ internal static class RendererEndpoints
 }
 
 /// <summary>
-/// The service's problem details (RFC 9457), each with a <c>kind</c>: one of
-/// <see cref="ProvisioningProblemKinds"/>, or <see cref="Unauthorized"/> or
-/// <see cref="InvalidRequest"/> for the statuses those do not cover.
+/// The service's problem details (RFC 9457), each with one of <see cref="ProvisioningProblemKinds"/>
+/// as its <c>kind</c>.
 /// </summary>
 internal static class ServiceProblems
 {
-  /// <summary><c>401</c>: no credential, or not one of the gateway's.</summary>
-  public const string Unauthorized = "Unauthorized";
-
-  /// <summary><c>400</c> and other client errors: a tenant ID that is not one, an unknown route.</summary>
-  public const string InvalidRequest = "InvalidRequest";
-
   public static IResult Problem(int status, string kind, string title, string detail) =>
     TypedResults.Problem(
       detail: detail,
@@ -115,10 +108,10 @@ internal static class ServiceProblems
       "kind",
       status switch
       {
-        StatusCodes.Status401Unauthorized => Unauthorized,
+        StatusCodes.Status401Unauthorized => ProvisioningProblemKinds.Unauthorized,
         StatusCodes.Status403Forbidden => ProvisioningProblemKinds.NotAllowed,
         >= 500 => ProvisioningProblemKinds.Failed,
-        _ => InvalidRequest,
+        _ => ProvisioningProblemKinds.InvalidRequest,
       }
     );
     if (status == StatusCodes.Status401Unauthorized)
