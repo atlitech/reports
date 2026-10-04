@@ -27,9 +27,17 @@ public sealed record RendererRecord
   /// <summary>When the provisioner created the renderer.</summary>
   public DateTimeOffset CreatedAt { get; init; }
 
+  /// <summary>
+  /// How many requests the renderer admits at once, its conversions and their queue (see
+  /// <see cref="RendererServerEnvironment.MaxConcurrentRequests"/>), so the gateway need not send
+  /// more; <see langword="null"/> when unknown, as in records written before it was recorded.
+  /// </summary>
+  public int? MaxConcurrentRequests { get; init; }
+
   /// <summary>Describes the record without <see cref="ApiKey"/>, so it can be logged and printed.</summary>
   public override string ToString() =>
     $"RendererRecord {{ TenantId = {TenantId}, Url = {Url}, SandboxId = {SandboxId}, "
     + $"DiskImageId = {DiskImageId}, "
-    + $"CreatedAt = {CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)} }}";
+    + $"CreatedAt = {CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}, "
+    + $"MaxConcurrentRequests = {MaxConcurrentRequests?.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}";
 }

@@ -1,3 +1,4 @@
+using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Tests.Support;
 using TUnit.Assertions.Enums;
@@ -57,6 +58,59 @@ public class DeleteTests
     await provisioning.Provisioner.DeleteAsync("a", TimeSpan.Zero, TestToken);
 
     await Assert.That(provisioning.Output.ToString()).EndsWith("[a] No renderer to delete.\n");
+  }
+
+  [Test]
+  public async Task A_record_that_cannot_be_read_is_deleted_with_the_tenants_sandboxes()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("b", "disk-1");
+    provisioning.Records.AddUnreadable("a");
+    provisioning.Sandboxes.Add("old-a", RendererLabels.For("a", RendererSize.Medium));
+
+    await provisioning.Provisioner.DeleteAsync("a", TimeSpan.FromMinutes(1), TestToken);
+
+    // No drain: a record that cannot be read routes nothing.
+    await Assert.That(provisioning.Records.HasUnreadable("a")).IsFalse();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-b"]);
+    await Assert
+      .That(provisioning.Output.ToString())
+      .StartsWith(
+        "[a] The record cannot be read (The record of a is damaged.); deleting it all the same.\n"
+      );
+  }
+
+  [Test]
+  public async Task The_record_is_deleted_even_when_the_store_reads_none()
+  {
+    using Provisioning provisioning = new();
+
+    await provisioning.Provisioner.DeleteAsync("a", TimeSpan.Zero, TestToken);
+
+    // A Key Vault store reads a disabled record as none, and still holds it.
+    await Assert.That(provisioning.Journal.Matching("delete")).IsEquivalentTo(["delete record a"]);
+  }
+
+  [Test]
+  public async Task A_sandbox_the_record_names_that_is_labeled_for_another_tenant_is_not_deleted()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("b", "disk-1");
+    provisioning.AddRenderer("a", "disk-1");
+    provisioning.Records.Add(provisioning.Records["a"]! with { SandboxId = "old-b" });
+
+    var exception = await Assert
+      .That(async () => await provisioning.Provisioner.DeleteAsync("a", TimeSpan.Zero, TestToken))
+      .Throws<ProvisioningException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "The record of tenant a named sandbox old-b, which is labeled for tenant b; it was not deleted."
+      );
+    await Assert.That(provisioning.Records["a"]).IsNull();
+    // The tenant's own sandbox, found by its label, is deleted all the same.
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-b"]);
   }
 
   [Test]

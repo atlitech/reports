@@ -1,4 +1,5 @@
 using System.Net;
+using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Tests.Support;
 using TUnit.Assertions.Enums;
@@ -266,9 +267,244 @@ public class RolloutTests
     await Assert
       .That(result.Failures["a"])
       .IsEqualTo(
-        "replaced, but the old sandbox old-a was not deleted (Deleting old-a failed.); delete it by hand."
+        "replaced, but the old sandbox old-a was not deleted (Deleting old-a failed.); "
+          + "run rollout or prune again to delete it."
       );
     await Assert.That(provisioning.Records["a"]!.SandboxId).IsEqualTo("sandbox-1");
+    // Not tried again by this run's own prune.
+    await Assert.That(provisioning.Journal.Matching("delete old-a").Count).IsEqualTo(1);
+
+    // The next run deletes it, as a leftover no record points to.
+    provisioning.Sandboxes.FailDelete.Clear();
+    var again = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert.That(again.Failures).IsEmpty();
+    await Assert.That(again.Pruned).IsEquivalentTo(["old-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+  }
+
+  [Test]
+  public async Task A_record_write_that_failed_after_writing_still_retires_the_old_sandbox()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    provisioning.Records.FailPutAfterWriting = new TimeoutException("The answer was lost.");
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert.That(result.Replaced).IsEquivalentTo(["a"]);
+    await Assert.That(result.Failures).IsEmpty();
+    await Assert.That(provisioning.Records["a"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+  }
+
+  [Test]
+  public async Task A_record_whose_sandbox_is_gone_is_replaced_even_on_the_disk_image()
+  {
+    using Provisioning provisioning = new();
+    var dangling = provisioning.AddRenderer("a", "disk-2", size: "L");
+    provisioning.AddRenderer("b", "disk-2");
+    provisioning.Sandboxes.Remove("old-a");
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert.That(result.Replaced).IsEquivalentTo(["a"]);
+    await Assert.That(result.AlreadyCurrent).IsEqualTo(1);
+    await Assert.That(provisioning.Records["a"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Records["a"]!.ApiKey).IsNotEqualTo(dangling.ApiKey);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-b", "sandbox-1"]);
+    await Assert
+      .That(provisioning.Output.ToString())
+      .Contains("[a] Sandbox old-a of the record no longer exists.");
+  }
+
+  [Test]
+  public async Task A_tenant_deleted_while_its_replacement_starts_stays_deleted()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    var provisioner = provisioning.Provisioner;
+    // An operator's delete runs while the replacement becomes ready.
+    provisioning.Readiness.Answer = async (_, cancellationToken) =>
+    {
+      await provisioner.DeleteAsync("a", TimeSpan.Zero, cancellationToken);
+      return ReadinessAnswer.Ready;
+    };
+
+    var result = await provisioner.RolloutAsync("disk-2", null, 4, TimeSpan.Zero, TestToken);
+
+    await Assert
+      .That(result.Failures["a"])
+      .IsEqualTo("The record of tenant a was deleted meanwhile; the replacement is discarded.");
+    await Assert.That(provisioning.Records["a"]).IsNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+    await Assert.That(provisioning.Journal.Matching("put")).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_tenant_another_rollout_replaced_meanwhile_keeps_that_replacement()
+  {
+    using Provisioning provisioning = new();
+    var old = provisioning.AddRenderer("a", "disk-1");
+    RendererRecord other = old with { SandboxId = "other-a", DiskImageId = "disk-2" };
+    provisioning.Sandboxes.Add("other-a", RendererLabels.For("a", RendererSize.Medium));
+    provisioning.Readiness.Answer = (_, _) =>
+    {
+      provisioning.Records.Add(other);
+      return Task.FromResult(ReadinessAnswer.Ready);
+    };
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert
+      .That(result.Failures["a"])
+      .IsEqualTo(
+        "The record of tenant a moved to sandbox other-a meanwhile; the replacement is discarded."
+      );
+    await Assert.That(provisioning.Records["a"]).IsSameReferenceAs(other);
+    // The discarded replacement is gone; the other rollout's old sandbox is its to retire.
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-a", "other-a"]);
+  }
+
+  [Test]
+  public async Task A_canceled_rollout_leaves_the_old_sandbox_and_the_next_run_deletes_it_after_the_drain()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    var drain = TimeSpan.FromSeconds(150);
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestToken);
+    var rollout = provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      drain,
+      cancellation.Token
+    );
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    await cancellation.CancelAsync();
+    try
+    {
+      // Whether the rollout reports the drain as canceled or throws depends on whether it had
+      // finished starting replacements; either way the old sandbox stays.
+      var canceled = await rollout;
+      await Assert
+        .That(canceled.Failures["a"])
+        .IsEqualTo(
+          "replaced, but the old sandbox old-a was not deleted (canceled); "
+            + "run rollout or prune again to delete it."
+        );
+    }
+    catch (OperationCanceledException) { }
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-a", "sandbox-1"]);
+
+    var again = provisioning.Provisioner.RolloutAsync("disk-2", null, 4, drain, TestToken);
+    // The record may have moved just before the cancel, so the leftover gets a drain of its own.
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    await Assert.That(provisioning.Sandboxes.Ids).Contains("old-a");
+    provisioning.Clock.Advance(drain);
+    var result = await again;
+
+    await Assert.That(result.AlreadyCurrent).IsEqualTo(1);
+    await Assert.That(result.Pruned).IsEquivalentTo(["old-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+  }
+
+  [Test]
+  public async Task A_rollout_of_one_tenant_prunes_only_that_tenants_leftovers()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    provisioning.AddRenderer("b", "disk-2");
+    provisioning.Sandboxes.Add("left-a", RendererLabels.For("a", RendererSize.Medium));
+    provisioning.Sandboxes.Add("left-b", RendererLabels.For("b", RendererSize.Medium));
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      "a",
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert.That(result.Pruned).IsEquivalentTo(["left-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-b", "old-b", "sandbox-1"]);
+  }
+
+  [Test]
+  public async Task An_old_record_naming_another_tenants_sandbox_does_not_delete_it()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("b", "disk-2");
+    var tampered = provisioning.AddRenderer("a", "disk-1") with { SandboxId = "old-b" };
+    provisioning.Records.Add(tampered);
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      "a",
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert
+      .That(result.Failures["a"])
+      .IsEqualTo(
+        "replaced, but the old record named sandbox old-b, which is labeled for tenant b; "
+          + "it was not deleted."
+      );
+    await Assert.That(provisioning.Sandboxes.Ids).Contains("old-b");
+    await Assert.That(provisioning.Records["b"]!.SandboxId).IsEqualTo("old-b");
+  }
+
+  [Test]
+  public async Task Unreadable_records_are_failures_and_the_others_are_still_replaced()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    provisioning.Records.AddUnreadable("b");
+    // Its sandbox is kept: the record that cannot be read may point to it.
+    provisioning.Sandboxes.Add("old-b", RendererLabels.For("b", RendererSize.Medium));
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      TestToken
+    );
+
+    await Assert.That(result.Replaced).IsEquivalentTo(["a"]);
+    await Assert
+      .That(result.Failures["b"])
+      .IsEqualTo(
+        "the record cannot be read (The record of b is damaged.); fix it, or delete the tenant."
+      );
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-b", "sandbox-1"]);
   }
 
   private static void InterlockedMax(ref int target, int value)

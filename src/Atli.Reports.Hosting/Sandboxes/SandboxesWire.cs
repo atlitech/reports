@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atli.Reports.Hosting.Sandboxes;
@@ -70,11 +71,42 @@ internal sealed class AddPortRequest
   public int Port { get; init; }
 
   public required PortAuthWire Auth { get; init; }
+
+  /// <summary>
+  /// <c>Manual</c> (the data plane's default) or <c>OnDemand</c>; omitted when the caller named
+  /// none.
+  /// </summary>
+  public string? ActivationMode { get; init; }
+
+  /// <summary>Which source addresses the port admits; omitted to admit any.</summary>
+  public IpAccessControlWire? IpAccessControl { get; init; }
 }
 
 internal sealed class PortAuthWire
 {
   public bool Anonymous { get; init; }
+}
+
+/// <summary>
+/// <c>{"defaultAction":"Deny","rules":[{"name","action":"Allow","priority","sourceCidrs"}]}</c>: at
+/// most 10 rules of 1 to 10 ranges each.
+/// </summary>
+internal sealed class IpAccessControlWire
+{
+  public required string DefaultAction { get; init; }
+
+  public required IReadOnlyList<IpAccessRuleWire> Rules { get; init; }
+}
+
+internal sealed class IpAccessRuleWire
+{
+  public required string Name { get; init; }
+
+  public required string Action { get; init; }
+
+  public int Priority { get; init; }
+
+  public required IReadOnlyList<string> SourceCidrs { get; init; }
 }
 
 /// <summary>
@@ -92,15 +124,31 @@ internal sealed class SandboxResponse
   public Dictionary<string, string>? Labels { get; init; }
 
   public List<PortResponse>? Ports { get; init; }
+
+  /// <summary>
+  /// An ISO 8601 time such as <c>2026-10-04T01:50:55.1020312+00:00</c>. Read as text, so a time
+  /// this client cannot parse leaves it unknown rather than failing the whole answer.
+  /// </summary>
+  public string? CreatedAt { get; init; }
 }
 
 internal sealed class PortResponse
 {
   public int Port { get; init; }
 
+  /// <summary>Absent while the proxy has not assigned the port an address yet.</summary>
   public string? Url { get; init; }
 
   public PortAuthWire? Auth { get; init; }
+
+  /// <summary><c>Manual</c> or <c>OnDemand</c>.</summary>
+  public string? ActivationMode { get; init; }
+
+  /// <summary>
+  /// The port's IP access control, read by hand: its shape in answers has not been observed, and
+  /// one this client does not expect must not make the whole sandbox unreadable.
+  /// </summary>
+  public JsonElement? IpAccessControl { get; init; }
 }
 
 [JsonSourceGenerationOptions(

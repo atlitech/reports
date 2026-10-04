@@ -5,6 +5,11 @@ namespace Atli.Reports.Hosting.Renderers;
 /// 2026-10-03 Sandboxes run converted the 49-page report at every size here
 /// (benchmarks/results/2026-10-03-5b667b4-azure-sandboxes-amd64.md).
 /// </summary>
+/// <remarks>
+/// Measured in the sandboxes: throughput tops out at about one conversion per vCPU, and each 49-page
+/// report in flight costs about 400 to 500 MiB, so a 2 GiB renderer running four to eight at once was
+/// killed out of memory. Sizes run at most one conversion per vCPU, and at least one.
+/// </remarks>
 /// <param name="Name">The size's name: <c>S</c>, <c>M</c>, or <c>L</c>.</param>
 /// <param name="Cpu">CPU in the platform's notation.</param>
 /// <param name="Memory">Memory in the platform's notation.</param>
@@ -19,11 +24,11 @@ public sealed record RendererSize(
   /// <summary>0.5 vCPU and 1 GiB: one conversion at a time.</summary>
   public static RendererSize Small { get; } = new("S", "500m", "1024Mi", 1);
 
-  /// <summary>1 vCPU and 2 GiB: the default.</summary>
-  public static RendererSize Medium { get; } = new("M", "1000m", "2048Mi", 2);
+  /// <summary>1 vCPU and 2 GiB, one conversion at a time: the default.</summary>
+  public static RendererSize Medium { get; } = new("M", "1000m", "2048Mi", 1);
 
-  /// <summary>2 vCPU and 4 GiB.</summary>
-  public static RendererSize Large { get; } = new("L", "2000m", "4096Mi", 4);
+  /// <summary>2 vCPU and 4 GiB, two conversions at a time.</summary>
+  public static RendererSize Large { get; } = new("L", "2000m", "4096Mi", 2);
 
   /// <summary>Returns the size named <paramref name="name"/> (case-insensitive).</summary>
   public static RendererSize Parse(string name) =>

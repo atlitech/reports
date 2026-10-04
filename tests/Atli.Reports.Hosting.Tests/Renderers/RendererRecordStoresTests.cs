@@ -1,5 +1,6 @@
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
+using Atli.Reports.Hosting.Tests.Support;
 using Azure.Identity;
 
 namespace Atli.Reports.Hosting.Tests.Renderers;
@@ -109,7 +110,7 @@ public class RendererRecordStoresTests
   {
     SandboxesOptions options = new()
     {
-      SubscriptionId = "sub",
+      SubscriptionId = "00000000-0000-0000-0000-000000000001",
       ResourceGroup = "rg",
       SandboxGroup = "group",
       Region = "eastus2",
@@ -120,7 +121,114 @@ public class RendererRecordStoresTests
     await Assert
       .That(options.GroupUri.ToString())
       .IsEqualTo(
-        "https://management.eastus2.azuredevcompute.io/subscriptions/sub/resourceGroups/rg/sandboxGroups/group/"
+        "https://management.eastus2.azuredevcompute.io/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg/sandboxGroups/group/"
       );
+  }
+
+  [Test]
+  public async Task A_store_written_before_tenant_listing_lists_the_tenants_of_its_records()
+  {
+    IRendererRecordStore store = new RecordsOnly(
+      Records.Acme() with
+      {
+        TenantId = "zeta",
+      },
+      Records.Acme()
+    );
+
+    await Assert
+      .That(await store.ListTenantIdsAsync(CancellationToken.None))
+      .IsEquivalentTo(["acme", "zeta"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    var listing = await store.ListWithUnreadableAsync(CancellationToken.None);
+    await Assert.That(listing.Records.Count).IsEqualTo(2);
+    await Assert.That(listing.Unreadable).IsEmpty();
+  }
+
+  [Test]
+  public async Task Resource_names_with_the_characters_azure_allows_are_escaped_into_the_address()
+  {
+    SandboxesOptions options = new()
+    {
+      SubscriptionId = "00000000-0000-0000-0000-000000000001",
+      ResourceGroup = "reports_(prod).eu-1",
+      SandboxGroup = "renderers",
+      Region = "westeurope",
+    };
+
+    await Assert
+      .That(options.GroupUri.AbsoluteUri)
+      .IsEqualTo(
+        "https://management.westeurope.azuredevcompute.io/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/reports_%28prod%29.eu-1/sandboxGroups/renderers/"
+      );
+  }
+
+  [Test]
+  // The region is part of the host name: anything but a region name could move the bearer token.
+  [Arguments("Region", "x.attacker.example#", "Region")]
+  [Arguments("Region", "attacker.example/", "Region")]
+  [Arguments("Region", "EastUS2", "Region")]
+  [Arguments("Region", "east us", "Region")]
+  [Arguments("SubscriptionId", "sub-1", "SubscriptionId")]
+  [Arguments("SubscriptionId", "{00000000-0000-0000-0000-000000000001}", "SubscriptionId")]
+  [Arguments("SubscriptionId", "00000000-0000-0000-0000-000000000001/../x", "SubscriptionId")]
+  [Arguments("ResourceGroup", "rg/../other", "ResourceGroup")]
+  [Arguments("ResourceGroup", "rg?x=1", "ResourceGroup")]
+  [Arguments("ResourceGroup", "rg#x", "ResourceGroup")]
+  [Arguments("ResourceGroup", "rg%2F", "ResourceGroup")]
+  [Arguments("ResourceGroup", "rg.", "ResourceGroup")]
+  [Arguments("SandboxGroup", "group/sandboxes", "SandboxGroup")]
+  [Arguments("SandboxGroup", "group\n", "SandboxGroup")]
+  public async Task Settings_that_could_change_the_address_are_refused(
+    string setting,
+    string value,
+    string named
+  )
+  {
+    SandboxesOptions options = new()
+    {
+      SubscriptionId = "00000000-0000-0000-0000-000000000001",
+      ResourceGroup = "rg",
+      SandboxGroup = "group",
+      Region = "eastus2",
+    };
+    switch (setting)
+    {
+      case "Region":
+        options.Region = value;
+        break;
+      case "SubscriptionId":
+        options.SubscriptionId = value;
+        break;
+      case "ResourceGroup":
+        options.ResourceGroup = value;
+        break;
+      default:
+        options.SandboxGroup = value;
+        break;
+    }
+
+    var exception = await Assert.That(options.Validate).Throws<InvalidOperationException>();
+    await Assert.That(exception!.Message).StartsWith($"Sandboxes {named} '");
+    await Assert.That(() => options.GroupUri).Throws<InvalidOperationException>();
+    using HttpClient http = new();
+    await Assert
+      .That(() => new SandboxesClient(http, new FakeCredential(TimeProvider.System), options))
+      .Throws<InvalidOperationException>();
+  }
+
+  /// <summary>A store as written before tenant listing: it implements only the first four members.</summary>
+  private sealed class RecordsOnly(params RendererRecord[] records) : IRendererRecordStore
+  {
+    public Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken) =>
+      Task.FromResult(records.FirstOrDefault(record => record.TenantId == tenantId));
+
+    public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
+      Task.FromResult<IReadOnlyList<RendererRecord>>(records);
+
+    public Task PutAsync(RendererRecord record, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task DeleteAsync(string tenantId, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
   }
 }

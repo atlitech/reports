@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Atli.Reports.Hosting.Sandboxes;
 
@@ -47,12 +49,165 @@ public sealed record SandboxView
 
   /// <summary>The exposed ports.</summary>
   public IReadOnlyList<SandboxPort> Ports { get; init; } = [];
+
+  /// <summary>When the sandbox was created, or <see langword="null"/> when the data plane did not say.</summary>
+  public DateTimeOffset? CreatedAt { get; init; }
 }
 
 /// <summary>A port exposed through the platform's proxy.</summary>
-public sealed record SandboxPort(int Port, Uri Url, bool Anonymous);
+/// <param name="Port">The port in the sandbox.</param>
+/// <param name="Url">The port's public address.</param>
+/// <param name="Anonymous">Whether the proxy admits requests without a user's sign-in.</param>
+public sealed record SandboxPort(int Port, Uri Url, bool Anonymous)
+{
+  /// <summary>
+  /// What a request to the port does while the sandbox is stopped:
+  /// <see cref="SandboxPortActivation.Manual"/> when the data plane reports no mode, or one this
+  /// client does not know.
+  /// </summary>
+  public SandboxPortActivation Activation { get; init; } = SandboxPortActivation.Manual;
 
-/// <summary>Lifecycle states the data plane reports.</summary>
+  /// <summary>
+  /// The source addresses the port admits, when the data plane reports an IP access control that
+  /// denies all others; empty when it reports none.
+  /// </summary>
+  public IReadOnlyList<string> AllowedSourceCidrs { get; init; } = [];
+}
+
+/// <summary>How to expose a port through the platform's proxy.</summary>
+public sealed record SandboxPortOptions
+{
+  /// <summary>The most IP access rules a port takes.</summary>
+  public const int MaxRules = 10;
+
+  /// <summary>The most source ranges one IP access rule takes.</summary>
+  public const int MaxCidrsPerRule = 10;
+
+  /// <summary>
+  /// Whether the proxy admits requests without a user's sign-in. A port that is not anonymous
+  /// needs one user's email, which this client does not set, so the data plane refuses it.
+  /// </summary>
+  public required bool Anonymous { get; init; }
+
+  /// <summary>What a request to the port does while the sandbox is stopped.</summary>
+  public SandboxPortActivation Activation { get; init; } = SandboxPortActivation.Manual;
+
+  /// <summary>
+  /// The source ranges the port admits, in CIDR notation (<c>203.0.113.7/32</c>); the proxy refuses
+  /// every other address. Empty, the default, admits any address. At most
+  /// <see cref="MaxRules"/> × <see cref="MaxCidrsPerRule"/>.
+  /// </summary>
+  /// <remarks>
+  /// An anonymous port with <see cref="SandboxPortActivation.OnDemand"/> activation lets anyone
+  /// who learns its URL wake the sandbox, and run up its compute, before the renderer checks a
+  /// credential; limiting it to the callers' addresses closes that.
+  /// </remarks>
+  public IReadOnlyList<string> AllowedSourceCidrs { get; init; } = [];
+
+  /// <summary>
+  /// Throws <see cref="ArgumentException"/> unless the options can be sent: a known activation,
+  /// and at most <see cref="MaxRules"/> × <see cref="MaxCidrsPerRule"/> source ranges, each an IPv4
+  /// or IPv6 network in canonical CIDR notation.
+  /// </summary>
+  public void Validate()
+  {
+    if (!Enum.IsDefined(Activation))
+    {
+      throw new ArgumentException($"Unknown port activation {Activation}.", nameof(Activation));
+    }
+
+    ArgumentNullException.ThrowIfNull(AllowedSourceCidrs, nameof(AllowedSourceCidrs));
+    if (AllowedSourceCidrs.Count > MaxRules * MaxCidrsPerRule)
+    {
+      throw new ArgumentException(
+        $"A port admits at most {MaxRules * MaxCidrsPerRule} source ranges.",
+        nameof(AllowedSourceCidrs)
+      );
+    }
+
+    foreach (var cidr in AllowedSourceCidrs)
+    {
+      if (!IsCidr(cidr))
+      {
+        throw new ArgumentException(
+          $"'{cidr}' is not a source range in CIDR notation, such as 203.0.113.7/32.",
+          nameof(AllowedSourceCidrs)
+        );
+      }
+    }
+  }
+
+  /// <summary>
+  /// Whether <paramref name="value"/> is <c>address/prefix</c>: an IPv4 address in dotted quads or
+  /// an IPv6 address without a scope, and a prefix no longer than the address with no address bits
+  /// set past it. <c>10.0.0.1/24</c> is refused as ambiguous: a host, or its network?
+  /// </summary>
+  private static bool IsCidr(string? value)
+  {
+    var slash = value?.IndexOf('/', StringComparison.Ordinal) ?? -1;
+    if (
+      slash <= 0
+      || !IPAddress.TryParse(value.AsSpan(0, slash), out var address)
+      || !int.TryParse(
+        value.AsSpan(slash + 1),
+        NumberStyles.None,
+        CultureInfo.InvariantCulture,
+        out var prefix
+      )
+    )
+    {
+      return false;
+    }
+
+    // IPAddress also reads "10" as 0.0.0.10, and an IPv6 address with a %scope.
+    if (
+      address.AddressFamily == AddressFamily.InterNetwork
+        ? !value.AsSpan(0, slash).SequenceEqual(address.ToString())
+        : address.AddressFamily != AddressFamily.InterNetworkV6 || address.ScopeId != 0
+    )
+    {
+      return false;
+    }
+
+    var bytes = address.GetAddressBytes();
+    if (prefix > bytes.Length * 8)
+    {
+      return false;
+    }
+
+    for (var bit = prefix; bit < bytes.Length * 8; bit++)
+    {
+      if ((bytes[bit / 8] & (0x80 >> (bit % 8))) != 0)
+      {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}
+
+/// <summary>What a request to an exposed port does while its sandbox is stopped.</summary>
+public enum SandboxPortActivation
+{
+  /// <summary>
+  /// The data plane's default: the proxy answers <c>403 {"error":"Sandbox is not running"}</c> until
+  /// the sandbox is resumed.
+  /// </summary>
+  Manual,
+
+  /// <summary>
+  /// The request resumes the sandbox and is then served, with no resume call. Observed on
+  /// 2026-10-04 with a plain listener: the first answer from a stopped sandbox came in about
+  /// 1.1 seconds.
+  /// </summary>
+  OnDemand,
+}
+
+/// <summary>
+/// The settled lifecycle states the data plane reports. Others, such as <c>Stopping</c>, are
+/// transitions between them.
+/// </summary>
 public static class SandboxStates
 {
   /// <summary>Running, using CPU and memory.</summary>

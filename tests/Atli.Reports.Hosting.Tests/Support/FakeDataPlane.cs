@@ -29,13 +29,14 @@ internal sealed record ReceivedRequest(
 /// </summary>
 internal sealed class FakeDataPlane : HttpMessageHandler
 {
-  public const string GroupPath = "/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/group-1/";
+  public const string GroupPath =
+    "/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/";
 
   public const string ApiVersionQuery = "?api-version=2026-02-01-preview";
 
   public static readonly SandboxesOptions Options = new()
   {
-    SubscriptionId = "sub-1",
+    SubscriptionId = "11111111-2222-3333-4444-555555555555",
     ResourceGroup = "rg-1",
     SandboxGroup = "group-1",
     Region = "eastus2",

@@ -1,4 +1,6 @@
 using System.Collections;
+using Atli.Reports.Hosting.Renderers;
+using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Tests.Support;
 using Microsoft.Extensions.Configuration;
 
@@ -40,7 +42,14 @@ public class CommandLineTests
   [Arguments("rollout --tenant A", "--tenant 'A' is not a tenant ID")]
   [Arguments("delete --tenant a --drain soon", "--drain is 'soon'")]
   [Arguments("delete --tenant a --drain -00:01:00", "--drain is '-00:01:00'")]
+  [Arguments("delete --tenant a --drain 01:00:01", "--drain is '01:00:01'; the most is 01:00:00.")]
+  [Arguments("rollout --drain 1.00:00:00", "--drain is '1.00:00:00'; the most is 01:00:00.")]
   [Arguments("list --tenant a", "Unknown option '--tenant'.")]
+  [Arguments("prune --drain 150", "--drain is '150'; use hh:mm:ss")]
+  [Arguments("prune --tenant A", "--tenant 'A' is not a tenant ID")]
+  [Arguments("prune --size S", "Unknown option '--size'.")]
+  [Arguments("disable", "--tenant is required.")]
+  [Arguments("enable --tenant a --drain 0", "Unknown option '--drain'.")]
   public async Task A_wrong_command_line_is_a_usage_error_that_changes_nothing(
     string commandLine,
     string message
@@ -65,6 +74,9 @@ public class CommandLineTests
   [Arguments("rollout -h", "Usage: atli-reports-provisioner rollout [--disk-image <id>]")]
   [Arguments("delete --tenant a --help", "Usage: atli-reports-provisioner delete --tenant <id>")]
   [Arguments("list --help", "Usage: atli-reports-provisioner list")]
+  [Arguments("prune --help", "Usage: atli-reports-provisioner prune [--tenant <id>]")]
+  [Arguments("disable --help", "Usage: atli-reports-provisioner disable --tenant <id>")]
+  [Arguments("enable -h", "Usage: atli-reports-provisioner enable --tenant <id>")]
   public async Task Help_needs_no_configuration(string commandLine, string expected)
   {
     using Provisioning provisioning = new();
@@ -83,6 +95,42 @@ public class CommandLineTests
   [Arguments("Provisioner:ReadyTimeout", "00:00:00", "Provisioner:ReadyTimeout must be positive.")]
   [Arguments("Provisioner:AutoSuspendAfter", "00:00:00", "AutoSuspendAfter must be positive.")]
   [Arguments("Provisioner:DrainDelay", "-00:00:01", "Provisioner:DrainDelay cannot be negative.")]
+  // A bare number would bind as days: DrainDelay=150 is 150 days, not seconds.
+  [Arguments("Provisioner:DrainDelay", "150", "Provisioner:DrainDelay is '150'; use hh:mm:ss")]
+  [Arguments("Provisioner:ReadyTimeout", "180", "Provisioner:ReadyTimeout is '180'; use hh:mm:ss")]
+  [Arguments(
+    "Provisioner:AutoSuspendAfter",
+    "300",
+    "Provisioner:AutoSuspendAfter is '300'; use hh:mm:ss"
+  )]
+  [Arguments(
+    "Provisioner:DrainDelay",
+    "01:00:01",
+    "Provisioner:DrainDelay is 01:00:01; the most is 01:00:00."
+  )]
+  [Arguments(
+    "Provisioner:ReadyTimeout",
+    "00:15:01",
+    "Provisioner:ReadyTimeout is 00:15:01; the most is 00:15:00."
+  )]
+  [Arguments(
+    "Provisioner:AutoSuspendAfter",
+    "1.00:00:01",
+    "Provisioner:AutoSuspendAfter is 1.00:00:01; the most is 1.00:00:00."
+  )]
+  [Arguments(
+    "Provisioner:PortActivation",
+    "Always",
+    "Provisioner:PortActivation is 'Always'; use OnDemand or Manual."
+  )]
+  [Arguments(
+    "Provisioner:AllowedSourceCidrs:0",
+    "203.0.113.7",
+    "Provisioner:AllowedSourceCidrs: '203.0.113.7' is not a source range in CIDR notation"
+  )]
+  [Arguments("Provisioner:Sandboxes:Region", "x.attacker.example#", "Sandboxes Region")]
+  [Arguments("Provisioner:Sandboxes:SubscriptionId", "sub-1", "Sandboxes SubscriptionId")]
+  [Arguments("Provisioner:Sandboxes:ResourceGroup", "rg/../x", "Sandboxes ResourceGroup")]
   public async Task Wrong_configuration_is_a_configuration_error(
     string key,
     string value,
@@ -90,16 +138,100 @@ public class CommandLineTests
   )
   {
     using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
 
     var (exitCode, _, error) = await RunAsync(
       provisioning,
       new(Configured) { [key] = value },
-      "list"
+      "rollout --disk-image disk-2"
     );
 
     await Assert.That(exitCode).IsEqualTo(2);
     await Assert.That(error).StartsWith("error: configuration: ");
     await Assert.That(error).Contains(message);
+    // Found before anything changed.
+    await Assert.That(provisioning.Journal.Entries).IsEmpty();
+  }
+
+  [Test]
+  public async Task Durations_within_their_bounds_are_taken()
+  {
+    using Provisioning provisioning = new();
+    ProvisionerOptions? options = null;
+    using StringWriter error = new() { NewLine = "\n" };
+
+    var exitCode = await ProvisionerCli.RunAsync(
+      ["list"],
+      new ConfigurationBuilder()
+        .AddInMemoryCollection(
+          new Dictionary<string, string?>(Configured)
+          {
+            ["Provisioner:DrainDelay"] = "01:00:00",
+            ["Provisioner:ReadyTimeout"] = "00:15:00",
+            ["Provisioner:AutoSuspendAfter"] = "1.00:00:00",
+            ["Provisioner:PortActivation"] = "manual",
+            ["Provisioner:AllowedSourceCidrs:0"] = "203.0.113.7/32",
+            ["Provisioner:AllowedSourceCidrs:1"] = "2001:db8::/48",
+          }
+        )
+        .Build(),
+      configured =>
+      {
+        options = configured;
+        return provisioning.Services;
+      },
+      provisioning.Output,
+      error,
+      provisioning.Clock,
+      TestToken
+    );
+
+    await Assert.That(exitCode).IsEqualTo(0);
+    await Assert.That(options!.DrainDelay).IsEqualTo(TimeSpan.FromHours(1));
+    await Assert.That(options.ReadyTimeout).IsEqualTo(TimeSpan.FromMinutes(15));
+    await Assert.That(options.AutoSuspendAfter).IsEqualTo(TimeSpan.FromDays(1));
+    await Assert.That(options.Activation).IsEqualTo(SandboxPortActivation.Manual);
+    await Assert
+      .That(options.PortOptions.AllowedSourceCidrs)
+      .IsEquivalentTo(["203.0.113.7/32", "2001:db8::/48"]);
+  }
+
+  [Test]
+  public async Task Disable_stops_the_tenants_renderer_and_enable_undoes_it()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+
+    var (disabled, _, _) = await RunAsync(provisioning, Configured, "disable --tenant a");
+    await Assert.That(disabled).IsEqualTo(0);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEquivalentTo(["old-a"]);
+
+    var (enabled, _, _) = await RunAsync(provisioning, Configured, "enable --tenant a");
+    await Assert.That(enabled).IsEqualTo(0);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEmpty();
+  }
+
+  [Test]
+  public async Task Prune_deletes_leftovers_after_the_drain_and_exits_with_1_when_one_stays()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Sandboxes.Add("left-a", RendererLabels.For("a", RendererSize.Medium));
+    provisioning.Sandboxes.Add("left-b", RendererLabels.For("b", RendererSize.Medium));
+    provisioning.Sandboxes.FailDelete.Add("left-b");
+    var drain = TimeSpan.FromSeconds(10);
+
+    var prune = RunAsync(
+      provisioning,
+      new(Configured) { ["Provisioner:DrainDelay"] = "00:02:30" },
+      "prune --drain 00:00:10"
+    );
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    provisioning.Clock.Advance(drain);
+    var (exitCode, output, _) = await prune;
+
+    await Assert.That(exitCode).IsEqualTo(1);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-b"]);
+    await Assert.That(output).Contains("Deleted 1, failed 1.");
   }
 
   [Test]

@@ -89,10 +89,28 @@ public class AccessTokenTests
   }
 
   [Test]
-  public async Task A_short_lived_token_is_refreshed_on_every_call()
+  public async Task A_short_lived_token_is_refreshed_halfway_through_its_life()
   {
     using TestSandboxes sandboxes = new(FakeDataPlane.Ok("[]"));
     sandboxes.Credential.Lifetime = TimeSpan.FromMinutes(4);
+
+    await sandboxes.Client.ListAsync(TestToken);
+    await sandboxes.Client.ListAsync(TestToken);
+    sandboxes.Clock.Advance(TimeSpan.FromMinutes(2) - TestClock.Tick);
+    await sandboxes.Client.ListAsync(TestToken);
+    await Assert.That(sandboxes.Credential.Requests).IsEqualTo(1);
+    sandboxes.Clock.Advance(TestClock.Tick);
+    await sandboxes.Client.ListAsync(TestToken);
+
+    await Assert.That(sandboxes.Credential.Requests).IsEqualTo(2);
+    await Assert.That(sandboxes.Plane.Requests[^1].Authorization).IsEqualTo("Bearer token-2");
+  }
+
+  [Test]
+  public async Task An_expired_token_is_never_reused()
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok("[]"));
+    sandboxes.Credential.Lifetime = TimeSpan.FromMinutes(-1);
 
     await sandboxes.Client.ListAsync(TestToken);
     await sandboxes.Client.ListAsync(TestToken);

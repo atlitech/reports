@@ -5,7 +5,8 @@ namespace Atli.Reports.Hosting.Renderers;
 
 /// <summary>
 /// How stores write and read a <see cref="RendererRecord"/>: camelCase JSON, the URL as its absolute
-/// URI string. Both stores check what they read, so a damaged or misplaced record fails loudly
+/// URI string, and fields without a value left out (so records written before a field existed read
+/// as it unset). Both stores check what they read, so a damaged or misplaced record fails loudly
 /// instead of routing a tenant somewhere else.
 /// </summary>
 internal static class RendererRecordJson
@@ -74,9 +75,12 @@ internal static class RendererRecordJson
   {
     ArgumentNullException.ThrowIfNull(record);
     TenantId.Validate(record.TenantId, nameof(record));
-    if (record.Url is null || !record.Url.IsAbsoluteUri)
+    if (!IsHttpUrl(record.Url))
     {
-      throw new ArgumentException("A renderer record's URL is absolute.", nameof(record));
+      throw new ArgumentException(
+        "A renderer record's URL is an absolute http or https address.",
+        nameof(record)
+      );
     }
 
     if (string.IsNullOrWhiteSpace(record.ApiKey))
@@ -84,12 +88,36 @@ internal static class RendererRecordJson
       throw new ArgumentException("A renderer record has an API key.", nameof(record));
     }
 
+    if (record.MaxConcurrentRequests is < 1)
+    {
+      throw new ArgumentException(
+        "A renderer record's MaxConcurrentRequests is at least 1, or absent.",
+        nameof(record)
+      );
+    }
+
     return record;
   }
 
+  /// <summary>
+  /// Whether <paramref name="url"/> is an absolute <c>http</c> or <c>https</c> address. Whether a
+  /// gateway also requires <c>https</c> is its own policy: development renderers listen on plain
+  /// <c>http</c>.
+  /// </summary>
+  private static bool IsHttpUrl(Uri? url) =>
+    url is { IsAbsoluteUri: true }
+    && (url.Scheme == Uri.UriSchemeHttps || url.Scheme == Uri.UriSchemeHttp);
+
   private static RendererRecord Check(RendererRecord? record, string tenantId, string source)
   {
-    if (record is null || record.Url is null || !record.Url.IsAbsoluteUri)
+    // Checked as on writing, so a record edited by hand or by another tool cannot route a tenant to
+    // a file: URL or present an empty credential.
+    if (
+      record is null
+      || !IsHttpUrl(record.Url)
+      || string.IsNullOrWhiteSpace(record.ApiKey)
+      || record.MaxConcurrentRequests is < 1
+    )
     {
       throw new InvalidDataException($"{source} does not hold a renderer record.");
     }
