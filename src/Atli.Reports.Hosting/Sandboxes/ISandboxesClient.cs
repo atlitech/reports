@@ -39,4 +39,30 @@ public interface ISandboxesClient
     bool anonymous,
     CancellationToken cancellationToken
   );
+
+  /// <summary>
+  /// Exposes a port through the platform's proxy with the given <paramref name="activation"/>, and
+  /// returns the sandbox with the port's URL. With <see cref="SandboxPortActivation.OnDemand"/> a
+  /// request to the port resumes a stopped sandbox, so its callers need no resume permission.
+  /// </summary>
+  /// <remarks>
+  /// Clients written before activation modes existed implement only the other overload, which
+  /// exposes a <see cref="SandboxPortActivation.Manual"/> port: this one delegates to it for
+  /// <see cref="SandboxPortActivation.Manual"/> and fails with
+  /// <see cref="NotSupportedException"/> otherwise.
+  /// </remarks>
+  Task<SandboxView> AddPortAsync(
+    string sandboxId,
+    int port,
+    bool anonymous,
+    SandboxPortActivation activation,
+    CancellationToken cancellationToken
+  ) =>
+    activation == SandboxPortActivation.Manual
+      ? AddPortAsync(sandboxId, port, anonymous, cancellationToken)
+      : Task.FromException<SandboxView>(
+        new NotSupportedException(
+          $"This Sandboxes client cannot expose a port with {activation} activation."
+        )
+      );
 }

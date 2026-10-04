@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -19,6 +20,12 @@ namespace Atli.Reports.Hosting.Sandboxes;
 /// attempt would leave a running renderer nobody records.
 /// </para>
 /// <para>
+/// A stop, resume, or port the data plane refuses with <c>409</c> because it is already done
+/// succeeds. A <c>409</c> while the sandbox is between states is waited out for up to
+/// <see cref="SettleTimeout"/>, and the call is made once more if the sandbox settled where it
+/// still applies.
+/// </para>
+/// <para>
 /// Failures throw <see cref="SandboxesException"/> with the status and the data plane's own
 /// description of the error, never a request's body or headers: a create's body holds the
 /// renderer's environment, credentials among them. The client logs nothing.
@@ -37,6 +44,16 @@ public sealed class SandboxesClient : ISandboxesClient
 
   /// <summary>How much of the data plane's error description an exception message carries.</summary>
   internal const int MaxErrorLength = 500;
+
+  /// <summary>
+  /// How long a call the data plane refused with <c>409</c> waits for the sandbox to settle before
+  /// deciding; see <see cref="SettleConflictAsync"/>. Suspending took 7 to 15 seconds in the measured
+  /// runs.
+  /// </summary>
+  internal static readonly TimeSpan SettleTimeout = TimeSpan.FromSeconds(30);
+
+  /// <summary>How often a sandbox that is between states is read again.</summary>
+  internal static readonly TimeSpan SettlePollInterval = TimeSpan.FromSeconds(1);
 
   /// <summary>
   /// Environment values at least this long are scrubbed from a failed create's error. Shorter ones
@@ -111,14 +128,8 @@ public sealed class SandboxesClient : ISandboxesClient
   public async Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken)
   {
     Call call = new(HttpMethod.Get, SandboxPath(sandboxId));
-    using var response = await SendAsync(call, cancellationToken);
-    if (response.StatusCode == HttpStatusCode.NotFound)
-    {
-      return null;
-    }
-
-    await EnsureSuccessAsync(call, response, cancellationToken);
-    return await ReadSandboxAsync(call, response, cancellationToken);
+    var sandbox = await GetResponseAsync(call, cancellationToken);
+    return sandbox is null ? null : ToView(call, sandbox);
   }
 
   /// <inheritdoc />
@@ -157,27 +168,34 @@ public sealed class SandboxesClient : ISandboxesClient
   public async Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken)
   {
     Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/stop", EmptyObject);
-    using (var response = await SendAsync(call, cancellationToken))
+    for (var attempt = 0; ; attempt++)
     {
-      if (
-        await AlreadyDoneAsync(
+      using (var response = await SendAsync(call, cancellationToken))
+      {
+        var conflict = await SettleConflictAsync(
           response,
           sandboxId,
           sandbox => sandbox.State == SandboxStates.Stopped,
+          IsSettled,
           cancellationToken
-        ) is
-        { } stopped
-      )
-      {
-        return stopped;
+        );
+        if (conflict.Done is { } stopped)
+        {
+          return stopped;
+        }
+
+        if (conflict.TryAgain && attempt == 0)
+        {
+          continue;
+        }
+
+        await EnsureSuccessAsync(call, response, cancellationToken);
       }
 
-      await EnsureSuccessAsync(call, response, cancellationToken);
+      // The response describes the memory snapshot the stop took (its "id" is the snapshot's), not
+      // the sandbox, so the sandbox is read afresh.
+      return await GetRequiredAsync(call, sandboxId, cancellationToken);
     }
-
-    // The response describes the memory snapshot the stop took (its "id" is the snapshot's), not
-    // the sandbox, so the sandbox is read afresh.
-    return await GetRequiredAsync(call, sandboxId, cancellationToken);
   }
 
   /// <inheritdoc />
@@ -185,22 +203,30 @@ public sealed class SandboxesClient : ISandboxesClient
   public async Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken)
   {
     Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/resume", EmptyObject);
-    using var response = await SendAsync(call, cancellationToken);
-    if (
-      await AlreadyDoneAsync(
+    for (var attempt = 0; ; attempt++)
+    {
+      using var response = await SendAsync(call, cancellationToken);
+      var conflict = await SettleConflictAsync(
         response,
         sandboxId,
         sandbox => sandbox.State == SandboxStates.Running,
+        IsSettled,
         cancellationToken
-      ) is
-      { } running
-    )
-    {
-      return running;
-    }
+      );
+      if (conflict.Done is { } running)
+      {
+        return running;
+      }
 
-    await EnsureSuccessAsync(call, response, cancellationToken);
-    return await ReadSandboxAsync(call, response, cancellationToken);
+      // Refused while it was suspending, say, and now it has stopped: resuming it can work.
+      if (conflict.TryAgain && attempt == 0)
+      {
+        continue;
+      }
+
+      await EnsureSuccessAsync(call, response, cancellationToken);
+      return await ReadSandboxAsync(call, response, cancellationToken);
+    }
   }
 
   /// <inheritdoc />
@@ -211,55 +237,106 @@ public sealed class SandboxesClient : ISandboxesClient
   /// activation mode is the data plane's default, <c>Manual</c>: a request to a stopped sandbox
   /// gets <c>403</c> until it is resumed.
   /// </remarks>
-  public async Task<SandboxView> AddPortAsync(
+  public Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
     bool anonymous,
+    CancellationToken cancellationToken
+  ) => AddPortCoreAsync(sandboxId, port, anonymous, activation: null, cancellationToken);
+
+  /// <inheritdoc />
+  /// <remarks>
+  /// Adding a port the sandbox already exposes with the same access and activation succeeds; with
+  /// other access or activation, the data plane's <c>409</c> stands.
+  /// </remarks>
+  public Task<SandboxView> AddPortAsync(
+    string sandboxId,
+    int port,
+    bool anonymous,
+    SandboxPortActivation activation,
+    CancellationToken cancellationToken
+  ) => AddPortCoreAsync(sandboxId, port, anonymous, activation, cancellationToken);
+
+  /// <summary>
+  /// Adds the port with <paramref name="activation"/>, or with none named when it is
+  /// <see langword="null"/>, which the data plane takes as <c>Manual</c>.
+  /// </summary>
+  private async Task<SandboxView> AddPortCoreAsync(
+    string sandboxId,
+    int port,
+    bool anonymous,
+    SandboxPortActivation? activation,
     CancellationToken cancellationToken
   )
   {
     ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
     ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+    if (activation is { } named && !Enum.IsDefined(named))
+    {
+      throw new ArgumentOutOfRangeException(nameof(activation), named, "Unknown activation.");
+    }
+
     var body = JsonSerializer.SerializeToUtf8Bytes(
       new AddPortRequest
       {
         Port = port,
         Auth = new PortAuthWire { Anonymous = anonymous },
+        ActivationMode = activation switch
+        {
+          null => null,
+          SandboxPortActivation.OnDemand => "OnDemand",
+          _ => "Manual",
+        },
       },
       SandboxesJsonContext.Default.AddPortRequest
     );
+    var expected = activation ?? SandboxPortActivation.Manual;
     Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/ports/add", body);
-    SandboxResponse added;
-    using (var response = await SendAsync(call, cancellationToken))
+    for (var attempt = 0; ; attempt++)
     {
-      if (
-        await AlreadyDoneAsync(
+      SandboxResponse added;
+      using (var response = await SendAsync(call, cancellationToken))
+      {
+        var conflict = await SettleConflictAsync(
           response,
           sandboxId,
           sandbox =>
-            sandbox.Ports.Any(exposed => exposed.Port == port && exposed.Anonymous == anonymous),
+            sandbox.Ports.Any(exposed =>
+              exposed.Port == port
+              && exposed.Anonymous == anonymous
+              && exposed.Activation == expected
+            ),
+          // The port exists but has no address yet: the proxy is still setting it up.
+          sandbox =>
+            IsSettled(sandbox)
+            && !(sandbox.Ports ?? []).Any(exposed => exposed.Port == port && exposed.Url is null),
           cancellationToken
-        ) is
-        { } exposed
-      )
-      {
-        return exposed;
+        );
+        if (conflict.Done is { } exposed)
+        {
+          return exposed;
+        }
+
+        if (conflict.TryAgain && attempt == 0)
+        {
+          continue;
+        }
+
+        await EnsureSuccessAsync(call, response, cancellationToken);
+        added = await ReadAsync(
+          call,
+          response,
+          SandboxesJsonContext.Default.SandboxResponse,
+          cancellationToken
+        );
       }
 
-      await EnsureSuccessAsync(call, response, cancellationToken);
-      added = await ReadAsync(
-        call,
-        response,
-        SandboxesJsonContext.Default.SandboxResponse,
-        cancellationToken
-      );
+      // The data plane answers with the sandbox's ports alone, so the sandbox is read afresh unless
+      // the answer is a whole sandbox.
+      return added is { Id: not null, State: not null }
+        ? ToView(call, added)
+        : await GetRequiredAsync(call, sandboxId, cancellationToken);
     }
-
-    // The data plane answers with the sandbox's ports alone, so the sandbox is read afresh unless
-    // the answer is a whole sandbox.
-    return added is { Id: not null, State: not null }
-      ? ToView(call, added)
-      : await GetRequiredAsync(call, sandboxId, cancellationToken);
   }
 
   private static CreateSandboxRequest ToRequest(SandboxSpec spec)
@@ -312,24 +389,81 @@ public sealed class SandboxesClient : ISandboxesClient
   /// <summary>
   /// The data plane refuses with <c>409</c> to stop a stopped sandbox (<c>SandboxNotRunning</c>), to
   /// resume a running one (<c>InvalidSandboxState</c>), and to add a port it already exposes
-  /// (<c>PortAlreadyExists</c>), as on a retry after an answer that was lost. Returns the sandbox when
-  /// it is already <paramref name="done"/>, so such a call succeeds; otherwise
-  /// <see langword="null"/>, and the refusal stands.
+  /// (<c>PortAlreadyExists</c>), as on a retry after an answer that was lost. It also refuses while
+  /// the sandbox is between states, such as <c>Stopping</c> on its way to <c>Stopped</c>, or while a
+  /// port it already has waits for its address.
   /// </summary>
-  private async Task<SandboxView?> AlreadyDoneAsync(
+  /// <remarks>
+  /// So on a <c>409</c> the sandbox is read until it is <paramref name="settled"/>, every
+  /// <see cref="SettlePollInterval"/> for up to <see cref="SettleTimeout"/>. When it is
+  /// <paramref name="done"/>, the call succeeds with it. When it settled only after a transition,
+  /// the call may be made once more. Otherwise the refusal stands.
+  /// </remarks>
+  private async Task<ConflictOutcome> SettleConflictAsync(
     HttpResponseMessage response,
     string sandboxId,
     Func<SandboxView, bool> done,
+    Func<SandboxResponse, bool> settled,
     CancellationToken cancellationToken
   )
   {
     if (response.StatusCode != HttpStatusCode.Conflict)
     {
+      return default;
+    }
+
+    Call get = new(HttpMethod.Get, SandboxPath(sandboxId));
+    var started = _time.GetTimestamp();
+    for (var transitioned = false; ; transitioned = true)
+    {
+      if (await GetResponseAsync(get, cancellationToken) is not { } sandbox)
+      {
+        return default;
+      }
+
+      var view = ToView(get, sandbox);
+      if (done(view))
+      {
+        return new ConflictOutcome(view, TryAgain: false);
+      }
+
+      if (settled(sandbox))
+      {
+        return new ConflictOutcome(null, TryAgain: transitioned);
+      }
+
+      if (_time.GetElapsedTime(started) >= SettleTimeout)
+      {
+        return default;
+      }
+
+      await Task.Delay(SettlePollInterval, _time, cancellationToken);
+    }
+  }
+
+  /// <summary>Whether the sandbox is in a state it stays in: running or stopped.</summary>
+  private static bool IsSettled(SandboxResponse sandbox) =>
+    sandbox.State is SandboxStates.Running or SandboxStates.Stopped;
+
+  /// <summary>Reads the sandbox as the data plane sends it, or <see langword="null"/> when it does not exist.</summary>
+  private async Task<SandboxResponse?> GetResponseAsync(
+    Call call,
+    CancellationToken cancellationToken
+  )
+  {
+    using var response = await SendAsync(call, cancellationToken);
+    if (response.StatusCode == HttpStatusCode.NotFound)
+    {
       return null;
     }
 
-    var sandbox = await GetAsync(sandboxId, cancellationToken);
-    return sandbox is not null && done(sandbox) ? sandbox : null;
+    await EnsureSuccessAsync(call, response, cancellationToken);
+    return await ReadAsync(
+      call,
+      response,
+      SandboxesJsonContext.Default.SandboxResponse,
+      cancellationToken
+    );
   }
 
   private async Task<SandboxView> GetRequiredAsync(
@@ -643,7 +777,18 @@ public sealed class SandboxesClient : ISandboxesClient
       // A port the proxy has no address for yet cannot be called; it is left out.
       if (Uri.TryCreate(port.Url, UriKind.Absolute, out var url))
       {
-        ports.Add(new SandboxPort(port.Port, url, port.Auth?.Anonymous ?? false));
+        ports.Add(
+          new SandboxPort(port.Port, url, port.Auth?.Anonymous ?? false)
+          {
+            Activation = string.Equals(
+              port.ActivationMode,
+              "OnDemand",
+              StringComparison.OrdinalIgnoreCase
+            )
+              ? SandboxPortActivation.OnDemand
+              : SandboxPortActivation.Manual,
+          }
+        );
       }
     }
 
@@ -653,6 +798,14 @@ public sealed class SandboxesClient : ISandboxesClient
       State = sandbox.State,
       Labels = sandbox.Labels ?? [],
       Ports = ports,
+      CreatedAt = DateTimeOffset.TryParse(
+        sandbox.CreatedAt,
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.AssumeUniversal,
+        out var createdAt
+      )
+        ? createdAt
+        : null,
     };
   }
 
@@ -681,4 +834,9 @@ public sealed class SandboxesClient : ISandboxesClient
   {
     public override string ToString() => $"Sandboxes {Method} {Path}";
   }
+
+  /// <summary>What a <c>409</c> turned out to mean; the default is that the refusal stands.</summary>
+  /// <param name="Done">The sandbox, already where the call would have taken it.</param>
+  /// <param name="TryAgain">The sandbox settled after a transition, so the call may work now.</param>
+  private readonly record struct ConflictOutcome(SandboxView? Done, bool TryAgain);
 }

@@ -10,7 +10,7 @@ internal sealed class Provisioning : IDisposable
 {
   public Provisioning()
   {
-    Sandboxes = new(Journal);
+    Sandboxes = new(Journal, Clock);
     Records = new(Journal);
     Readiness = new(Journal);
   }

@@ -8,8 +8,16 @@ operator's shell or a release pipeline, with rights the gateway never holds.
 Each renderer is one sandbox that serves one tenant for its whole lifetime. The sandbox runs the
 unmodified server image with Chromium's sandbox on, denies egress, admits only a credential that
 belongs to that renderer alone, and suspends itself when idle. Its record holds the URL of its
-port, its sandbox ID, and that credential. The gateway reads the record to route conversions and
-resumes the sandbox when its proxy answers `403 {"error":"Sandbox is not running"}`.
+port, its sandbox ID, and that credential. The gateway reads the record to route conversions.
+
+A suspended renderer is woken by the request itself: its port is exposed with on-demand
+activation (`Provisioner:PortActivation`, `OnDemand` by default), so the platform's proxy resumes
+the sandbox and then serves the request. The gateway then needs no permission on the sandbox group.
+With `Manual` activation the proxy answers `403 {"error":"Sandbox is not running"}` instead, and the
+gateway's `Wake:Mode=Sandboxes` resumes the sandbox and retries; that remains the fallback.
+On-demand activation was observed with a plain listener on 2026-10-04 (the first answer from a
+stopped sandbox came in about 1.1 seconds); its behavior with the server image is still being
+measured.
 
 ## Azure roles
 
@@ -18,7 +26,7 @@ resumes the sandbox when its proxy answers `403 {"error":"Sandbox is not running
 | Provisioner | Container Apps SandboxGroup Data Owner | The renderer sandbox group |
 | Provisioner, with `Records:Store` set to `KeyVault` | Key Vault Secrets Officer | The record vault |
 | Gateway | Key Vault Secrets User | The record vault |
-| Gateway | A custom role with only `Microsoft.App/sandboxGroups/sandboxes/read` and `Microsoft.App/sandboxGroups/sandboxes/resume/action` | The renderer sandbox group |
+| Gateway, only with `Wake:Mode=Sandboxes` (renderers with `Manual` ports) | A custom role with only `Microsoft.App/sandboxGroups/sandboxes/read` and `Microsoft.App/sandboxGroups/sandboxes/resume/action` | The renderer sandbox group |
 
 Data Owner also allows running commands and reading files in every sandbox of the group, so
 nothing on the request path may hold it. The gateway's custom role cannot create, delete, or
@@ -40,17 +48,18 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Provisioner:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region` | Required | The renderer sandbox group |
+| `Provisioner:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region` | Required | The renderer sandbox group: a subscription GUID, Azure resource names, and a region name such as `eastus2` |
 | `Provisioner:Sandboxes:ManagedIdentityClientId` | Empty | A user-assigned identity for the data plane; empty for the default chain |
 | `Provisioner:Records:Store` | Required | `KeyVault`, or `File` for development and tests |
 | `Provisioner:Records:VaultUri` | | For `KeyVault`: the vault, such as `https://contoso.vault.azure.net/` |
 | `Provisioner:Records:ManagedIdentityClientId` | Empty | For `KeyVault`: a user-assigned identity for the vault |
-| `Provisioner:Records:Path` | | For `File`: the directory of record files |
+| `Provisioner:Records:Path` | | For `File`: the directory of record files, which only its owner may write to |
 | `Provisioner:DiskImageId` | | The disk image new renderers start from; `--disk-image` overrides it |
 | `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, two), or `L` (2 vCPU, 4 GiB, four) |
-| `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer |
-| `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200` |
-| `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves; `--drain` overrides it |
+| `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
+| `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
+| `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
+| `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
 
 ```json
 {
@@ -71,13 +80,25 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 ```
 
 The same settings as environment variables: `Provisioner__Sandboxes__Region=eastus2`,
-`Provisioner__Records__Store=KeyVault`, and so on. Durations are `hh:mm:ss`.
+`Provisioner__Records__Store=KeyVault`, and so on. Durations are `hh:mm:ss` everywhere: a bare
+number such as `DrainDelay=150` is refused, since .NET would read it as 150 days. Every setting is
+checked before anything changes.
 
 ## Commands
 
 Every command accepts `--help`. Exit codes: `0` success, `1` failure, `2` a usage or configuration
 error, found before anything changes. Progress lines start with the tenant, such as `[contoso]`.
-No command ever prints a credential or a verifier.
+No command ever prints a credential or a verifier. The first Ctrl+C or `SIGTERM` cancels the
+command and lets it delete what it created but has not recorded; a second one stops it at once.
+
+### One command at a time
+
+Run only one provisioner command per sandbox group at a time: in a release pipeline, put every job
+that runs it in one concurrency group (a GitHub Actions `concurrency:` key, an Azure Pipelines
+exclusive lock). Commands that overlap are still kept from corrupting records: just before a command
+writes a tenant's record, it reads the record again, and if another command created, replaced, or
+deleted it meanwhile, it discards its own new renderer and reports the tenant as failed. What can
+remain is a sandbox no record points to, which `prune` deletes.
 
 ### create
 
@@ -91,15 +112,27 @@ Creates a renderer for a tenant that has none:
    the record keeps the credential for the gateway.
 2. Creates the sandbox from the disk image at the size's CPU and memory, with the server image's
    entrypoint, egress denied, auto-suspend, and the labels `app=atli-reports`, `role=renderer`,
-   `tenant=<id>`, and `size=<S|M|L>`.
-3. Exposes port 8080 anonymously. The port URL is public; the renderer's credential check is the
-   gate, as the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) explains.
+   `tenant=<id>`, `size=<S|M|L>`, and `launch=<a new GUID>`. The renderer runs the size's
+   conversions at once and queues up to three times as many more from the gateway, and accepts
+   request bodies up to 30 MiB: the gateway's JSON encoding of a body it admitted can grow it up to
+   three times.
+3. Exposes port 8080 anonymously, with `Provisioner:PortActivation`. The port URL is public; the
+   renderer's credential check is the gate, as the
+   [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) explains.
 4. Polls `GET <url>/health/ready` every 500 ms until it answers `200`, for up to `ReadyTimeout`.
    A new renderer answered in 1.4 to 5.2 seconds in the measured runs.
-5. Writes the record, which makes the renderer routable.
+5. Reads the tenant's record again, and stops if another command wrote one meanwhile.
+6. Writes the record, which makes the renderer routable.
 
 If any step after the sandbox exists fails, or the command is canceled, the sandbox is deleted
-again and no record is written. A tenant that already has a record is refused; `rollout` replaces
+again and no record is written. A create call that failed without an answer may still have made a
+sandbox, so the provisioner then looks for its `launch` label and deletes what it finds. A record
+write that failed may still have taken effect, so the provisioner reads the record back: if it
+points to the new renderer, the create succeeded; if the read fails too, the sandbox is kept and
+`prune` deletes it should no record point to it. Every cleanup runs even after a cancel, for at most
+two minutes.
+
+A tenant that already has a record, or one that cannot be read, is refused; `rollout` replaces
 renderers. Tenant IDs are 1 to 63 lowercase letters, digits, and hyphens.
 
 ### rollout
@@ -108,11 +141,12 @@ renderers. Tenant IDs are 1 to 63 lowercase letters, digits, and hyphens.
 atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel 4] [--drain 00:02:30]
 ```
 
-Replaces every renderer whose record names another disk image, or only the given tenant's.
-Suspended renderers are replaced too, without being resumed. For each one, the provisioner creates
-a replacement exactly as `create` does, with a new credential and the old sandbox's `size` label
-(`M` when it has none), waits until it is ready, and replaces the record in one step. The old
-sandbox is deleted after the drain.
+Replaces every renderer whose record names another disk image or a sandbox that no longer exists,
+or only the given tenant's. Suspended renderers are replaced too, without being resumed. For each
+one, the provisioner creates a replacement exactly as `create` does, with a new credential and the
+old sandbox's `size` label (`M` when it has none), waits until it is ready, and replaces the record
+in one step. The old sandbox is deleted after the drain, if it is labeled for the tenant; a record
+that names another tenant's sandbox is reported, and that sandbox is left alone.
 
 - `--max-parallel` bounds how many replacements are created at once. A drain does not hold a
   place, so a rollout takes about the tenant count divided by `--max-parallel`, times the time to
@@ -120,8 +154,12 @@ sandbox is deleted after the drain.
 - The drain must outlast the gateway's cached copy of the record (30 seconds) and its longest
   request (90 seconds). Until then, the gateway may still send conversions to the old renderer.
 - A tenant that fails keeps its old renderer and record; a half-created replacement is deleted.
-  The rollout carries on with the other tenants, prints a summary, and exits with `1`. Renderers
-  already on the disk image are skipped, so running the same command again finishes the job.
+  A record that cannot be read is a failure too, and its renderer is left alone. The rollout
+  carries on with the other tenants, prints a summary, and exits with `1`. Renderers already on
+  the disk image are skipped, so running the same command again finishes the job.
+- Last, it prunes, as `prune` does (for the given tenant only, with `--tenant`): renderer sandboxes
+  that an earlier, canceled or killed command left behind are deleted after one more drain. A
+  canceled rollout skips this; its old sandboxes still draining are left to the next run.
 
 ### delete
 
@@ -130,10 +168,16 @@ atli-reports-provisioner delete --tenant contoso [--drain 00:02:30]
 ```
 
 Deletes the tenant's record first, so the gateway stops routing to the renderer, then the sandbox.
-Without `--drain` the sandbox goes at once, as it should for a compromised renderer; with it, the
-command waits that long in between so conversions in flight can finish. It also deletes any other
-sandbox labeled for the tenant, such as one an earlier, interrupted delete left behind, so running
-it again is always safe.
+A record that cannot be read, or that the vault holds disabled, is deleted all the same, so a
+compromised renderer can always be cut off. Without `--drain` the sandbox goes at once, as it should
+for a compromised renderer; with it, the command waits that long in between so conversions in
+flight can finish. It deletes every sandbox labeled for the tenant, such as one an earlier,
+interrupted delete left behind, so running it again is always safe. A sandbox the record names that
+is labeled for another tenant is not deleted, and the command exits with `1`.
+
+With the Key Vault store, deleting a record disables its current secret version before deleting the
+secret. Creating the tenant again recovers the soft-deleted secret, which stays disabled, so no
+record, until the new record is written; if that write fails, the secret is deleted again.
 
 ### list
 
@@ -147,10 +191,28 @@ contoso   3f0c1c4e-0d51-4f7a-9d6b-5f4bb0b1c2d3  Stopped  M     <disk id>   2026-
 fabrikam  8d1e7a90-4c55-4b8e-a1f2-0b9e6c3d4e5f  Running  L     <disk id>   2026-10-03 21:41:03Z
 ```
 
-Lists each record with its sandbox's current state (`missing` when the sandbox is gone). Renderer
-sandboxes that no record points to follow in a second table: one being created right now, or one
-a failed or canceled command left behind. Delete a leftover with
-`aca sandbox delete --id <sandbox ID> --yes`.
+Lists each record with its sandbox's current state (`missing` when the sandbox is gone; `rollout`
+replaces it). Records the store holds but cannot read follow, with the reason, instead of failing
+the list. Renderer sandboxes that no record points to follow in a last table: one being created
+right now, or one a failed or canceled command left behind, which `prune` deletes.
+
+### prune
+
+```bash
+atli-reports-provisioner prune [--tenant <id>] [--drain 00:02:30]
+```
+
+Deletes renderer sandboxes (labeled `app=atli-reports`, `role=renderer`, and a tenant) that no
+record points to: the old sandboxes of a rollout canceled during its drain, the sandbox of a tenant
+whose delete was interrupted, or one a killed create left behind. It keeps:
+
+- every sandbox of a tenant whose record cannot be read, since that record may point to it;
+- a sandbox created less than the drain and `ReadyTimeout` ago, or at an unknown time, which may
+  belong to a create or rollout that has not written its record yet.
+
+The others are deleted after the drain, in case the gateway still sends them work (a record may
+have moved away from one moments ago), and only if no record points to them by then. A sandbox
+that cannot be deleted is reported, and the command exits with `1`.
 
 ## Rolling out a server release
 
@@ -165,7 +227,8 @@ of the rollout.
 2. Run `atli-reports-provisioner rollout --disk-image <id>`.
 3. If it exits with `1`, fix what the summary reports and run the same command again.
 4. Set `Provisioner:DiskImageId` to the new ID, so tenants created from now on start from it.
-5. Run `list`: every renderer is on the new disk image, and no renderer sandbox lacks a record.
+5. Run `list`: every renderer is on the new disk image, every record can be read, and no renderer
+   sandbox lacks a record.
 
 ## Why one sandbox per customer, and no shared snapshot
 

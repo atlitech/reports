@@ -13,7 +13,7 @@ namespace Atli.Reports.Hosting.Tests.Sandboxes;
 public class SandboxesClientRequestTests
 {
   private const string GroupUri =
-    "https://management.eastus2.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/group-1/";
+    "https://management.eastus2.azuredevcompute.io/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/rg-1/sandboxGroups/group-1/";
 
   private const string Id = "98c01b65-b81b-4dca-b000-fdae0eb0939c";
 
@@ -329,7 +329,111 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
-  public async Task A_conflict_stands_when_the_sandbox_is_not_where_it_was_asked_to_go()
+  public async Task A_conflict_stands_when_the_sandbox_settles_elsewhere_without_a_transition()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Problem(
+        HttpStatusCode.Conflict,
+        "PortAlreadyExists",
+        "Port 8080 already exists on this sandbox"
+      ),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopped", $"[{FakeDataPlane.Port(Id, 8080)}]"))
+    );
+
+    var exception = await Assert
+      .That(async () =>
+        await sandboxes.Client.AddPortAsync(
+          Id,
+          8080,
+          anonymous: true,
+          SandboxPortActivation.OnDemand,
+          TestToken
+        )
+      )
+      .Throws<SandboxesException>();
+
+    // The port exists as Manual: no wait, no second attempt.
+    await Assert.That(exception!.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(2);
+    await Assert.That(sandboxes.Clock.HasPendingTimer).IsFalse();
+  }
+
+  [Test]
+  public async Task A_resume_refused_while_the_sandbox_stops_waits_for_it_then_resumes_it()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Problem(
+        HttpStatusCode.Conflict,
+        "InvalidSandboxState",
+        "Sandbox must be in Stopped state to resume. Current state: Stopping"
+      ),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopping")),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopped")),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running"))
+    );
+
+    var resume = sandboxes.Client.ResumeAsync(Id, TestToken);
+    var poll = await sandboxes.Clock.NextTimerAsync(TestToken);
+    sandboxes.Clock.Advance(poll);
+    var resumed = await resume;
+
+    await Assert.That(poll).IsEqualTo(SandboxesClient.SettlePollInterval);
+    await Assert.That(resumed.State).IsEqualTo(SandboxStates.Running);
+    await Assert
+      .That(sandboxes.Plane.Requests.Select(request => $"{request.Method} {request.PathInGroup}"))
+      .IsEquivalentTo(
+        [
+          $"POST sandboxes/{Id}/resume",
+          $"GET sandboxes/{Id}",
+          $"GET sandboxes/{Id}",
+          $"POST sandboxes/{Id}/resume",
+        ],
+        CollectionOrdering.Matching
+      );
+  }
+
+  [Test]
+  public async Task A_stop_refused_while_the_sandbox_stops_succeeds_once_it_has_stopped()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Problem(HttpStatusCode.Conflict, "SandboxNotRunning", "Not running."),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopping")),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopped"))
+    );
+
+    var stop = sandboxes.Client.StopAsync(Id, TestToken);
+    sandboxes.Clock.Advance(await sandboxes.Clock.NextTimerAsync(TestToken));
+    var stopped = await stop;
+
+    await Assert.That(stopped.State).IsEqualTo(SandboxStates.Stopped);
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(3);
+  }
+
+  [Test]
+  public async Task A_port_refused_while_its_address_is_assigned_succeeds_once_it_has_one()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Problem(HttpStatusCode.Conflict, "PortAlreadyExists", "Port 8080 exists."),
+      FakeDataPlane.Ok(
+        FakeDataPlane.Sandbox(
+          Id,
+          "Running",
+          """[{ "port": 8080, "auth": { "anonymous": true } }]"""
+        )
+      ),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
+    );
+
+    var add = sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    sandboxes.Clock.Advance(await sandboxes.Clock.NextTimerAsync(TestToken));
+    var sandbox = await add;
+
+    await Assert.That(sandbox.Ports.Single().Port).IsEqualTo(8080);
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(3);
+  }
+
+  [Test]
+  public async Task A_conflict_stands_when_the_sandbox_does_not_settle_within_the_wait()
   {
     using TestSandboxes sandboxes = new(
       FakeDataPlane.Problem(
@@ -340,12 +444,146 @@ public class SandboxesClientRequestTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopping"))
     );
 
-    var exception = await Assert
-      .That(async () => await sandboxes.Client.ResumeAsync(Id, TestToken))
-      .Throws<SandboxesException>();
+    var resume = sandboxes.Client.ResumeAsync(Id, TestToken);
+    var waited = TimeSpan.Zero;
+    while (waited < SandboxesClient.SettleTimeout)
+    {
+      var poll = await sandboxes.Clock.NextTimerAsync(TestToken);
+      sandboxes.Clock.Advance(poll);
+      waited += poll;
+    }
+
+    var exception = await Assert.That(async () => await resume).Throws<SandboxesException>();
 
     await Assert.That(exception!.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
     await Assert.That(exception.Message).Contains("Current state: Stopping");
+    // The first read, and one after each second of the 30.
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(1 + 31);
+    await Assert.That(sandboxes.Plane.Requests[^1].Method).IsEqualTo(HttpMethod.Get);
+  }
+
+  [Test]
+  public async Task Add_port_asks_for_on_demand_activation()
+  {
+    var onDemand = FakeDataPlane
+      .Port(Id, 8080)
+      .Replace("\"Manual\"", "\"OnDemand\"", StringComparison.Ordinal);
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok($$"""{ "ports": [{{onDemand}}] }"""),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{onDemand}]"))
+    );
+
+    var sandbox = await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      anonymous: true,
+      SandboxPortActivation.OnDemand,
+      TestToken
+    );
+
+    await AssertJson(
+      sandboxes.Plane.Requests[0].Body,
+      """{ "port": 8080, "auth": { "anonymous": true }, "activationMode": "OnDemand" }"""
+    );
+    await Assert
+      .That(sandbox.Ports.Single())
+      .IsEqualTo(
+        new SandboxPort(8080, new Uri($"https://{Id}--8080.eastus2.adcproxy.io"), true)
+        {
+          Activation = SandboxPortActivation.OnDemand,
+        }
+      );
+  }
+
+  [Test]
+  public async Task Add_port_names_manual_activation_when_asked_to()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
+    );
+
+    await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      anonymous: true,
+      SandboxPortActivation.Manual,
+      TestToken
+    );
+
+    await AssertJson(
+      sandboxes.Plane.Requests.Single().Body,
+      """{ "port": 8080, "auth": { "anonymous": true }, "activationMode": "Manual" }"""
+    );
+  }
+
+  [Test]
+  public async Task Adding_an_on_demand_port_that_is_already_exposed_on_demand_succeeds()
+  {
+    var onDemand = FakeDataPlane
+      .Port(Id, 8080)
+      .Replace("\"Manual\"", "\"OnDemand\"", StringComparison.Ordinal);
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Problem(HttpStatusCode.Conflict, "PortAlreadyExists", "Port 8080 exists."),
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Stopped", $"[{onDemand}]"))
+    );
+
+    var sandbox = await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      anonymous: true,
+      SandboxPortActivation.OnDemand,
+      TestToken
+    );
+
+    await Assert.That(sandbox.Ports.Single().Activation).IsEqualTo(SandboxPortActivation.OnDemand);
+  }
+
+  [Test]
+  public async Task A_client_written_before_activation_modes_exposes_only_manual_ports()
+  {
+    ISandboxesClient client = new ManualPortsOnly();
+
+    var manual = await client.AddPortAsync(
+      Id,
+      8080,
+      anonymous: true,
+      SandboxPortActivation.Manual,
+      TestToken
+    );
+
+    await Assert.That(manual.Id).IsEqualTo(Id);
+    await Assert
+      .That(async () =>
+        await client.AddPortAsync(
+          Id,
+          8080,
+          anonymous: true,
+          SandboxPortActivation.OnDemand,
+          TestToken
+        )
+      )
+      .Throws<NotSupportedException>();
+  }
+
+  [Test]
+  public async Task Get_reads_when_the_sandbox_was_created_and_leaves_an_unreadable_time_unknown()
+  {
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running")),
+      FakeDataPlane.Ok(
+        FakeDataPlane
+          .Sandbox(Id, "Running")
+          .Replace("2026-10-04T01:50:55.1020312+00:00", "yesterday", StringComparison.Ordinal)
+      )
+    );
+
+    var sandbox = await sandboxes.Client.GetAsync(Id, TestToken);
+    var unknown = await sandboxes.Client.GetAsync(Id, TestToken);
+
+    await Assert
+      .That(sandbox!.CreatedAt)
+      .IsEqualTo(new DateTimeOffset(2026, 10, 4, 1, 50, 55, TimeSpan.Zero).AddTicks(1020312));
+    await Assert.That(unknown!.CreatedAt).IsNull();
   }
 
   [Test]
@@ -435,6 +673,25 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
+  public async Task Add_port_refuses_an_unknown_activation()
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok("{}"));
+
+    await Assert
+      .That(async () =>
+        await sandboxes.Client.AddPortAsync(
+          Id,
+          8080,
+          anonymous: true,
+          (SandboxPortActivation)7,
+          TestToken
+        )
+      )
+      .Throws<ArgumentOutOfRangeException>();
+    await Assert.That(sandboxes.Plane.Requests.Count).IsEqualTo(0);
+  }
+
+  [Test]
   [Arguments("")]
   [Arguments(" ")]
   [Arguments("..")]
@@ -501,5 +758,34 @@ public class SandboxesClientRequestTests
     await Assert.That(actual).IsNotNull();
     var equal = JsonNode.DeepEquals(JsonNode.Parse(actual!), JsonNode.Parse(expected));
     await Assert.That(equal).IsTrue().Because($"the body was {actual}");
+  }
+
+  /// <summary>A client as written before activation modes: it implements only the first overload.</summary>
+  private sealed class ManualPortsOnly : ISandboxesClient
+  {
+    public Task<SandboxView> AddPortAsync(
+      string sandboxId,
+      int port,
+      bool anonymous,
+      CancellationToken cancellationToken
+    ) => Task.FromResult(new SandboxView { Id = sandboxId, State = SandboxStates.Running });
+
+    public Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task DeleteAsync(string sandboxId, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
+
+    public Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken) =>
+      throw new NotSupportedException();
   }
 }

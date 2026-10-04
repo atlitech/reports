@@ -3,10 +3,11 @@ using Atli.Reports.Hosting.Sandboxes;
 namespace Atli.Reports.Provisioner.Tests.Support;
 
 /// <summary>
-/// A sandbox group's data plane in memory. Created sandboxes are numbered (<c>sandbox-1</c>, …) and
-/// run at once; a port's URL is <c>https://{id}-{port}.example.test/</c>.
+/// A sandbox group's data plane in memory. Created sandboxes are numbered (<c>sandbox-1</c>, …),
+/// run at once, and are created at the clock's now; a port's URL is
+/// <c>https://{id}-{port}.example.test/</c>.
 /// </summary>
-internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
+internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) : ISandboxesClient
 {
   private readonly Lock _lock = new();
   private readonly Dictionary<string, SandboxView> _sandboxes = new(StringComparer.Ordinal);
@@ -15,6 +16,12 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
 
   /// <summary>Returns the exception to fail adding a port to a sandbox with, or <see langword="null"/>.</summary>
   public Func<SandboxView, Exception?>? FailAddPort { get; set; }
+
+  /// <summary>
+  /// Returns the exception to fail a create with after it made the sandbox, as a create whose
+  /// answer was lost, or <see langword="null"/>.
+  /// </summary>
+  public Func<SandboxSpec, Exception?>? FailCreateAfterCreating { get; set; }
 
   /// <summary>Sandboxes whose deletion fails.</summary>
   public HashSet<string> FailDelete { get; } = new(StringComparer.Ordinal);
@@ -43,11 +50,15 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
     }
   }
 
-  /// <summary>Adds a sandbox that exists before the test runs.</summary>
+  /// <summary>
+  /// Adds a sandbox that exists before the test runs, created <paramref name="age"/> ago (a week
+  /// by default).
+  /// </summary>
   public SandboxView Add(
     string id,
     IReadOnlyDictionary<string, string> labels,
-    string state = SandboxStates.Running
+    string state = SandboxStates.Running,
+    TimeSpan? age = null
   )
   {
     SandboxView sandbox = new()
@@ -55,6 +66,7 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
       Id = id,
       State = state,
       Labels = labels,
+      CreatedAt = clock.GetUtcNow() - (age ?? TimeSpan.FromDays(7)),
     };
     lock (_lock)
     {
@@ -85,9 +97,15 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
         Id = id,
         State = SandboxStates.Running,
         Labels = spec.Labels,
+        CreatedAt = clock.GetUtcNow(),
       };
       _sandboxes[id] = sandbox;
       journal.Add($"create {id} ({spec.Labels.GetValueOrDefault("tenant")})");
+      if (FailCreateAfterCreating?.Invoke(spec) is { } failure)
+      {
+        throw failure;
+      }
+
       return Task.FromResult(sandbox);
     }
   }
@@ -141,9 +159,17 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
     int port,
     bool anonymous,
     CancellationToken cancellationToken
+  ) => AddPortAsync(sandboxId, port, anonymous, SandboxPortActivation.Manual, cancellationToken);
+
+  public Task<SandboxView> AddPortAsync(
+    string sandboxId,
+    int port,
+    bool anonymous,
+    SandboxPortActivation activation,
+    CancellationToken cancellationToken
   )
   {
-    journal.Add($"port {sandboxId} {port}{(anonymous ? " anonymous" : "")}");
+    journal.Add($"port {sandboxId} {port}{(anonymous ? " anonymous" : "")} {activation}");
     lock (_lock)
     {
       if (FailAddPort?.Invoke(_sandboxes[sandboxId]) is { } failure)
@@ -161,11 +187,10 @@ internal sealed class FakeSandboxesClient(Journal journal) : ISandboxesClient
             Ports =
             [
               .. sandbox.Ports,
-              new SandboxPort(
-                port,
-                new Uri($"https://{sandboxId}-{port}.example.test/"),
-                anonymous
-              ),
+              new SandboxPort(port, new Uri($"https://{sandboxId}-{port}.example.test/"), anonymous)
+              {
+                Activation = activation,
+              },
             ],
           }
       )

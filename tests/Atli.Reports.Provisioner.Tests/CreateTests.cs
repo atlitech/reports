@@ -42,8 +42,11 @@ public class CreateTests
           ["role"] = "renderer",
           ["tenant"] = "contoso",
           ["size"] = "L",
+          // Unique to this create call.
+          ["launch"] = spec.Labels["launch"],
         }
       );
+    await Assert.That(Guid.TryParseExact(spec.Labels["launch"], "N", out _)).IsTrue();
     // The renderer holds the verifier of exactly the credential the gateway will present.
     RendererCredential recorded = new(
       record.ApiKey.Split('.')[0],
@@ -73,7 +76,8 @@ public class CreateTests
       .IsEquivalentTo(
         [
           "create sandbox-1 (contoso)",
-          "port sandbox-1 8080 anonymous",
+          // On demand by default: a request to the stopped renderer resumes it.
+          "port sandbox-1 8080 anonymous OnDemand",
           "probe https://sandbox-1-8080.example.test/",
           "put contoso -> sandbox-1",
         ],
@@ -191,6 +195,153 @@ public class CreateTests
     await Assert.That(provisioning.Journal.Matching("delete")).IsEquivalentTo(["delete sandbox-1"]);
     await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
     await Assert.That(provisioning.Records.Count).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task Exposes_a_manual_port_when_configured_to()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Options.PortActivation = "manual";
+
+    await provisioning.Provisioner.CreateAsync("contoso", RendererSize.Medium, "disk-1", TestToken);
+
+    await Assert
+      .That(provisioning.Journal.Matching("port"))
+      .IsEquivalentTo(["port sandbox-1 8080 anonymous Manual"]);
+  }
+
+  [Test]
+  public async Task A_record_write_that_failed_after_writing_keeps_the_renderer()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Records.FailPutAfterWriting = new TimeoutException("The answer was lost.");
+
+    var record = await provisioning.Provisioner.CreateAsync(
+      "contoso",
+      RendererSize.Medium,
+      "disk-1",
+      TestToken
+    );
+
+    // Deleting the sandbox would leave the record pointing at nothing.
+    await Assert.That(provisioning.Records["contoso"]).IsEqualTo(record);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+    await Assert.That(provisioning.Journal.Matching("delete")).IsEmpty();
+    await Assert
+      .That(provisioning.Output.ToString())
+      .Contains(
+        "[contoso] Writing the record reported a failure (The answer was lost.), but the record "
+          + "points to sandbox sandbox-1."
+      );
+  }
+
+  [Test]
+  public async Task A_record_write_whose_outcome_cannot_be_read_back_keeps_the_sandbox_for_prune()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Records.BeforePut = () =>
+      provisioning.Records.FailGet = new InvalidOperationException("The vault is unavailable.");
+    provisioning.Records.FailPut = new TimeoutException("No answer.");
+
+    await Assert
+      .That(async () =>
+        await provisioning.Provisioner.CreateAsync(
+          "contoso",
+          RendererSize.Medium,
+          "disk-1",
+          TestToken
+        )
+      )
+      .Throws<TimeoutException>();
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+    await Assert
+      .That(provisioning.Output.ToString())
+      .Contains("[contoso] Could not tell whether the record points to sandbox sandbox-1");
+  }
+
+  [Test]
+  public async Task A_create_that_another_create_beat_is_discarded()
+  {
+    using Provisioning provisioning = new();
+    // Another create finishes while this one waits for its renderer.
+    var other = provisioning.AddRenderer("contoso", "disk-1");
+    await provisioning.Records.DeleteAsync("contoso", TestToken);
+    provisioning.Readiness.Answer = (_, _) =>
+    {
+      provisioning.Records.Add(other);
+      return Task.FromResult(ReadinessAnswer.Ready);
+    };
+
+    var exception = await Assert
+      .That(async () =>
+        await provisioning.Provisioner.CreateAsync(
+          "contoso",
+          RendererSize.Medium,
+          "disk-1",
+          TestToken
+        )
+      )
+      .Throws<ProvisioningException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "Tenant contoso got a renderer (sandbox old-contoso) from another command meanwhile; "
+          + "this one is discarded."
+      );
+    await Assert.That(provisioning.Records["contoso"]).IsSameReferenceAs(other);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-contoso"]);
+    await Assert.That(provisioning.Journal.Matching("put")).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_create_whose_answer_was_lost_deletes_the_sandbox_it_made_by_its_launch_label()
+  {
+    using Provisioning provisioning = new();
+    // Another renderer of the tenant's, from another launch, stays.
+    provisioning.Sandboxes.Add("other", RendererLabels.For("contoso", RendererSize.Medium, "x"));
+    provisioning.Sandboxes.FailCreateAfterCreating = _ => new SandboxesException(
+      "Sandboxes PUT sandboxes failed: The response ended prematurely."
+    );
+
+    await Assert
+      .That(async () =>
+        await provisioning.Provisioner.CreateAsync(
+          "contoso",
+          RendererSize.Medium,
+          "disk-1",
+          TestToken
+        )
+      )
+      .Throws<SandboxesException>();
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["other"]);
+    await Assert.That(provisioning.Journal.Matching("delete")).IsEquivalentTo(["delete sandbox-1"]);
+    await Assert.That(provisioning.Records.Count).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task A_tenant_with_an_unreadable_record_is_refused()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Records.AddUnreadable("contoso");
+
+    var exception = await Assert
+      .That(async () =>
+        await provisioning.Provisioner.CreateAsync(
+          "contoso",
+          RendererSize.Medium,
+          "disk-1",
+          TestToken
+        )
+      )
+      .Throws<ProvisioningException>();
+
+    await Assert
+      .That(exception!.Message)
+      .StartsWith("Tenant contoso has a record that cannot be read");
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
   }
 
   [Test]

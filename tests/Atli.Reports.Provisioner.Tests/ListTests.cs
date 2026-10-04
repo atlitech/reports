@@ -70,6 +70,30 @@ public class ListTests
   }
 
   [Test]
+  public async Task Lists_the_records_that_cannot_be_read_without_failing()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-2");
+    provisioning.Records.AddUnreadable("b");
+
+    await provisioning.Provisioner.ListAsync(TestToken);
+
+    await Assert
+      .That(provisioning.Output.ToString())
+      .IsEqualTo(
+        """
+        TENANT  SANDBOX  STATE    SIZE  DISK IMAGE  CREATED
+        a       old-a    Running  M     disk-2      2026-09-26 12:00:00Z
+
+        Records that cannot be read (fix them, or delete the tenant):
+        TENANT  REASON
+        b       The record of b is damaged.
+
+        """
+      );
+  }
+
+  [Test]
   public async Task Says_when_there_are_no_renderers()
   {
     using Provisioning provisioning = new();

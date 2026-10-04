@@ -214,9 +214,137 @@ public sealed class FileRendererRecordStoreTests : IDisposable
   }
 
   [Test]
+  public async Task List_reports_files_that_are_not_their_tenants_record_and_returns_the_rest()
+  {
+    FileRendererRecordStore store = new(Directory);
+    await store.PutAsync(Records.Acme(), TestToken);
+    await File.WriteAllTextAsync(Path.Combine(Directory, "bogus.json"), "{}", TestToken);
+    await File.WriteAllTextAsync(
+      Path.Combine(Directory, "globex.json"),
+      Records.Json(Records.Acme()),
+      TestToken
+    );
+
+    var listing = await store.ListWithUnreadableAsync(TestToken);
+
+    await Assert.That(listing.Records).IsEquivalentTo([Records.Acme()]);
+    await Assert.That(await store.ListAsync(TestToken)).IsEquivalentTo([Records.Acme()]);
+    await Assert
+      .That(listing.Unreadable.Select(record => record.TenantId))
+      .IsEquivalentTo(["bogus", "globex"], CollectionOrdering.Matching);
+    await Assert
+      .That(listing.Unreadable[1].Reason)
+      .IsEqualTo(
+        $"The renderer record file {Path.Combine(Directory, "globex.json")} holds the record of "
+          + "another tenant."
+      );
+  }
+
+  [Test]
+  public async Task Listing_tenant_ids_takes_them_from_the_file_names()
+  {
+    FileRendererRecordStore store = new(Directory);
+    await store.PutAsync(Records.Acme() with { TenantId = "zeta" }, TestToken);
+    await store.PutAsync(Records.Acme(), TestToken);
+    await File.WriteAllTextAsync(Path.Combine(Directory, "damaged.json"), "{", TestToken);
+    await File.WriteAllTextAsync(Path.Combine(Directory, "Not_A_Tenant.json"), "{", TestToken);
+
+    var tenants = await store.ListTenantIdsAsync(TestToken);
+
+    await Assert
+      .That(tenants)
+      .IsEquivalentTo(["acme", "damaged", "zeta"], CollectionOrdering.Matching);
+    await Assert
+      .That(await new FileRendererRecordStore(_root + "-none").ListTenantIdsAsync(TestToken))
+      .IsEmpty();
+  }
+
+  [Test]
+  public async Task A_directory_others_can_write_to_is_refused()
+  {
+    if (OperatingSystem.IsWindows())
+    {
+      Skip.Test("Unix file modes.");
+      return;
+    }
+
+    FileRendererRecordStore store = new(Directory);
+    await store.PutAsync(Records.Acme(), TestToken);
+    File.SetUnixFileMode(
+      Directory,
+      UnixFileMode.UserRead
+        | UnixFileMode.UserWrite
+        | UnixFileMode.UserExecute
+        | UnixFileMode.GroupRead
+        | UnixFileMode.GroupWrite
+        | UnixFileMode.GroupExecute
+    );
+
+    var exception = await Assert
+      .That(async () => await store.GetAsync("acme", TestToken))
+      .Throws<UnauthorizedAccessException>();
+    await Assert.That(exception!.Message).Contains("is writable by other users");
+    await Assert
+      .That(async () => await store.ListAsync(TestToken))
+      .Throws<UnauthorizedAccessException>();
+    await Assert
+      .That(async () => await store.PutAsync(Records.Acme(), TestToken))
+      .Throws<UnauthorizedAccessException>();
+    await Assert
+      .That(async () => await store.DeleteAsync("acme", TestToken))
+      .Throws<UnauthorizedAccessException>();
+  }
+
+  [Test]
+  public async Task A_directory_of_another_user_is_refused()
+  {
+    if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+    {
+      Skip.Test("Unix ownership, as a user other than root.");
+      return;
+    }
+
+    // Root's, and not writable by anyone else.
+    FileRendererRecordStore store = new("/etc");
+
+    var exception = await Assert
+      .That(async () => await store.GetAsync("acme", TestToken))
+      .Throws<UnauthorizedAccessException>();
+    await Assert.That(exception!.Message).EndsWith("belongs to another user.");
+  }
+
+  [Test]
+  public async Task A_record_file_of_another_user_is_refused()
+  {
+    if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+    {
+      Skip.Test("Unix ownership, as a user other than root.");
+      return;
+    }
+
+    FileRendererRecordStore store = new(Directory);
+    await store.PutAsync(Records.Acme(), TestToken);
+    // A file root owns, in the record's place.
+    File.CreateSymbolicLink(Path.Combine(Directory, "globex.json"), "/etc/hosts");
+
+    var exception = await Assert
+      .That(async () => await store.GetAsync("globex", TestToken))
+      .Throws<UnauthorizedAccessException>();
+    var listing = await store.ListWithUnreadableAsync(TestToken);
+
+    await Assert.That(exception!.Message).EndsWith("belongs to another user.");
+    await Assert.That(listing.Records).IsEquivalentTo([Records.Acme()]);
+    await Assert.That(listing.Unreadable.Single().TenantId).IsEqualTo("globex");
+  }
+
+  [Test]
   [Arguments("{")]
   [Arguments("""{"tenantId":"acme"}""")]
   [Arguments("""{"tenantId":"acme","url":"relative/path","apiKey":"k"}""")]
+  [Arguments("""{"tenantId":"acme","url":"file:///etc/passwd","apiKey":"k"}""")]
+  [Arguments("""{"tenantId":"acme","url":"https://renderer.example/","apiKey":""}""")]
+  [Arguments("""{"tenantId":"acme","url":"https://renderer.example/","apiKey":" "}""")]
+  [Arguments("""{"tenantId":"acme","url":"https://renderer.example/"}""")]
   [Arguments("null")]
   public async Task A_file_that_is_not_a_record_is_refused(string json)
   {
@@ -270,6 +398,17 @@ public sealed class FileRendererRecordStoreTests : IDisposable
       .Throws<ArgumentException>();
     await Assert
       .That(async () => await store.PutAsync(Records.Acme() with { ApiKey = " " }, TestToken))
+      .Throws<ArgumentException>();
+    await Assert
+      .That(async () =>
+        await store.PutAsync(
+          Records.Acme() with
+          {
+            Url = new Uri("ftp://renderer.example/"),
+          },
+          TestToken
+        )
+      )
       .Throws<ArgumentException>();
     await Assert.That(System.IO.Directory.Exists(Directory)).IsFalse();
   }

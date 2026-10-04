@@ -9,13 +9,15 @@ namespace Atli.Reports.Hosting.Tests.Support;
 /// An in-memory vault with soft delete, answering as Key Vault does (observed 2026-10-04): a missing
 /// secret is <c>404</c>, a disabled one <c>403</c> with <c>SecretDisabled</c> in the message, and a
 /// deleted name <c>409</c> while it is being deleted (<c>ObjectIsBeingDeleted</c>) and after
-/// (<c>ObjectIsDeletedButRecoverable</c>) until it is recovered.
+/// (<c>ObjectIsDeletedButRecoverable</c>) until it is recovered. Recovery restores the secret as it
+/// was deleted, its current version disabled if it was; a write adds an enabled version.
 /// </summary>
 internal sealed class FakeVault : IRendererSecrets
 {
   private readonly Lock _lock = new();
   private readonly Dictionary<string, Secret> _secrets = new(StringComparer.OrdinalIgnoreCase);
   private readonly List<string> _calls = [];
+  private int _writes;
 
   /// <summary>
   /// How many calls on a secret it takes to finish deleting it; until then, writing or recovering it
@@ -28,6 +30,15 @@ internal sealed class FakeVault : IRendererSecrets
 
   /// <summary>When set, every read fails with it.</summary>
   public RequestFailedException? ReadFailure { get; set; }
+
+  /// <summary>When set, every read awaits it first, outside the vault's lock.</summary>
+  public Func<CancellationToken, Task>? BeforeRead { get; set; }
+
+  /// <summary>
+  /// When set, called with the number of each write (1 for the first) before it is made; the write
+  /// fails with what it returns.
+  /// </summary>
+  public Func<int, RequestFailedException?>? WriteFailure { get; set; }
 
   /// <summary>Each call made, such as <c>Set renderer-acme</c>.</summary>
   public IReadOnlyList<string> Calls
@@ -80,8 +91,13 @@ internal sealed class FakeVault : IRendererSecrets
     }
   }
 
-  public Task<KeyVaultSecret> GetSecretAsync(string name, CancellationToken cancellationToken)
+  public async Task<KeyVaultSecret> GetSecretAsync(string name, CancellationToken cancellationToken)
   {
+    if (BeforeRead is { } beforeRead)
+    {
+      await beforeRead(cancellationToken);
+    }
+
     lock (_lock)
     {
       _calls.Add("Get " + name);
@@ -98,19 +114,10 @@ internal sealed class FakeVault : IRendererSecrets
 
       if (!secret.Enabled)
       {
-        throw new RequestFailedException(
-          403,
-          "Operation get is not allowed on a disabled secret.\nStatus: 403 (Forbidden)\n"
-            + "ErrorCode: Forbidden\n\nContent:\n"
-            + """{"error":{"code":"Forbidden","message":"Operation get is not allowed on a disabled secret.","innererror":{"code":"SecretDisabled"}}}""",
-          "Forbidden",
-          null
-        );
+        throw Disabled();
       }
 
-      return Task.FromResult(
-        SecretModelFactory.KeyVaultSecret(Properties(name, secret), secret.Value)
-      );
+      return SecretModelFactory.KeyVaultSecret(Properties(name, secret), secret.Value);
     }
   }
 
@@ -139,9 +146,21 @@ internal sealed class FakeVault : IRendererSecrets
 
   public Task SetSecretAsync(KeyVaultSecret secret, CancellationToken cancellationToken)
   {
+    int write;
     lock (_lock)
     {
       _calls.Add("Set " + secret.Name);
+      write = ++_writes;
+    }
+
+    // Outside the lock, so the hook may read the vault.
+    if (WriteFailure?.Invoke(write) is { } failure)
+    {
+      throw failure;
+    }
+
+    lock (_lock)
+    {
       Advance(secret.Name);
       if (_secrets.TryGetValue(secret.Name, out var existing))
       {
@@ -162,6 +181,45 @@ internal sealed class FakeVault : IRendererSecrets
         new Dictionary<string, string>(secret.Properties.Tags)
       );
       return Task.CompletedTask;
+    }
+  }
+
+  public Task DisableSecretAsync(string name, CancellationToken cancellationToken)
+  {
+    lock (_lock)
+    {
+      _calls.Add("Disable " + name);
+      Advance(name);
+      if (!_secrets.TryGetValue(name, out var secret) || secret.State != SecretState.Active)
+      {
+        throw NotFound(name);
+      }
+
+      if (!secret.Enabled)
+      {
+        throw Disabled();
+      }
+
+      secret.Enabled = false;
+      return Task.CompletedTask;
+    }
+  }
+
+  /// <summary>Whether the secret exists, soft-deleted or not, with its current version disabled.</summary>
+  public bool IsDisabled(string name)
+  {
+    lock (_lock)
+    {
+      return _secrets.TryGetValue(name, out var secret) && !secret.Enabled;
+    }
+  }
+
+  /// <summary>Whether the secret is soft-deleted (or being deleted).</summary>
+  public bool IsDeleted(string name)
+  {
+    lock (_lock)
+    {
+      return _secrets.TryGetValue(name, out var secret) && secret.State != SecretState.Active;
     }
   }
 
@@ -239,6 +297,16 @@ internal sealed class FakeVault : IRendererSecrets
       null
     );
 
+  private static RequestFailedException Disabled() =>
+    new(
+      403,
+      "Operation get is not allowed on a disabled secret.\nStatus: 403 (Forbidden)\n"
+        + "ErrorCode: Forbidden\n\nContent:\n"
+        + """{"error":{"code":"Forbidden","message":"Operation get is not allowed on a disabled secret.","innererror":{"code":"SecretDisabled"}}}""",
+      "Forbidden",
+      null
+    );
+
   private static RequestFailedException Conflict(string name, string code) =>
     new(409, $"Secret {name} is currently in a deleted state ({code}).", "Conflict", null);
 
@@ -261,7 +329,8 @@ internal sealed class FakeVault : IRendererSecrets
 
     public IReadOnlyDictionary<string, string> Tags { get; } = tags;
 
-    public bool Enabled { get; init; } = true;
+    /// <summary>Whether the current version is enabled; recovery keeps it as it was.</summary>
+    public bool Enabled { get; set; } = true;
 
     public SecretState State { get; set; }
 

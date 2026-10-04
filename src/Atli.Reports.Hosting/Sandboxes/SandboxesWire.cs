@@ -70,6 +70,12 @@ internal sealed class AddPortRequest
   public int Port { get; init; }
 
   public required PortAuthWire Auth { get; init; }
+
+  /// <summary>
+  /// <c>Manual</c> (the data plane's default) or <c>OnDemand</c>; omitted when the caller named
+  /// none.
+  /// </summary>
+  public string? ActivationMode { get; init; }
 }
 
 internal sealed class PortAuthWire
@@ -92,15 +98,25 @@ internal sealed class SandboxResponse
   public Dictionary<string, string>? Labels { get; init; }
 
   public List<PortResponse>? Ports { get; init; }
+
+  /// <summary>
+  /// An ISO 8601 time such as <c>2026-10-04T01:50:55.1020312+00:00</c>. Read as text, so a time
+  /// this client cannot parse leaves it unknown rather than failing the whole answer.
+  /// </summary>
+  public string? CreatedAt { get; init; }
 }
 
 internal sealed class PortResponse
 {
   public int Port { get; init; }
 
+  /// <summary>Absent while the proxy has not assigned the port an address yet.</summary>
   public string? Url { get; init; }
 
   public PortAuthWire? Auth { get; init; }
+
+  /// <summary><c>Manual</c> or <c>OnDemand</c>.</summary>
+  public string? ActivationMode { get; init; }
 }
 
 [JsonSourceGenerationOptions(

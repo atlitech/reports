@@ -74,9 +74,12 @@ internal static class RendererRecordJson
   {
     ArgumentNullException.ThrowIfNull(record);
     TenantId.Validate(record.TenantId, nameof(record));
-    if (record.Url is null || !record.Url.IsAbsoluteUri)
+    if (!IsHttpUrl(record.Url))
     {
-      throw new ArgumentException("A renderer record's URL is absolute.", nameof(record));
+      throw new ArgumentException(
+        "A renderer record's URL is an absolute http or https address.",
+        nameof(record)
+      );
     }
 
     if (string.IsNullOrWhiteSpace(record.ApiKey))
@@ -87,9 +90,20 @@ internal static class RendererRecordJson
     return record;
   }
 
+  /// <summary>
+  /// Whether <paramref name="url"/> is an absolute <c>http</c> or <c>https</c> address. Whether a
+  /// gateway also requires <c>https</c> is its own policy: development renderers listen on plain
+  /// <c>http</c>.
+  /// </summary>
+  private static bool IsHttpUrl(Uri? url) =>
+    url is { IsAbsoluteUri: true }
+    && (url.Scheme == Uri.UriSchemeHttps || url.Scheme == Uri.UriSchemeHttp);
+
   private static RendererRecord Check(RendererRecord? record, string tenantId, string source)
   {
-    if (record is null || record.Url is null || !record.Url.IsAbsoluteUri)
+    // Checked as on writing, so a record edited by hand or by another tool cannot route a tenant to
+    // a file: URL or present an empty credential.
+    if (record is null || !IsHttpUrl(record.Url) || string.IsNullOrWhiteSpace(record.ApiKey))
     {
       throw new InvalidDataException($"{source} does not hold a renderer record.");
     }

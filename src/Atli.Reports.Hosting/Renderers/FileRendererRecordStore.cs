@@ -1,3 +1,5 @@
+using Microsoft.Win32.SafeHandles;
+
 namespace Atli.Reports.Hosting.Renderers;
 
 /// <summary>
@@ -5,10 +7,18 @@ namespace Atli.Reports.Hosting.Renderers;
 /// readable by their owner only. For development, tests, and single-machine deployments.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A record is <c>&lt;directory&gt;/&lt;tenant&gt;.json</c>. On Unix the directory is created
 /// <c>0700</c> and every record file <c>0600</c>, since a record holds the raw credential its
 /// renderer admits. A replacement is written to a temporary file in the same directory and renamed
 /// over the old record, so a reader opens the old file or the new one, never a partial write.
+/// </para>
+/// <para>
+/// Whoever can write to the directory can route a tenant anywhere, so on Unix the store refuses a
+/// directory that is writable by its group or by others or that belongs to another user, and a
+/// record file that belongs to another user. Ownership is tested by setting the file's mode to what
+/// it already is, which only its owner (or root, who is not refused) may do: .NET exposes no owner.
+/// </para>
 /// </remarks>
 public sealed class FileRendererRecordStore : IRendererRecordStore
 {
@@ -25,38 +35,60 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
   }
 
   /// <inheritdoc />
+  /// <remarks>
+  /// Throws <see cref="UnauthorizedAccessException"/> for a directory or record file another user
+  /// could have written.
+  /// </remarks>
   public async Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken)
   {
     TenantId.Validate(tenantId);
+    CheckDirectory();
     return await ReadAsync(tenantId, cancellationToken);
   }
 
   /// <inheritdoc />
-  /// <remarks>Files that are not records, such as a write in progress, are skipped.</remarks>
-  public async Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken)
+  public async Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
+    (await ListWithUnreadableAsync(cancellationToken)).Records;
+
+  /// <inheritdoc />
+  /// <remarks>From the file names alone; files that are not records are skipped.</remarks>
+  public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken)
   {
-    if (!Directory.Exists(_directory))
-    {
-      return [];
-    }
+    cancellationToken.ThrowIfCancellationRequested();
+    CheckDirectory();
+    return Task.FromResult<IReadOnlyList<string>>([.. TenantFiles()]);
+  }
 
+  /// <inheritdoc />
+  /// <remarks>
+  /// Files that are not records by name, such as a write in progress, are skipped. A record file
+  /// that cannot be parsed, holds another tenant's record, or belongs to another user is reported.
+  /// </remarks>
+  public async Task<RendererRecordListing> ListWithUnreadableAsync(
+    CancellationToken cancellationToken
+  )
+  {
+    CheckDirectory();
     List<RendererRecord> records = [];
-    foreach (var file in Directory.EnumerateFiles(_directory, "*" + Extension))
+    List<UnreadableRendererRecord> unreadable = [];
+    foreach (var tenantId in TenantFiles())
     {
-      var tenantId = Path.GetFileNameWithoutExtension(file);
-      if (!TenantId.IsValid(tenantId))
+      try
       {
-        continue;
+        // Null when the record was deleted since the directory was listed.
+        if (await ReadAsync(tenantId, cancellationToken) is { } record)
+        {
+          records.Add(record);
+        }
       }
-
-      // Null when the record was deleted since the directory was listed.
-      if (await ReadAsync(tenantId, cancellationToken) is { } record)
+      catch (Exception exception)
+        when (exception is InvalidDataException or UnauthorizedAccessException)
       {
-        records.Add(record);
+        unreadable.Add(new UnreadableRendererRecord(tenantId, exception.Message));
       }
     }
 
-    return [.. records.OrderBy(record => record.TenantId, StringComparer.Ordinal)];
+    return new RendererRecordListing(records, unreadable);
   }
 
   /// <inheritdoc />
@@ -64,6 +96,8 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
   {
     RendererRecordJson.Validate(record);
     CreateDirectory();
+    // An operator's existing directory keeps its mode, so it is checked like any other.
+    CheckDirectory();
 
     // Starts with a dot and ends in .tmp, so no reader takes it for a record.
     var temporary = Path.Combine(_directory, $".{record.TenantId}.{Guid.NewGuid():N}.tmp");
@@ -98,10 +132,12 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
   }
 
   /// <inheritdoc />
+  /// <remarks>Deletes the file whatever it holds, so a damaged record can always be deleted.</remarks>
   public Task DeleteAsync(string tenantId, CancellationToken cancellationToken)
   {
     TenantId.Validate(tenantId);
     cancellationToken.ThrowIfCancellationRequested();
+    CheckDirectory();
     try
     {
       File.Delete(PathOf(tenantId));
@@ -115,6 +151,17 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
   }
 
   private string PathOf(string tenantId) => Path.Combine(_directory, tenantId + Extension);
+
+  /// <summary>The tenants that have a record file, by name, in ordinal order.</summary>
+  private IEnumerable<string> TenantFiles() =>
+    Directory.Exists(_directory)
+      ? Directory
+        .EnumerateFiles(_directory, "*" + Extension)
+        .Select(Path.GetFileNameWithoutExtension)
+        .OfType<string>()
+        .Where(TenantId.IsValid)
+        .Order(StringComparer.Ordinal)
+      : [];
 
   private async Task<RendererRecord?> ReadAsync(
     string tenantId,
@@ -142,6 +189,14 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
 
     await using (stream)
     {
+      // The file opened, not the name: a rename since cannot swap in another file.
+      if (!OperatingSystem.IsWindows() && !IsOwnedByCurrentUser(stream.SafeFileHandle))
+      {
+        throw new UnauthorizedAccessException(
+          $"The renderer record file {path} belongs to another user."
+        );
+      }
+
       return await RendererRecordJson.DeserializeAsync(
         stream,
         tenantId,
@@ -164,6 +219,79 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
         _directory,
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
       );
+    }
+  }
+
+  /// <summary>
+  /// Throws <see cref="UnauthorizedAccessException"/> for a directory another user could write
+  /// records into; a missing one is fine. Not on Windows, whose access control lists are the
+  /// operator's to set.
+  /// </summary>
+  private void CheckDirectory()
+  {
+    if (OperatingSystem.IsWindows())
+    {
+      return;
+    }
+
+    UnixFileMode mode;
+    try
+    {
+      mode = File.GetUnixFileMode(_directory);
+    }
+    catch (Exception exception)
+      when (exception is FileNotFoundException or DirectoryNotFoundException)
+    {
+      return;
+    }
+
+    if ((mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+    {
+      throw new UnauthorizedAccessException(
+        $"The renderer record directory {_directory} is writable by other users; "
+          + "only its owner may write to it (chmod 700)."
+      );
+    }
+
+    // Setting the mode it has changes nothing, and only its owner and root may: see
+    // IsOwnedByCurrentUser.
+    try
+    {
+      File.SetUnixFileMode(_directory, mode);
+    }
+    catch (UnauthorizedAccessException)
+    {
+      throw new UnauthorizedAccessException(
+        $"The renderer record directory {_directory} belongs to another user."
+      );
+    }
+    catch (IOException)
+    {
+      // Mounted read-only: no one can change it, so no one else can write records into it either.
+    }
+  }
+
+  /// <summary>
+  /// Whether the open file belongs to the current user (or the current user is root): whether
+  /// setting its mode to the one it has, which changes nothing, is allowed. A file system that
+  /// refuses every change (mounted read-only) cannot tell, and no other user can write to it either,
+  /// so its files pass.
+  /// </summary>
+  [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+  private static bool IsOwnedByCurrentUser(SafeFileHandle file)
+  {
+    try
+    {
+      File.SetUnixFileMode(file, File.GetUnixFileMode(file));
+      return true;
+    }
+    catch (UnauthorizedAccessException)
+    {
+      return false;
+    }
+    catch (IOException)
+    {
+      return true;
     }
   }
 }

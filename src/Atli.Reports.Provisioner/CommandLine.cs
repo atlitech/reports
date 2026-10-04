@@ -8,7 +8,7 @@ internal abstract record ProvisionerCommand
 {
   /// <summary>
   /// Configuration keys the command's flags set, over every other source: <c>--size</c>,
-  /// <c>--disk-image</c>, and a rollout's <c>--drain</c>.
+  /// <c>--disk-image</c>, and a rollout's or prune's <c>--drain</c>.
   /// </summary>
   public IReadOnlyDictionary<string, string?> Settings { get; init; } =
     new Dictionary<string, string?>();
@@ -22,6 +22,9 @@ internal sealed record RolloutCommand(string? TenantId, int MaxParallel) : Provi
 internal sealed record DeleteCommand(string TenantId, TimeSpan Drain) : ProvisionerCommand;
 
 internal sealed record ListCommand : ProvisionerCommand;
+
+/// <param name="TenantId">The only tenant whose leftovers to delete, or <see langword="null"/> for all.</param>
+internal sealed record PruneCommand(string? TenantId) : ProvisionerCommand;
 
 /// <summary><c>--help</c>: write <paramref name="Text"/> and succeed.</summary>
 internal sealed record HelpCommand(string Text) : ProvisionerCommand;
@@ -64,10 +67,12 @@ internal static class CommandLine
       rollout   Replace every renderer that runs another disk image.
       delete    Delete a tenant's renderer and its record.
       list      List renderers with the state of their sandboxes.
+      prune     Delete renderer sandboxes that no record points to.
 
     Run 'atli-reports-provisioner <command> --help' for a command's options. Settings come from
     appsettings.json next to the binary, then Provisioner__* environment variables, then flags.
-    Exit codes: 0 success, 1 failure, 2 usage or configuration error.
+    Run one command at a time per sandbox group. Exit codes: 0 success, 1 failure, 2 usage or
+    configuration error.
     """;
 
   public const string CreateUsage = """
@@ -87,10 +92,11 @@ internal static class CommandLine
     Usage: atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel <n>]
                                             [--drain <hh:mm:ss>]
 
-    Replaces every renderer, or the tenant's, that runs another disk image, suspended ones included:
-    a new sandbox with a new credential and the old one's size, its record swapped in once it is
-    ready, and the old sandbox deleted after the drain. Renderers already on the image are skipped,
-    so running it again after a partial failure finishes the job.
+    Replaces every renderer, or the tenant's, that runs another disk image or whose sandbox is gone,
+    suspended ones included: a new sandbox with a new credential and the old one's size, its record
+    swapped in once it is ready, and the old sandbox deleted after the drain. Then deletes, as prune
+    does, renderer sandboxes an earlier command left behind. Renderers already on the image are
+    skipped, so running it again after a partial failure finishes the job.
 
     Options:
       --disk-image <id>      The disk image to move to; default Provisioner:DiskImageId.
@@ -104,8 +110,9 @@ internal static class CommandLine
   public const string DeleteUsage = """
     Usage: atli-reports-provisioner delete --tenant <id> [--drain <hh:mm:ss>]
 
-    Deletes the tenant's record, so the gateway stops routing to it, then its sandbox, and any other
-    sandbox labeled for the tenant. Deleting a tenant that has neither succeeds.
+    Deletes the tenant's record, even one that cannot be read, so the gateway stops routing to it,
+    then every sandbox labeled for the tenant. A sandbox the record names that is labeled for another
+    tenant is not deleted. Deleting a tenant that has neither succeeds.
 
     Options:
       --tenant <id>        The tenant.
@@ -116,8 +123,23 @@ internal static class CommandLine
   public const string ListUsage = """
     Usage: atli-reports-provisioner list
 
-    Lists each renderer record with its sandbox's current state, then any renderer sandbox no record
-    points to. Credentials are never shown.
+    Lists each renderer record with its sandbox's current state, then any record that cannot be
+    read, then any renderer sandbox no record points to. Credentials are never shown.
+    """;
+
+  public const string PruneUsage = """
+    Usage: atli-reports-provisioner prune [--tenant <id>] [--drain <hh:mm:ss>]
+
+    Deletes renderer sandboxes that no record points to, such as the old sandboxes of a rollout
+    that was canceled during its drain, or the sandbox of a create that was killed. A sandbox newer
+    than the drain and the ready timeout together is kept, as it may still be being created, and so
+    is every sandbox of a tenant whose record cannot be read. The leftovers are deleted after the
+    drain, in case the gateway still sends them work, if no record points to them by then.
+
+    Options:
+      --tenant <id>          Only this tenant's leftovers.
+      --drain <hh:mm:ss>     How long to wait before deleting; default Provisioner:DrainDelay,
+                             else 00:02:30.
     """;
 
   public static ProvisionerCommand Parse(IReadOnlyList<string> arguments)
@@ -140,6 +162,7 @@ internal static class CommandLine
       "rollout" => RolloutUsage,
       "delete" => DeleteUsage,
       "list" => ListUsage,
+      "prune" => PruneUsage,
       _ => throw new UsageException($"Unknown command '{name}'.", Overview),
     };
     var options = ParseOptions(arguments.Skip(1), usage);
@@ -153,6 +176,7 @@ internal static class CommandLine
       "create" => ParseCreate(options, usage),
       "rollout" => ParseRollout(options, usage),
       "delete" => ParseDelete(options, usage),
+      "prune" => ParsePrune(options, usage),
       _ => ParseList(options, usage),
     };
   }
@@ -175,15 +199,7 @@ internal static class CommandLine
     options.Allow(usage, "--disk-image", "--tenant", "--max-parallel", "--drain");
     Dictionary<string, string?> settings = [];
     AddDiskImage(options, settings, usage);
-    if (options.Get("--drain") is { } drain)
-    {
-      settings[$"{ProvisionerOptions.SectionName}:DrainDelay"] = ParseDuration(
-          "--drain",
-          drain,
-          usage
-        )
-        .ToString("c", CultureInfo.InvariantCulture);
-    }
+    AddDrain(options, settings, usage);
 
     var maxParallelText = options.Get("--max-parallel") ?? DefaultMaxParallel;
     if (
@@ -210,9 +226,28 @@ internal static class CommandLine
   {
     options.Allow(usage, "--tenant", "--drain");
     var drain = options.Get("--drain") is { } value
-      ? ParseDuration("--drain", value, usage)
+      ? ParseDrain("--drain", value, usage)
       : TimeSpan.Zero;
     return new DeleteCommand(RequireTenant(options, usage), drain);
+  }
+
+  private static PruneCommand ParsePrune(Options options, string usage)
+  {
+    options.Allow(usage, "--tenant", "--drain");
+    Dictionary<string, string?> settings = [];
+    AddDrain(options, settings, usage);
+    var tenant = options.Get("--tenant") is { } value ? ValidateTenant(value, usage) : null;
+    return new PruneCommand(tenant) { Settings = settings };
+  }
+
+  /// <summary><c>--drain</c>, over <c>Provisioner:DrainDelay</c>.</summary>
+  private static void AddDrain(Options options, Dictionary<string, string?> settings, string usage)
+  {
+    if (options.Get("--drain") is { } drain)
+    {
+      settings[$"{ProvisionerOptions.SectionName}:DrainDelay"] = ParseDrain("--drain", drain, usage)
+        .ToString("c", CultureInfo.InvariantCulture);
+    }
   }
 
   private static ListCommand ParseList(Options options, string usage)
@@ -307,23 +342,23 @@ internal static class CommandLine
       : throw new UsageException($"--size is '{value}'; use S, M, or L.", usage);
 
   /// <summary>
-  /// Parses <c>hh:mm:ss</c>, or <c>0</c>. A bare number is refused: <see cref="TimeSpan"/> would
-  /// read <c>90</c> as 90 days.
+  /// Parses a drain: <c>hh:mm:ss</c>, or <c>0</c>, of at most an hour. A bare number is refused:
+  /// <see cref="TimeSpan"/> would read <c>90</c> as 90 days.
   /// </summary>
-  private static TimeSpan ParseDuration(string name, string value, string usage)
+  private static TimeSpan ParseDrain(string name, string value, string usage)
   {
-    if (value == "0")
-    {
-      return TimeSpan.Zero;
-    }
-
-    if (
-      !value.Contains(':', StringComparison.Ordinal)
-      || !TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var duration)
-      || duration < TimeSpan.Zero
-    )
+    if (!ProvisionerOptions.TryParseDuration(value, out var duration) || duration < TimeSpan.Zero)
     {
       throw new UsageException($"{name} is '{value}'; use hh:mm:ss, such as 00:02:30.", usage);
+    }
+
+    if (duration > ProvisionerOptions.MaxDrainDelay)
+    {
+      throw new UsageException(
+        $"{name} is '{value}'; the most is "
+          + $"{ProvisionerOptions.MaxDrainDelay.ToString("c", CultureInfo.InvariantCulture)}.",
+        usage
+      );
     }
 
     return duration;

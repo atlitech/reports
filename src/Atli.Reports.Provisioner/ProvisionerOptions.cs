@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Microsoft.Extensions.Configuration;
@@ -12,6 +13,15 @@ namespace Atli.Reports.Provisioner;
 internal sealed class ProvisionerOptions
 {
   public const string SectionName = "Provisioner";
+
+  /// <summary>The longest <see cref="DrainDelay"/>: past the gateway's record cache and longest request many times over.</summary>
+  public static readonly TimeSpan MaxDrainDelay = TimeSpan.FromHours(1);
+
+  /// <summary>The longest <see cref="ReadyTimeout"/>; a renderer was ready in 1.4 to 5.2 seconds in the measured runs.</summary>
+  public static readonly TimeSpan MaxReadyTimeout = TimeSpan.FromMinutes(15);
+
+  /// <summary>The longest <see cref="AutoSuspendAfter"/>.</summary>
+  public static readonly TimeSpan MaxAutoSuspendAfter = TimeSpan.FromHours(24);
 
   /// <summary>The renderer sandbox group, which the provisioner holds the Data Owner role on.</summary>
   public SandboxesOptions Sandboxes { get; set; } = new();
@@ -37,8 +47,25 @@ internal sealed class ProvisionerOptions
   /// </summary>
   public TimeSpan DrainDelay { get; set; } = TimeSpan.FromSeconds(150);
 
+  /// <summary>
+  /// What a request to a stopped renderer's port does: <c>OnDemand</c> (the default) resumes it, so
+  /// the gateway needs no resume permission; <c>Manual</c> leaves resuming to the gateway's
+  /// <c>Wake:Mode=Sandboxes</c>.
+  /// </summary>
+  public string PortActivation { get; set; } = nameof(SandboxPortActivation.OnDemand);
+
   /// <summary><see cref="Size"/>, parsed; <see cref="Load"/> has checked it.</summary>
   public RendererSize RendererSize => RendererSize.Parse(Size);
+
+  /// <summary><see cref="PortActivation"/>, parsed; <see cref="Load"/> has checked it.</summary>
+  public SandboxPortActivation Activation =>
+    string.Equals(
+      PortActivation,
+      nameof(SandboxPortActivation.Manual),
+      StringComparison.OrdinalIgnoreCase
+    )
+      ? SandboxPortActivation.Manual
+      : SandboxPortActivation.OnDemand;
 
   /// <summary>
   /// Binds the <c>Provisioner</c> section and checks it. Throws <see cref="InvalidOperationException"/>
@@ -46,8 +73,15 @@ internal sealed class ProvisionerOptions
   /// </summary>
   public static ProvisionerOptions Load(IConfiguration configuration)
   {
+    var section = configuration.GetSection(SectionName);
+    // Before binding: TimeSpan reads a bare number as days, so DrainDelay=150 would bind as
+    // 150 days. Durations must say hh:mm:ss.
+    CheckDuration(section, nameof(AutoSuspendAfter));
+    CheckDuration(section, nameof(ReadyTimeout));
+    CheckDuration(section, nameof(DrainDelay));
+
     ProvisionerOptions options = new();
-    configuration.GetSection(SectionName).Bind(options);
+    section.Bind(options);
     options.Sandboxes.Validate();
     if (!RendererSizes.TryParse(options.Size, out _))
     {
@@ -56,22 +90,98 @@ internal sealed class ProvisionerOptions
       );
     }
 
-    if (options.AutoSuspendAfter <= TimeSpan.Zero)
+    if (
+      !string.Equals(
+        options.PortActivation,
+        nameof(SandboxPortActivation.OnDemand),
+        StringComparison.OrdinalIgnoreCase
+      )
+      && !string.Equals(
+        options.PortActivation,
+        nameof(SandboxPortActivation.Manual),
+        StringComparison.OrdinalIgnoreCase
+      )
+    )
     {
-      throw new InvalidOperationException($"{SectionName}:AutoSuspendAfter must be positive.");
+      throw new InvalidOperationException(
+        $"{SectionName}:PortActivation is '{options.PortActivation}'; use OnDemand or Manual."
+      );
     }
 
-    if (options.ReadyTimeout <= TimeSpan.Zero)
-    {
-      throw new InvalidOperationException($"{SectionName}:ReadyTimeout must be positive.");
-    }
-
-    if (options.DrainDelay < TimeSpan.Zero)
-    {
-      throw new InvalidOperationException($"{SectionName}:DrainDelay cannot be negative.");
-    }
-
+    CheckRange(
+      nameof(AutoSuspendAfter),
+      options.AutoSuspendAfter,
+      TimeSpan.Zero,
+      MaxAutoSuspendAfter,
+      zeroAllowed: false
+    );
+    CheckRange(
+      nameof(ReadyTimeout),
+      options.ReadyTimeout,
+      TimeSpan.Zero,
+      MaxReadyTimeout,
+      zeroAllowed: false
+    );
+    CheckRange(
+      nameof(DrainDelay),
+      options.DrainDelay,
+      TimeSpan.Zero,
+      MaxDrainDelay,
+      zeroAllowed: true
+    );
     return options;
+  }
+
+  /// <summary>
+  /// Whether <paramref name="value"/> is a duration as the provisioner takes them: <c>hh:mm:ss</c>
+  /// (or <c>d.hh:mm:ss</c>), or <c>0</c>. A bare number is refused.
+  /// </summary>
+  public static bool TryParseDuration(string value, out TimeSpan duration)
+  {
+    if (value == "0")
+    {
+      duration = TimeSpan.Zero;
+      return true;
+    }
+
+    return TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out duration)
+      && value.Contains(':', StringComparison.Ordinal);
+  }
+
+  private static void CheckDuration(IConfigurationSection section, string name)
+  {
+    if (section[name] is { } value && !TryParseDuration(value.Trim(), out _))
+    {
+      throw new InvalidOperationException(
+        $"{SectionName}:{name} is '{value}'; use hh:mm:ss, such as 00:02:30."
+      );
+    }
+  }
+
+  private static void CheckRange(
+    string name,
+    TimeSpan value,
+    TimeSpan minimum,
+    TimeSpan maximum,
+    bool zeroAllowed
+  )
+  {
+    if (value < minimum || (!zeroAllowed && value == minimum))
+    {
+      throw new InvalidOperationException(
+        zeroAllowed
+          ? $"{SectionName}:{name} cannot be negative."
+          : $"{SectionName}:{name} must be positive."
+      );
+    }
+
+    if (value > maximum)
+    {
+      throw new InvalidOperationException(
+        $"{SectionName}:{name} is {value.ToString("c", CultureInfo.InvariantCulture)}; "
+          + $"the most is {maximum.ToString("c", CultureInfo.InvariantCulture)}."
+      );
+    }
   }
 }
 

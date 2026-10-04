@@ -1,3 +1,4 @@
+using System.Globalization;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Tests.Support;
 
@@ -121,11 +122,67 @@ public class RendererModelTests
           ["ReportsServer__Authentication__ApiKeys__0__Hash"] = credential.Verifier,
           ["ReportsServer__Authentication__ApiKeys__0__CallerId"] = "gateway",
           ["ReportsServer__Authentication__ApiKeys__0__Permissions__0"] = "reports.convert",
-          ["ReportsServer__Limits__MaxConcurrentRequestsPerCaller"] = "4",
+          ["ReportsServer__Limits__MaxConcurrentRequestsPerCaller"] = "16",
+          ["ReportsServer__Limits__MaxRequestBodyBytes"] = "31457280",
+          ["Kestrel__Limits__MaxRequestBodySize"] = "31457280",
           ["ReportsEngine__Concurrency__MaxConcurrentConversions"] = "4",
+          ["ReportsEngine__Concurrency__MaxQueueLength"] = "12",
           ["ReportsEngine__Network__Mode"] = "Disabled",
         }
       );
+  }
+
+  [Test]
+  [Arguments("S", "1", "4", "3")]
+  [Arguments("M", "2", "8", "6")]
+  [Arguments("L", "4", "16", "12")]
+  public async Task A_renderer_queues_what_it_admits_beyond_its_conversions(
+    string size,
+    string conversions,
+    string admitted,
+    string queued
+  )
+  {
+    var environment = RendererServerEnvironment.Create(
+      RendererCredential.Generate(),
+      RendererSize.Parse(size)
+    );
+
+    // The gateway's requests beyond the running conversions wait in the engine's queue instead of
+    // being refused as busy.
+    await Assert
+      .That(environment["ReportsEngine__Concurrency__MaxConcurrentConversions"])
+      .IsEqualTo(conversions);
+    await Assert
+      .That(environment["ReportsServer__Limits__MaxConcurrentRequestsPerCaller"])
+      .IsEqualTo(admitted);
+    await Assert.That(environment["ReportsEngine__Concurrency__MaxQueueLength"]).IsEqualTo(queued);
+  }
+
+  [Test]
+  public async Task A_renderer_accepts_any_body_the_gateways_encoder_can_make_of_an_admitted_one()
+  {
+    var environment = RendererServerEnvironment.Create(
+      RendererCredential.Generate(),
+      RendererSize.Small
+    );
+    // The server's default body limit, and the most the gateway's JSON encoder grows text by.
+    const long admitted = 10 * 1024 * 1024;
+
+    await Assert
+      .That(
+        long.Parse(
+          environment["ReportsServer__Limits__MaxRequestBodyBytes"],
+          CultureInfo.InvariantCulture
+        )
+      )
+      .IsGreaterThanOrEqualTo(3 * admitted);
+    // Kestrel's own limit is 30,000,000 bytes unless set, and the lower of the two applies.
+    await Assert
+      .That(
+        long.Parse(environment["Kestrel__Limits__MaxRequestBodySize"], CultureInfo.InvariantCulture)
+      )
+      .IsGreaterThanOrEqualTo(3 * admitted);
   }
 
   [Test]

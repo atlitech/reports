@@ -9,7 +9,10 @@ namespace Atli.Reports.Hosting.Sandboxes;
 /// </summary>
 internal sealed class AccessTokenCache(TokenCredential credential, string scope, TimeProvider time)
 {
-  /// <summary>How long before expiry a token is refreshed, so no request leaves with one about to lapse.</summary>
+  /// <summary>
+  /// How long before expiry a token is refreshed, so no request leaves with one about to lapse; for
+  /// a token issued with less than twice this left, half of what it has.
+  /// </summary>
   internal static readonly TimeSpan RefreshMargin = TimeSpan.FromMinutes(5);
 
   private readonly TokenRequestContext _context = new([scope]);
@@ -22,8 +25,8 @@ internal sealed class AccessTokenCache(TokenCredential credential, string scope,
   private Task<CachedToken>? _refreshing;
 
   /// <summary>
-  /// Returns a token valid for at least <see cref="RefreshMargin"/>, or failing a refresh, one that
-  /// has not expired yet.
+  /// Returns a token that is not due for a refresh (see <see cref="RefreshMargin"/>), or failing a
+  /// refresh, one that has not expired yet.
   /// </summary>
   public async ValueTask<string> GetTokenAsync(CancellationToken cancellationToken)
   {
@@ -73,7 +76,15 @@ internal sealed class AccessTokenCache(TokenCredential credential, string scope,
   private async Task<CachedToken> RefreshAsync()
   {
     var token = await credential.GetTokenAsync(_context, CancellationToken.None);
-    var refreshAt = token.ExpiresOn - RefreshMargin;
+    // A token that arrives with less than twice the margin left is refreshed halfway through what
+    // it has, not at once: with the full margin, one issued with under five minutes left (a
+    // credential that caches tokens itself may hand one out) would be refreshed on every call.
+    var lifetime = token.ExpiresOn - time.GetUtcNow();
+    var margin =
+      lifetime <= TimeSpan.Zero ? TimeSpan.Zero
+      : lifetime / 2 < RefreshMargin ? lifetime / 2
+      : RefreshMargin;
+    var refreshAt = token.ExpiresOn - margin;
     if (token.RefreshOn is { } refreshOn && refreshOn < refreshAt)
     {
       refreshAt = refreshOn;

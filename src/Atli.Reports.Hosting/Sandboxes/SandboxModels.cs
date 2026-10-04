@@ -47,12 +47,46 @@ public sealed record SandboxView
 
   /// <summary>The exposed ports.</summary>
   public IReadOnlyList<SandboxPort> Ports { get; init; } = [];
+
+  /// <summary>When the sandbox was created, or <see langword="null"/> when the data plane did not say.</summary>
+  public DateTimeOffset? CreatedAt { get; init; }
 }
 
 /// <summary>A port exposed through the platform's proxy.</summary>
-public sealed record SandboxPort(int Port, Uri Url, bool Anonymous);
+/// <param name="Port">The port in the sandbox.</param>
+/// <param name="Url">The port's public address.</param>
+/// <param name="Anonymous">Whether the proxy admits requests without a user's sign-in.</param>
+public sealed record SandboxPort(int Port, Uri Url, bool Anonymous)
+{
+  /// <summary>
+  /// What a request to the port does while the sandbox is stopped:
+  /// <see cref="SandboxPortActivation.Manual"/> when the data plane reports no mode, or one this
+  /// client does not know.
+  /// </summary>
+  public SandboxPortActivation Activation { get; init; } = SandboxPortActivation.Manual;
+}
 
-/// <summary>Lifecycle states the data plane reports.</summary>
+/// <summary>What a request to an exposed port does while its sandbox is stopped.</summary>
+public enum SandboxPortActivation
+{
+  /// <summary>
+  /// The data plane's default: the proxy answers <c>403 {"error":"Sandbox is not running"}</c> until
+  /// the sandbox is resumed.
+  /// </summary>
+  Manual,
+
+  /// <summary>
+  /// The request resumes the sandbox and is then served, with no resume call. Observed on
+  /// 2026-10-04 with a plain listener: the first answer from a stopped sandbox came in about
+  /// 1.1 seconds.
+  /// </summary>
+  OnDemand,
+}
+
+/// <summary>
+/// The settled lifecycle states the data plane reports. Others, such as <c>Stopping</c>, are
+/// transitions between them.
+/// </summary>
 public static class SandboxStates
 {
   /// <summary>Running, using CPU and memory.</summary>
