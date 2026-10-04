@@ -52,7 +52,9 @@ engine and embedded Blazor libraries do not acquire an authentication dependency
 `None` explicitly permits anonymous access to every endpoint, including diagnostics. Use it only
 on a controlled local endpoint or behind a separately enforced security boundary. A private
 address alone does not authenticate callers. Proxies must not expose an alternate route around
-authorization. No forwarded identity or tenant headers are trusted by this server.
+authorization. No forwarded identity or tenant headers are trusted by this server. In
+[gateway mode](engine/server.md#gateway-mode), `X-Reports-Tenant` only selects among the product
+tenants the authenticated caller already belongs to; it cannot add one.
 
 ### API keys
 

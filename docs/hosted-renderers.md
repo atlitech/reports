@@ -1,8 +1,12 @@
 # Hosted renderer design
 
-Status: agreed design, not built. This is how a managed service would render customers'
-documents, if one is built; nothing in this repository implements it yet. The default server
-remains the integrated engine for self-hosted, application-owned reports. The
+Status: agreed design, partly built. The shared API is the server's
+[gateway mode](engine/server.md#gateway-mode); the
+[provisioner](../src/Atli.Reports.Provisioner/README.md) creates, rolls out, and deletes renderers
+on Azure Container Apps Sandboxes; both share [`Atli.Reports.Hosting`](../src/Atli.Reports.Hosting).
+The [production acceptance gates](#production-acceptance-gates) are not met yet, so no hosted
+service runs on them. The default server remains the integrated engine for self-hosted,
+application-owned reports. The
 [isolated renderer experiment](isolated-workers.md) records why a sandbox launched by the API for
 every request is not this design, and holds the measurements behind the numbers below.
 
