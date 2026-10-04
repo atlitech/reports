@@ -5,7 +5,8 @@ namespace Atli.Reports.Provisioner.Tests.Support;
 /// <summary>
 /// A sandbox group's data plane in memory. Created sandboxes are numbered (<c>sandbox-1</c>, …),
 /// run at once, and are created at the clock's now; a port's URL is
-/// <c>https://{id}-{port}.example.test/</c>.
+/// <c>https://{id}-{port}.example.test/</c>. Stopping, disabling, and enabling set the stop's reason
+/// and time as the data plane does.
 /// </summary>
 internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) : ISandboxesClient
 {
@@ -23,6 +24,12 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
   /// answer was lost, or <see langword="null"/>.
   /// </summary>
   public Func<SandboxSpec, Exception?>? FailCreateAfterCreating { get; set; }
+
+  /// <summary>
+  /// Runs after each list is taken, before it is returned, when set: something that happens between
+  /// a command's scan and what the command does next, such as a request waking a renderer.
+  /// </summary>
+  public Func<Task>? AfterList { get; set; }
 
   /// <summary>Sandboxes whose deletion fails.</summary>
   public HashSet<string> FailDelete { get; } = new(StringComparer.Ordinal);
@@ -92,6 +99,33 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
     return sandbox;
   }
 
+  /// <summary>
+  /// Stops a sandbox behind the provisioner's back, as its auto-suspend does: <paramref name="ago"/>
+  /// before the clock's now, or at a time the data plane does not report when <see langword="null"/>.
+  /// </summary>
+  public SandboxView Suspend(
+    string id,
+    TimeSpan? ago,
+    string reason = SandboxStoppedReasons.Idle
+  ) =>
+    Update(
+      id,
+      sandbox =>
+        sandbox with
+        {
+          State = SandboxStates.Stopped,
+          StoppedReason = reason,
+          StoppedAt = clock.GetUtcNow() - ago,
+        }
+    );
+
+  /// <summary>
+  /// Starts a sandbox behind the provisioner's back, as a request to its on-demand port does. The
+  /// stop's reason and time stay, as the data plane keeps them.
+  /// </summary>
+  public SandboxView Wake(string id) =>
+    Update(id, sandbox => sandbox with { State = SandboxStates.Running });
+
   /// <summary>Removes a sandbox behind the provisioner's back.</summary>
   public void Remove(string id)
   {
@@ -134,12 +168,20 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
     }
   }
 
-  public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken)
+  public async Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken)
   {
+    IReadOnlyList<SandboxView> sandboxes;
     lock (_lock)
     {
-      return Task.FromResult<IReadOnlyList<SandboxView>>([.. _sandboxes.Values]);
+      sandboxes = [.. _sandboxes.Values];
     }
+
+    if (AfterList is { } afterList)
+    {
+      await afterList();
+    }
+
+    return sandboxes;
   }
 
   public Task DeleteAsync(string sandboxId, CancellationToken cancellationToken)
@@ -157,9 +199,7 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
   public Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken)
   {
     journal.Add($"stop {sandboxId}");
-    return Task.FromResult(
-      Update(sandboxId, sandbox => sandbox with { State = SandboxStates.Stopped })
-    );
+    return Task.FromResult(Stop(sandboxId, SandboxStoppedReasons.UserStopped));
   }
 
   public Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken)
@@ -241,9 +281,7 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
       _disabled.Add(sandboxId);
     }
 
-    return Task.FromResult(
-      Update(sandboxId, sandbox => sandbox with { State = SandboxStates.Stopped })
-    );
+    return Task.FromResult(Stop(sandboxId, SandboxStoppedReasons.Disabled));
   }
 
   public Task<SandboxView> EnableAsync(string sandboxId, CancellationToken cancellationToken)
@@ -252,9 +290,36 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
     lock (_lock)
     {
       _disabled.Remove(sandboxId);
-      return Task.FromResult(_sandboxes[sandboxId]);
     }
+
+    // Still stopped; it reads as stopped by the user from now on.
+    return Task.FromResult(
+      Update(
+        sandboxId,
+        sandbox =>
+          sandbox.IsDisabled
+            ? sandbox with
+            {
+              StoppedReason = SandboxStoppedReasons.UserStopped,
+            }
+            : sandbox
+      )
+    );
   }
+
+  /// <summary>Stops a sandbox now for <paramref name="reason"/>; a stopped one keeps its stop time.</summary>
+  private SandboxView Stop(string sandboxId, string reason) =>
+    Update(
+      sandboxId,
+      sandbox =>
+        sandbox with
+        {
+          State = SandboxStates.Stopped,
+          StoppedReason = reason,
+          StoppedAt =
+            sandbox.State == SandboxStates.Stopped ? sandbox.StoppedAt : clock.GetUtcNow(),
+        }
+    );
 
   private SandboxView Update(string sandboxId, Func<SandboxView, SandboxView> update)
   {

@@ -16,7 +16,11 @@ internal abstract record ProvisionerCommand
 
 internal sealed record CreateCommand(string TenantId) : ProvisionerCommand;
 
-internal sealed record RolloutCommand(string? TenantId, int MaxParallel) : ProvisionerCommand;
+/// <param name="RetireStopped">
+/// Whether managed tenants' stopped renderers are retired instead of replaced: <c>--stopped retire</c>.
+/// </param>
+internal sealed record RolloutCommand(string? TenantId, int MaxParallel, bool RetireStopped)
+  : ProvisionerCommand;
 
 /// <param name="Drain">How long to wait between deleting the record and the sandbox; none by default.</param>
 internal sealed record DeleteCommand(string TenantId, TimeSpan Drain) : ProvisionerCommand;
@@ -106,7 +110,7 @@ internal static class CommandLine
 
   public const string RolloutUsage = """
     Usage: atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel <n>]
-                                            [--drain <hh:mm:ss>]
+                                            [--drain <hh:mm:ss>] [--stopped replace|retire]
 
     Replaces every renderer, or the tenant's, that runs another disk image or whose sandbox is gone,
     suspended ones included: a new sandbox with a new credential and the old one's size, its record
@@ -121,6 +125,12 @@ internal static class CommandLine
       --drain <hh:mm:ss>     How long an old renderer stays after its record moves, for the gateway's
                              cached records and requests in flight; default Provisioner:DrainDelay,
                              else 00:02:30.
+      --stopped replace|retire
+                             What happens to the stopped renderers of tenants under
+                             Provisioner:Service:TenantPrefixes: replaced like the others (the
+                             default), or retired as the retire command does, however long they have
+                             been stopped, to come back from the provisioning service's disk image on
+                             their next conversion. Disabled renderers are replaced either way.
     """;
 
   public const string DeleteUsage = """
@@ -263,7 +273,7 @@ internal static class CommandLine
 
   private static RolloutCommand ParseRollout(Options options, string usage)
   {
-    options.Allow(usage, "--disk-image", "--tenant", "--max-parallel", "--drain");
+    options.Allow(usage, "--disk-image", "--tenant", "--max-parallel", "--drain", "--stopped");
     Dictionary<string, string?> settings = [];
     AddDiskImage(options, settings, usage);
     AddDrain(options, settings, usage);
@@ -285,8 +295,17 @@ internal static class CommandLine
       );
     }
 
+    var retireStopped = options.Get("--stopped") switch
+    {
+      null or "replace" => false,
+      "retire" => true,
+      var stopped => throw new UsageException(
+        $"--stopped is '{stopped}'; use replace or retire.",
+        usage
+      ),
+    };
     var tenant = options.Get("--tenant") is { } value ? ValidateTenant(value, usage) : null;
-    return new RolloutCommand(tenant, maxParallel) { Settings = settings };
+    return new RolloutCommand(tenant, maxParallel, retireStopped) { Settings = settings };
   }
 
   private static DeleteCommand ParseDelete(Options options, string usage)

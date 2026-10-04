@@ -58,6 +58,13 @@ public sealed record SandboxView
   public string? StoppedReason { get; init; }
 
   /// <summary>
+  /// When the sandbox last stopped, or <see langword="null"/> when the data plane did not say or
+  /// said it in a form this client cannot read. As with <see cref="StoppedReason"/>, it means
+  /// something only while the sandbox is stopped.
+  /// </summary>
+  public DateTimeOffset? StoppedAt { get; init; }
+
+  /// <summary>
   /// Whether the sandbox is stopped because it was disabled: the platform refuses to start it,
   /// whether a request reaches an on-demand port or something resumes it, until it is enabled.
   /// </summary>

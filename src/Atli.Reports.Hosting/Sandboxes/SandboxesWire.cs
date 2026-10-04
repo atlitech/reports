@@ -141,6 +141,9 @@ internal sealed class SandboxResponse
 internal sealed class StateDetailsWire
 {
   public string? StoppedReason { get; init; }
+
+  /// <summary>An ISO 8601 time, read as text as <see cref="SandboxResponse.CreatedAt"/> is.</summary>
+  public string? StoppedAt { get; init; }
 }
 
 internal sealed class PortResponse

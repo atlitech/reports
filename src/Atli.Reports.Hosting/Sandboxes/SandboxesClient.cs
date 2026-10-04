@@ -925,18 +925,26 @@ public sealed class SandboxesClient : ISandboxesClient
       Id = sandbox.Id,
       State = sandbox.State,
       StoppedReason = sandbox.StateDetails?.StoppedReason,
+      StoppedAt = ParseTime(sandbox.StateDetails?.StoppedAt),
       Labels = sandbox.Labels ?? [],
       Ports = ports,
-      CreatedAt = DateTimeOffset.TryParse(
-        sandbox.CreatedAt,
-        CultureInfo.InvariantCulture,
-        DateTimeStyles.AssumeUniversal,
-        out var createdAt
-      )
-        ? createdAt
-        : null,
+      CreatedAt = ParseTime(sandbox.CreatedAt),
     };
   }
+
+  /// <summary>
+  /// A time the data plane sent, or <see langword="null"/> when it sent none or one this client
+  /// cannot parse: an unknown time, not a sandbox that cannot be read.
+  /// </summary>
+  private static DateTimeOffset? ParseTime(string? value) =>
+    DateTimeOffset.TryParse(
+      value,
+      CultureInfo.InvariantCulture,
+      DateTimeStyles.AssumeUniversal,
+      out var time
+    )
+      ? time
+      : null;
 
   private static SandboxesException Unexpected(Call call) =>
     new($"{call} answered with a sandbox this client cannot read.");

@@ -126,6 +126,13 @@ internal sealed class RendererProvisioner
   /// How many replacements are created at once. An old renderer's drain does not hold a place, so
   /// the time to replace every renderer does not grow with the drain.
   /// </param>
+  /// <param name="retireStopped">
+  /// The prefixes whose tenants' stopped renderers are retired instead of replaced, however long
+  /// they have been stopped, as <see cref="RetireIdleAsync"/> retires idle ones; each comes back
+  /// from the provisioning service's disk image on its tenant's next conversion. A renderer that
+  /// starts before it is retired is replaced after all. <see langword="null"/> replaces stopped
+  /// renderers too.
+  /// </param>
   /// <param name="drain">How long an old renderer stays after its record moves.</param>
   /// <param name="cancellationToken">Cancels the rollout; replacements not yet recorded are deleted.</param>
   /// <summary>
@@ -147,6 +154,7 @@ internal sealed class RendererProvisioner
     string? tenantId,
     int maxParallel,
     TimeSpan drain,
+    ProvisioningServiceOptions? retireStopped,
     CancellationToken cancellationToken
   )
   {
@@ -172,17 +180,26 @@ internal sealed class RendererProvisioner
       ];
     }
 
-    var existing = (await _sandboxes.ListAsync(cancellationToken))
-      .Select(sandbox => sandbox.Id)
-      .ToHashSet(StringComparer.Ordinal);
+    var existing = await ListSandboxesAsync(cancellationToken);
     List<RendererRecord> outdated = [];
+    // The outdated tenants whose renderers are retired rather than replaced.
+    HashSet<string> stopped = new(StringComparer.Ordinal);
     foreach (var record in records.OrderBy(record => record.TenantId, StringComparer.Ordinal))
     {
+      var sandbox = record.SandboxId is null ? null : existing.GetValueOrDefault(record.SandboxId);
       if (!string.Equals(record.DiskImageId, diskImageId, StringComparison.Ordinal))
       {
         outdated.Add(record);
+        if (
+          retireStopped?.PrefixOf(record.TenantId) is not null
+          && sandbox is not null
+          && IsRetirable(sandbox, record.TenantId, idle: null)
+        )
+        {
+          stopped.Add(record.TenantId);
+        }
       }
-      else if (record.SandboxId is { } sandboxId && !existing.Contains(sandboxId))
+      else if (record.SandboxId is { } sandboxId && sandbox is null)
       {
         // On the image, but pointing at a sandbox that is gone: replacing it repairs the tenant.
         Log(record.TenantId, $"Sandbox {sandboxId} of the record no longer exists.");
@@ -192,12 +209,15 @@ internal sealed class RendererProvisioner
 
     var current = records.Count - outdated.Count;
     _output.WriteLine(
-      $"Rollout of disk image {diskImageId}: {outdated.Count} to replace, {current} already on it"
+      $"Rollout of disk image {diskImageId}: {outdated.Count - stopped.Count} to replace, "
+        + (retireStopped is null ? "" : $"{stopped.Count} stopped to retire, ")
+        + $"{current} already on it"
         + (failures.IsEmpty ? ". " : $", {failures.Count} unreadable. ")
         + $"{maxParallel} at a time; old sandboxes are deleted {Format(drain)} after their record moves."
     );
 
     ConcurrentQueue<string> replaced = new();
+    ConcurrentQueue<string> retiredStopped = new();
     ConcurrentQueue<Task> retiring = new();
     try
     {
@@ -212,6 +232,23 @@ internal sealed class RendererProvisioner
         {
           try
           {
+            if (stopped.Contains(old.TenantId))
+            {
+              switch (await RetireRendererAsync(old, idle: null, token))
+              {
+                case Retirement.Retired:
+                  retiredStopped.Enqueue(old.TenantId);
+                  return;
+                case Retirement.RecordChanged:
+                  failures[old.TenantId] =
+                    "the record changed since the rollout read it; run rollout again.";
+                  return;
+                default:
+                  // Started, or disabled, since it was read: replaced as any other.
+                  break;
+              }
+            }
+
             var size = await ReadSizeAsync(old, token);
             Log(
               old.TenantId,
@@ -258,21 +295,45 @@ internal sealed class RendererProvisioner
 
     RolloutResult result = new(
       [.. replaced.Order(StringComparer.Ordinal)],
+      [.. retiredStopped.Order(StringComparer.Ordinal)],
       current,
       new SortedDictionary<string, string>(failures, StringComparer.Ordinal),
       pruned
     );
     _output.WriteLine(
-      $"Replaced {result.Replaced.Count}, already on the image {result.AlreadyCurrent}, "
-        + $"failed {result.Failures.Count}."
+      $"Replaced {result.Replaced.Count}, "
+        + (retireStopped is null ? "" : $"retired {result.Retired.Count}, ")
+        + $"already on the image {result.AlreadyCurrent}, failed {result.Failures.Count}."
     );
     foreach (var (tenant, reason) in result.Failures)
     {
       _output.WriteLine($"  {tenant}: {reason}");
     }
 
+    if (result.Retired.Count > 0)
+    {
+      _output.WriteLine("Retired, to be created again on their next conversion:");
+      foreach (var tenant in result.Retired)
+      {
+        _output.WriteLine($"  {tenant}");
+      }
+    }
+
     return result;
   }
+
+  /// <summary>
+  /// Replaces every renderer, or <paramref name="tenantId"/>'s, as the overload with
+  /// <c>retireStopped</c> does, stopped ones included.
+  /// </summary>
+  public Task<RolloutResult> RolloutAsync(
+    string diskImageId,
+    string? tenantId,
+    int maxParallel,
+    TimeSpan drain,
+    CancellationToken cancellationToken
+  ) =>
+    RolloutAsync(diskImageId, tenantId, maxParallel, drain, retireStopped: null, cancellationToken);
 
   /// <summary>
   /// Deletes the tenant's record first, so the gateway stops routing to its renderer, then, after
@@ -534,10 +595,223 @@ internal sealed class RendererProvisioner
   /// then its sandboxes, as <see cref="DeleteAsync"/> does. Does nothing when <c>RetireAfterIdle</c>
   /// is zero.
   /// </summary>
-  public Task<RetireResult> RetireIdleAsync(
+  /// <remarks>
+  /// <para>
+  /// A record whose sandbox no longer exists is retired too: the record alone is deleted. Kept are
+  /// running and disabled renderers, those whose stop time the data plane does not report, records
+  /// that cannot be read, and every tenant outside the prefixes. A record that names a sandbox
+  /// labeled for another tenant is kept and reported as a failure.
+  /// </para>
+  /// <para>
+  /// Just before deleting, the record and the sandbox are read again: a record another command
+  /// changed meanwhile, or a sandbox a request is waking, is kept until the next run.
+  /// </para>
+  /// </remarks>
+  public async Task<RetireResult> RetireIdleAsync(
     ProvisioningServiceOptions service,
     CancellationToken cancellationToken
-  ) => throw new NotImplementedException();
+  )
+  {
+    ArgumentNullException.ThrowIfNull(service);
+    List<string> retired = [];
+    SortedDictionary<string, string> failures = new(StringComparer.Ordinal);
+    var idle = service.RetireAfterIdle;
+    if (idle <= TimeSpan.Zero)
+    {
+      _output.WriteLine(
+        $"Retiring is off: {ProvisioningServiceOptions.SectionName}:RetireAfterIdle is 00:00:00."
+      );
+      return new RetireResult(retired, failures);
+    }
+
+    // Records first: a renderer's sandbox exists before its record, so the sandboxes listed after
+    // include every one a listed record names, unless it is gone.
+    var listing = await _records.ListWithUnreadableAsync(cancellationToken);
+    var sandboxes = await ListSandboxesAsync(cancellationToken);
+    foreach (var unreadable in listing.Unreadable)
+    {
+      if (service.PrefixOf(unreadable.TenantId) is not null)
+      {
+        Log(unreadable.TenantId, $"Not retired: the record cannot be read ({unreadable.Reason}).");
+      }
+    }
+
+    var now = _time.GetUtcNow();
+    foreach (
+      var record in listing
+        .Records.Where(record => service.PrefixOf(record.TenantId) is not null)
+        .OrderBy(record => record.TenantId, StringComparer.Ordinal)
+    )
+    {
+      var tenant = record.TenantId;
+      if (record.SandboxId is not { } sandboxId)
+      {
+        Log(tenant, "Not retired: the record names no sandbox.");
+        continue;
+      }
+
+      if (sandboxes.GetValueOrDefault(sandboxId) is { } sandbox)
+      {
+        if (sandbox.State != SandboxStates.Stopped || sandbox.IsDisabled)
+        {
+          continue;
+        }
+
+        if (RendererLabels.TenantOf(sandbox) is var owner && owner != tenant)
+        {
+          failures[tenant] =
+            $"the record names sandbox {sandboxId}, which is labeled for "
+            + $"{(owner is null ? "no tenant" : "tenant " + owner)}; it was not retired.";
+          Log(tenant, $"Not retired: {failures[tenant]}");
+          continue;
+        }
+
+        if (sandbox.StoppedAt is not { } stoppedAt)
+        {
+          Log(tenant, $"Not retired: when sandbox {sandboxId} stopped is unknown.");
+          continue;
+        }
+
+        if (now - stoppedAt <= idle)
+        {
+          continue;
+        }
+      }
+
+      try
+      {
+        if (await RetireRendererAsync(record, idle, cancellationToken) == Retirement.Retired)
+        {
+          retired.Add(tenant);
+        }
+      }
+      catch (Exception exception)
+        when (exception is not OperationCanceledException
+          || !cancellationToken.IsCancellationRequested
+        )
+      {
+        failures[tenant] = exception.Message;
+        Log(tenant, $"Failed: {exception.Message}");
+      }
+    }
+
+    _output.WriteLine($"Retired {retired.Count}, failed {failures.Count}.");
+    foreach (var (tenant, reason) in failures)
+    {
+      _output.WriteLine($"  {tenant}: {reason}");
+    }
+
+    return new RetireResult(retired, failures);
+  }
+
+  /// <summary>
+  /// Retires the tenant's renderer, which a scan found stopped or gone: deletes its record, then its
+  /// sandboxes, as <see cref="DeleteAsync"/> does, unless the record or the sandbox changed since.
+  /// </summary>
+  /// <param name="scanned">The record as the scan read it.</param>
+  /// <param name="idle">
+  /// How long the sandbox must have been stopped, or <see langword="null"/> for a rollout, which
+  /// retires stopped renderers however long they have been stopped.
+  /// </param>
+  /// <param name="cancellationToken">Cancels the retirement.</param>
+  private async Task<Retirement> RetireRendererAsync(
+    RendererRecord scanned,
+    TimeSpan? idle,
+    CancellationToken cancellationToken
+  )
+  {
+    var tenant = scanned.TenantId;
+    RendererRecord? current;
+    try
+    {
+      current = await _records.GetAsync(tenant, cancellationToken);
+    }
+    catch (InvalidDataException)
+    {
+      current = null;
+    }
+
+    if (current != scanned)
+    {
+      Log(tenant, "Not retired: the record changed since it was read; another command is at work.");
+      return Retirement.RecordChanged;
+    }
+
+    // Read last, just before the delete: a request to its on-demand port may be waking it.
+    var sandboxId = scanned.SandboxId!;
+    var sandbox = await _sandboxes.GetAsync(sandboxId, cancellationToken);
+    if (sandbox is null)
+    {
+      Log(tenant, $"Retiring: sandbox {sandboxId} of the record no longer exists.");
+    }
+    else if (IsRetirable(sandbox, tenant, idle))
+    {
+      Log(
+        tenant,
+        idle is { } after
+          ? $"Retiring: sandbox {sandboxId} has been stopped since "
+            + sandbox.StoppedAt!.Value.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            + $", longer than {Format(after)}."
+          : $"Retiring the stopped sandbox {sandboxId}; the tenant's next conversion creates a "
+            + "new renderer."
+      );
+    }
+    else
+    {
+      Log(
+        tenant,
+        sandbox.State != SandboxStates.Stopped
+          ? $"Not retired: sandbox {sandboxId} is {sandbox.State} now; a request may be waking it."
+          : $"Not retired: sandbox {sandboxId} was "
+            + (sandbox.IsDisabled ? "disabled" : "stopped again")
+            + " meanwhile."
+      );
+      return Retirement.SandboxChanged;
+    }
+
+    await DeleteAsync(tenant, TimeSpan.Zero, cancellationToken);
+    return Retirement.Retired;
+  }
+
+  /// <summary>
+  /// Whether <paramref name="sandbox"/> is the tenant's renderer, stopped but not disabled, and with
+  /// <paramref name="idle"/>, stopped for longer than that at a known time.
+  /// </summary>
+  private bool IsRetirable(SandboxView sandbox, string tenantId, TimeSpan? idle) =>
+    sandbox.State == SandboxStates.Stopped
+    && !sandbox.IsDisabled
+    && RendererLabels.TenantOf(sandbox) == tenantId
+    && (
+      idle is not { } after
+      || (sandbox.StoppedAt is { } stoppedAt && _time.GetUtcNow() - stoppedAt > after)
+    );
+
+  /// <summary>Every sandbox of the group, by ID.</summary>
+  private async Task<Dictionary<string, SandboxView>> ListSandboxesAsync(
+    CancellationToken cancellationToken
+  )
+  {
+    Dictionary<string, SandboxView> sandboxes = new(StringComparer.Ordinal);
+    foreach (var sandbox in await _sandboxes.ListAsync(cancellationToken))
+    {
+      sandboxes[sandbox.Id] = sandbox;
+    }
+
+    return sandboxes;
+  }
+
+  /// <summary>What <see cref="RetireRendererAsync"/> did.</summary>
+  private enum Retirement
+  {
+    /// <summary>Deleted the record and the sandboxes.</summary>
+    Retired,
+
+    /// <summary>Kept the renderer: another command changed the record since it was read.</summary>
+    RecordChanged,
+
+    /// <summary>Kept the renderer: its sandbox is running, waking, or disabled now.</summary>
+    SandboxChanged,
+  }
 
   /// <summary>
   /// Deletes the renderer sandboxes, of every tenant or of <paramref name="tenantId"/>, that no
@@ -1113,11 +1387,15 @@ internal sealed class RendererProvisioner
 
 /// <summary>What a rollout did.</summary>
 /// <param name="Replaced">Tenants whose renderer was replaced and whose old sandbox is gone.</param>
+/// <param name="Retired">
+/// Tenants whose stopped renderer was retired instead, with <c>--stopped retire</c>.
+/// </param>
 /// <param name="AlreadyCurrent">How many renderers were already on the disk image.</param>
 /// <param name="Failures">Each tenant that failed, with the reason.</param>
 /// <param name="Pruned">The leftover renderer sandboxes the rollout deleted at its end.</param>
 internal sealed record RolloutResult(
   IReadOnlyList<string> Replaced,
+  IReadOnlyList<string> Retired,
   int AlreadyCurrent,
   IReadOnlyDictionary<string, string> Failures,
   IReadOnlyList<string> Pruned
