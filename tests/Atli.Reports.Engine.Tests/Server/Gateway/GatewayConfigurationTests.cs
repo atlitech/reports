@@ -89,6 +89,14 @@ public class GatewayConfigurationTests
   )]
   [Arguments("--ReportsServer:Gateway:Replicas=0", "Replicas")]
   [Arguments("--ReportsServer:Gateway:Replicas=1001", "Replicas")]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=0",
+    "MaxConcurrentDeletesPerCaller"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=101",
+    "MaxConcurrentDeletesPerCaller"
+  )]
   public async Task Invalid_settings_fail_at_startup_naming_the_setting(
     string setting,
     string named

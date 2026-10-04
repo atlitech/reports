@@ -446,6 +446,88 @@ public class GatewayTenantDeletionTests
   }
 
   [Test]
+  public async Task Each_callers_deletions_in_flight_are_limited()
+  {
+    const string BetaKey = "beta.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    var inside = 0;
+    TaskCompletionSource limitReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var service = await FakeProvisioningService.StartAsync(_ =>
+      throw new InvalidOperationException("Never created.")
+    );
+    service.OnDelete = async (context, tenant) =>
+    {
+      if (Interlocked.Increment(ref inside) == 2)
+      {
+        limitReached.TrySetResult();
+      }
+
+      if (tenant.StartsWith("bill-held-", StringComparison.Ordinal))
+      {
+        await release.Task.WaitAsync(context.RequestAborted);
+      }
+
+      await service.DeleteAsync(context, tenant);
+    };
+    await using var under = await StartAsync(
+      service,
+      [
+        "--ReportsServer:Authentication:Mode=ApiKey",
+        .. KeySettings(0, "manager", ManagerKey, "reports.tenants", caller: "billing-app"),
+        .. KeySettings(1, "beta", BetaKey, "reports.tenants", caller: "beta-app"),
+        .. Billing(),
+      ]
+    );
+
+    // The default limit: two deletions in flight per caller.
+    Task<HttpResponseMessage>[] held =
+    [
+      DeleteAsync(under, "bill-held-1", ManagerKey),
+      DeleteAsync(under, "bill-held-2", ManagerKey),
+    ];
+    await limitReached.Task.WaitAsync(TestToken);
+    Problem busy;
+    HttpStatusCode otherCaller;
+    try
+    {
+      busy = await ReadProblemAsync(await DeleteAsync(under, "bill-3f2504e0", ManagerKey));
+      using var other = await DeleteAsync(under, "beta-3f2504e0", BetaKey);
+      otherCaller = other.StatusCode;
+    }
+    finally
+    {
+      release.TrySetResult();
+    }
+
+    var completed = await Task.WhenAll(held);
+    // The finished deletions gave their slots back.
+    using var next = await DeleteAsync(under, "bill-3f2504e0", ManagerKey);
+
+    await Assert.That(busy.Status).IsEqualTo(503);
+    await Assert.That(busy.Kind).IsEqualTo("Busy");
+    await Assert.That(busy.RetryAfter).IsEqualTo(TimeSpan.FromSeconds(1));
+    await Assert
+      .That(busy.Detail)
+      .IsEqualTo("The caller's in-flight deletion limit was reached. Retry later.");
+    await Assert.That(otherCaller).IsEqualTo(HttpStatusCode.NoContent);
+    foreach (var response in completed)
+    {
+      using (response)
+      {
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+      }
+    }
+
+    await Assert.That(next.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    // The refused deletion never reached the service.
+    await Assert.That(service.Deletes).IsEqualTo(4);
+    await Assert.That(service.Calls.Count(call => call.TenantId == "bill-3f2504e0")).IsEqualTo(1);
+    var refused = under.Logs.WithEventId(69).Single();
+    await Assert.That(refused["CallerId"]).IsEqualTo("billing-app");
+    await Assert.That(refused["Reason"]).IsEqualTo("Busy");
+  }
+
+  [Test]
   public async Task The_openapi_document_describes_the_deletion()
   {
     await using var service = await FakeProvisioningService.StartAsync(_ =>

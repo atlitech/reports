@@ -189,6 +189,7 @@ security settings:
 | `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress (`http` only with `AllowHttpRenderers`) |
 | `Provisioning:ApiKey` | | For `OnDemand`: the gateway's credential for the service, `<id>.<secret>` |
 | `Provisioning:Timeout` | `00:01:00` | How long the gateway waits for the service to create or delete a renderer; a conversion waits no longer than its `RendererTimeout` |
+| `Provisioning:MaxConcurrentDeletesPerCaller` | `2` | How many deletions (`DELETE /tenants/{tenantId}`, below) one caller may have in flight in this replica, 1 to 100; one more is `503` `Busy` |
 | `RendererTimeout` | `00:01:30` | The deadline of one forwarded conversion, from the record lookup to the PDF's last byte |
 | `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
 | `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when this replica's share of what the tenant's renderer admits is fewer |
@@ -324,7 +325,10 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   deletes it, and the gateway forgets nothing. `NotAllowed`, `Failed`, any other answer, a service
   that cannot be reached, and `Provisioning:Timeout` are `503` `BrowserUnavailable`; retrying is
   safe, since deleting a tenant without a renderer succeeds. The tenant header, caller
-  admission, and tenant admission take no part. The replica that serves the deletion forgets the
+  admission, and tenant admission take no part. Instead, a caller may have
+  `Provisioning:MaxConcurrentDeletesPerCaller` deletions in flight in a replica, each waiting for
+  the service for up to `Provisioning:Timeout`; one more is `503` `Busy` with `Retry-After: 1`,
+  and does not reach the service. The replica that serves the deletion forgets the
   tenant's record, but other replicas may route the tenant's conversions to the deleted renderer
   for up to `Records:CacheDuration`; such a conversion gets the proxy's `404` and creates a new
   renderer. An application must therefore stop converting for a tenant before deleting it. The

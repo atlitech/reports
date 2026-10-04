@@ -545,8 +545,14 @@ internal sealed class GatewayProvisioningOptions
   /// <summary>For <c>OnDemand</c>: the gateway's credential for the provisioning service.</summary>
   public string ApiKey { get; set; } = "";
 
-  /// <summary>How long a conversion waits for its tenant's renderer to be created.</summary>
+  /// <summary>How long the gateway waits for the service to create or delete a renderer.</summary>
   public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(60);
+
+  /// <summary>
+  /// How many deletions one caller may have in flight in this replica; more are <c>Busy</c>, so no
+  /// caller can hold any number of calls to the service open.
+  /// </summary>
+  public int MaxConcurrentDeletesPerCaller { get; set; } = 2;
 
   public bool Enabled => Mode == OnDemandMode;
 
@@ -563,6 +569,13 @@ internal sealed class GatewayProvisioningOptions
     {
       throw new InvalidOperationException(
         "ReportsServer:Gateway:Provisioning:Timeout must be positive and at most 10 minutes."
+      );
+    }
+
+    if (MaxConcurrentDeletesPerCaller is < 1 or > 100)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller must be between 1 and 100."
       );
     }
 

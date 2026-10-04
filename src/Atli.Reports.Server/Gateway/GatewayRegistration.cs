@@ -51,7 +51,6 @@ internal static partial class GatewayRegistration
     services.TryAddSingleton(TimeProvider.System);
     services.AddHttpContextAccessor();
     services.AddSingleton<TenantMembership>();
-    services.AddSingleton<TenantAdmission>();
 
     services.TryAddSingleton<IRendererRecordStore>(_ =>
       settings.Records.Store == GatewayRecordsOptions.ConfigurationStore
@@ -215,7 +214,8 @@ internal static partial class GatewayRegistration
     }
 
     var membership = app.Services.GetRequiredService<TenantMembership>();
-    var admission = app.Services.GetRequiredService<TenantAdmission>();
+    // Conversions in flight per tenant.
+    InFlightAdmission admission = new();
     var directory = app.Services.GetRequiredService<RendererDirectory>();
     var logger = app
       .Services.GetRequiredService<ILoggerFactory>()

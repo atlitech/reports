@@ -95,54 +95,57 @@ internal enum TenantRejection
 }
 
 /// <summary>
-/// In-flight conversions per tenant in this instance, across the tenant's callers, so one tenant's
-/// burst cannot hold every connection to the renderers. Full means <c>Busy</c>; nothing queues.
-/// Entries disappear with their last request, and only configured tenants ever get one.
+/// Requests in flight per key in this instance, each key up to the limit its caller passes:
+/// conversions per tenant across the tenant's callers, so one tenant's burst cannot hold every
+/// connection to the renderers, and deletions per caller, so no caller can hold any number of
+/// calls to the provisioning service open. Full means <c>Busy</c>; nothing queues. An entry lives
+/// only while its key has a request in flight, so there are never more entries than requests in
+/// flight, however many tenants callers name under their prefixes.
 /// </summary>
-internal sealed class TenantAdmission
+internal sealed class InFlightAdmission
 {
   private readonly Lock _gate = new();
   private readonly Dictionary<string, int> _active = new(StringComparer.Ordinal);
 
   /// <summary>
-  /// Takes one of the tenant's <paramref name="limit"/> slots: the gateway's
+  /// Takes one of the key's <paramref name="limit"/> slots: for a tenant, the gateway's
   /// <c>MaxConcurrentRequestsPerTenant</c>, or less when this replica's share of what the tenant's
-  /// renderer admits is fewer.
+  /// renderer admits is fewer; for a caller's deletions, <c>MaxConcurrentDeletesPerCaller</c>.
   /// </summary>
-  public bool TryAcquire(string tenantId, int limit, out IDisposable? lease)
+  public bool TryAcquire(string key, int limit, out IDisposable? lease)
   {
     lock (_gate)
     {
-      var count = _active.GetValueOrDefault(tenantId);
+      var count = _active.GetValueOrDefault(key);
       if (count >= limit)
       {
         lease = null;
         return false;
       }
 
-      _active[tenantId] = count + 1;
-      lease = new Lease(this, tenantId);
+      _active[key] = count + 1;
+      lease = new Lease(this, key);
       return true;
     }
   }
 
-  private void Release(string tenantId)
+  private void Release(string key)
   {
     lock (_gate)
     {
-      var count = _active[tenantId];
+      var count = _active[key];
       if (count == 1)
       {
-        _active.Remove(tenantId);
+        _active.Remove(key);
       }
       else
       {
-        _active[tenantId] = count - 1;
+        _active[key] = count - 1;
       }
     }
   }
 
-  private sealed class Lease(TenantAdmission owner, string tenantId) : IDisposable
+  private sealed class Lease(InFlightAdmission owner, string key) : IDisposable
   {
     private int _disposed;
 
@@ -150,7 +153,7 @@ internal sealed class TenantAdmission
     {
       if (Interlocked.Exchange(ref _disposed, 1) == 0)
       {
-        owner.Release(tenantId);
+        owner.Release(key);
       }
     }
   }
