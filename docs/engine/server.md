@@ -246,7 +246,7 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   record or none) nor being read for another request. One more is `503` `Busy` with
   `Retry-After: 1`, and reads nothing. Cached answers cost nothing, and listed tenants are never
   limited. The budget holds per replica, so size it against the vault's limit with every replica
-  and every caller with a prefix counted: a new tenant costs at most about four vault operations
+  and every caller with a prefix counted: a new tenant costs up to about four vault operations
   (the gateway's lookup, the service's lookup and its writing of the record, and the gateway's
   reading of it), so the budget times the replicas times those callers times four must stay well
   under 400 a second, with room left for the vault's other traffic. The default, 20, lets one
@@ -337,17 +337,18 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `InvalidRequest`. The service's refusals reach the caller as the gateway's own errors, never in
   the service's words. A renderer the operator disabled (`Disabled`) is a `409` (`InvalidRequest`)
   with a fixed message: the service neither deletes nor replaces it until the operator enables or
-  deletes it, and the gateway forgets nothing. `NotAllowed`, `Failed`, any other answer, a service
-  that cannot be reached, and `Provisioning:Timeout` are `503` `BrowserUnavailable`; retrying is
-  safe, since deleting a tenant without a renderer succeeds. The tenant header, caller
-  admission, and tenant admission take no part. Instead, a caller may have
+  deletes it, and the gateway keeps the tenant's cached record. `NotAllowed`, `Failed`, any other
+  answer, a service that cannot be reached, and `Provisioning:Timeout` are `503`
+  `BrowserUnavailable`; retrying is safe, since deleting a tenant without a renderer succeeds. The
+  tenant header, caller admission, and tenant admission take no part. Instead, a caller may have
   `Provisioning:MaxConcurrentDeletesPerCaller` deletions in flight in a replica, each waiting for
   the service for up to `Provisioning:Timeout`; one more is `503` `Busy` with `Retry-After: 1`,
-  and does not reach the service. The replica that serves the deletion forgets the
-  tenant's record, but other replicas may route the tenant's conversions to the deleted renderer
-  for up to `Records:CacheDuration`; such a conversion gets the proxy's `404` and creates a new
-  renderer. An application must therefore stop converting for a tenant before deleting it. The
-  OpenAPI document describes the route; without `OnDemand` it does not exist.
+  and does not reach the service. The replica that serves the deletion forgets the tenant's
+  record, and no lookup that started before the deletion brings it back, but other replicas may
+  route the tenant's conversions to the deleted renderer for up to `Records:CacheDuration`; such a
+  conversion gets the proxy's `404` and creates a new renderer. An application must therefore
+  stop converting for a tenant before deleting it. The OpenAPI document describes the route;
+  without `OnDemand` it does not exist.
 - **Readiness.** `/health/ready` has one check, `renderer_records`: always healthy for the
   `Configuration` store, and for the others healthy when the store answered a lookup of the
   reserved tenant `readiness-probe` within the last 30 seconds. Finding nothing there, or
@@ -364,10 +365,11 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   67 for the provisioning service (64 when the gateway asks for a renderer, 65 when the service
   created or found it, with the time it took, 66 for a refusal, at `Error` for `NotAllowed` and
   `Warning` otherwise, and 67, an error, for a failure), 68 and 69 for a deleted tenant and a
-  refused deletion, and 70 for a caller over its budget of new tenants. The request span carries the tenant as `atli.reports.tenant`. Record lookups,
-  sandbox checks, and renderer creations are shared by the requests waiting for them, so they run
-  without any request's trace context, and neither the renderer client, the Sandboxes client, nor
-  the provisioning client sends trace headers or baggage.
+  refused deletion, and 70 for a caller over its budget of new tenants. The request span carries
+  the tenant as `atli.reports.tenant`. Record lookups, sandbox checks, and renderer creations are
+  shared by the requests waiting for them, so they run without any request's trace context, and
+  neither the renderer client, the Sandboxes client, nor the provisioning client sends trace
+  headers or baggage.
 
 ## Telemetry
 
