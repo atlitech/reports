@@ -298,6 +298,10 @@ public class GatewayTenantDeletionTests
     "--ReportsServer:Authentication:Jwt:TenantsPermission=reports.convert",
     "TenantsPermission"
   )]
+  [Arguments(
+    "--ReportsServer:Authentication:Jwt:TenantsPermission=reports.diagnostics",
+    "TenantsPermission must differ from Jwt:RequiredPermission and from reports.diagnostics"
+  )]
   public async Task An_invalid_jwt_tenants_permission_fails_at_startup(string setting, string named)
   {
     var exception = await Assert

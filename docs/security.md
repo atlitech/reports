@@ -115,8 +115,8 @@ signature, expiration, and lifetime (30 seconds of clock tolerance), using HTTPS
 signing-key discovery. The caller must also have the required permission. A valid token without
 that permission gets `403`; a missing or invalid credential gets `401`, never a login redirect.
 `TenantsPermission` names the permission for deleting tenants' renderers; it must differ from
-`RequiredPermission`, so that converting never grants it. API keys grant it with
-`reports.tenants` in their `Permissions`.
+`RequiredPermission` and from `reports.diagnostics`, so that neither converting nor reading
+diagnostics grants it. API keys grant it with `reports.tenants` in their `Permissions`.
 Use an identity-provider-specific stable application claim if `sub` is unsuitable. Internal
 Atli identity claims in a supplied token are discarded and rebuilt after validation.
 

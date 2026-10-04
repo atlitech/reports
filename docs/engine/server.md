@@ -186,7 +186,7 @@ security settings:
 | `Wake:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region`, `ManagedIdentityClientId` | | The renderers' sandbox group, for `Sandboxes` |
 | `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
 | `Provisioning:Mode` | `None` | `OnDemand` has the provisioning service create the renderer of a tenant under a caller's prefix on first use, and maps `DELETE /tenants/{tenantId}` (below). It needs a record store the service writes, `File` or `KeyVault` |
-| `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress (`http` only with `AllowHttpRenderers`) |
+| `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress. `http` needs `AllowHttpRenderers`, and sends the gateway's key for the service in clear |
 | `Provisioning:ApiKey` | | For `OnDemand`: the gateway's credential for the service, `<id>.<secret>` |
 | `Provisioning:Timeout` | `00:01:00` | How long the gateway waits for the service to create or delete a renderer; a conversion waits no longer than its `RendererTimeout` |
 | `Provisioning:MaxConcurrentDeletesPerCaller` | `2` | How many deletions (`DELETE /tenants/{tenantId}`, below) one caller may have in flight in this replica, 1 to 100; one more is `503` `Busy` |
@@ -195,7 +195,7 @@ security settings:
 | `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when this replica's share of what the tenant's renderer admits is fewer |
 | `Replicas` | `1` | How many gateway replicas send conversions to the same renderers, 1 to 1000: each replica admits a tenant its record's `MaxConcurrentRequests` divided by this, rounded down and at least 1. Set it to the most replicas that run at once |
 | `MaxNewTenantLookupsPerCallerPerSecond` | `20` | How many record lookups per second one caller may cause in this replica for tenants under its prefixes that the gateway has no answer for, 1 to 10000; see "New tenants have a budget" below |
-| `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
+| `AllowHttpRenderers` | `false` | Allows `http` renderer and provisioning service URLs, over which the gateway's credentials for them travel in clear. For tests and development only |
 | `AllowAnonymousCallers` | `false` | Allows `Authentication:Mode=None`, under which anyone who reaches the gateway converts as `anonymous` for that caller ID's tenants. For tests and development only |
 
 ```text

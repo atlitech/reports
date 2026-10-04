@@ -12,6 +12,7 @@ internal static class ReportsSecurityRegistration
   internal const string DiagnosticsPolicy = "Reports.Diagnostics";
   internal const string TenantsPolicy = "Reports.Tenants";
   internal const string TenantsPermission = "reports.tenants";
+  internal const string DiagnosticsPermission = "reports.diagnostics";
   internal const string CallerClaim = "atli.reports.caller";
   internal const string PartitionClaim = "atli.reports.partition";
   internal const string PermissionClaim = "atli.reports.permission";
@@ -142,7 +143,7 @@ internal static class ReportsSecurityRegistration
           else
           {
             policy.RequireAuthenticatedUser();
-            policy.RequireClaim(PermissionClaim, "reports.diagnostics");
+            policy.RequireClaim(PermissionClaim, DiagnosticsPermission);
           }
         }
       )
@@ -241,11 +242,15 @@ internal static class ReportsSecurityRegistration
         );
       }
 
-      // Otherwise every caller that may convert could delete its tenants' renderers.
-      if (string.Equals(jwt.TenantsPermission, jwt.RequiredPermission, StringComparison.Ordinal))
+      // Otherwise every caller that may convert, or every operator who may read diagnostics, could
+      // delete tenants' renderers.
+      if (
+        string.Equals(jwt.TenantsPermission, jwt.RequiredPermission, StringComparison.Ordinal)
+        || string.Equals(jwt.TenantsPermission, DiagnosticsPermission, StringComparison.Ordinal)
+      )
       {
         throw new InvalidOperationException(
-          "ReportsServer:Authentication:Jwt:TenantsPermission must differ from Jwt:RequiredPermission."
+          $"ReportsServer:Authentication:Jwt:TenantsPermission must differ from Jwt:RequiredPermission and from {DiagnosticsPermission}."
         );
       }
     }

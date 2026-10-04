@@ -82,7 +82,7 @@ internal sealed class GatewayOptions
   /// </summary>
   public int MaxNewTenantLookupsPerCallerPerSecond { get; set; } = 20;
 
-  /// <summary>Allows <c>http</c> renderer URLs. For tests and development only.</summary>
+  /// <summary>Allows <c>http</c> renderer and provisioning service URLs. For tests and development only.</summary>
   public bool AllowHttpRenderers { get; set; }
 
   /// <summary>
@@ -600,16 +600,12 @@ internal sealed class GatewayProvisioningOptions
       return;
     }
 
-    if (
-      Url is not { IsAbsoluteUri: true }
-      || !(Url.Scheme == Uri.UriSchemeHttps || (allowHttp && Url.Scheme == Uri.UriSchemeHttp))
-      || !string.IsNullOrEmpty(Url.UserInfo)
-      || !string.IsNullOrEmpty(Url.Query)
-      || !string.IsNullOrEmpty(Url.Fragment)
-    )
+    // Over http, the gateway's credential for the service would travel in clear.
+    if (!GatewayOptions.IsRendererUrl(Url, allowHttp))
     {
       throw new InvalidOperationException(
-        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:Url, the provisioning service's https address."
+        "ReportsServer:Gateway:Provisioning:Mode=OnDemand needs Provisioning:Url, the provisioning service's absolute https address without credentials, query, or fragment"
+          + (allowHttp ? " (http is allowed)." : "; http needs AllowHttpRenderers=true.")
       );
     }
 
