@@ -18,6 +18,8 @@ on:
     branches: [ "main" ]
     paths:
       - "src/Atli.Reports.Engine/**"
+      - "src/Atli.Reports.Client/**"
+      - "src/Atli.Reports.Hosting/**"
       - "src/Atli.Reports.Server/**"
       - "Directory.Build.props"
       - "Directory.Packages.props"
@@ -36,6 +38,8 @@ on:
     branches: [ "main" ]
     paths:
       - "src/Atli.Reports.Engine/**"
+      - "src/Atli.Reports.Client/**"
+      - "src/Atli.Reports.Hosting/**"
       - "src/Atli.Reports.Server/**"
       - "Directory.Build.props"
       - "Directory.Packages.props"

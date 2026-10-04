@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -10,6 +11,8 @@ using Atli.Reports.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Atli.Reports.Engine.Tests.Server.Gateway;
@@ -22,9 +25,15 @@ internal static class GatewayHost
 {
   private static CancellationToken TestToken => TestContext.Current!.Execution.CancellationToken;
 
+  /// <summary>The name of the gateway's renderer <see cref="HttpClient"/>.</summary>
+  public const string RendererClientName = "Atli.Reports.Gateway.Renderers";
+
+  /// <summary>The name of the gateway's Sandboxes data-plane <see cref="HttpClient"/>.</summary>
+  public const string SandboxesClientName = "Atli.Reports.Gateway.Sandboxes";
+
   /// <summary>
-  /// Starts a gateway with anonymous callers (the caller ID <c>anonymous</c>) and HTTP renderers
-  /// allowed; <paramref name="settings"/> come after the defaults and override them.
+  /// Starts a gateway with anonymous callers (the caller ID <c>anonymous</c>, allowed for tests) and
+  /// HTTP renderers allowed; <paramref name="settings"/> come after the defaults and override them.
   /// </summary>
   public static async Task<RunningServer> StartAsync(
     string[] settings,
@@ -36,6 +45,7 @@ internal static class GatewayHost
         "--urls=http://127.0.0.1:0",
         "--ReportsServer:Mode=Gateway",
         "--ReportsServer:Authentication:Mode=None",
+        "--ReportsServer:Gateway:AllowAnonymousCallers=true",
         "--ReportsServer:Limits:MaxConcurrentRequestsPerCaller=64",
         "--ReportsServer:Gateway:AllowHttpRenderers=true",
         .. settings,
@@ -61,11 +71,12 @@ internal static class GatewayHost
   /// <summary>
   /// Starts a real renderer: the server in integrated mode, configured exactly as the provisioner
   /// configures a renderer (<see cref="RendererServerEnvironment"/>), so it admits only
-  /// <paramref name="credential"/>.
+  /// <paramref name="credential"/>; <paramref name="settings"/> come after and override it.
   /// </summary>
   public static Task<RunningServer> StartRendererAsync(
     IHtmlToPdfConverter converter,
-    RendererCredential credential
+    RendererCredential credential,
+    params string[] settings
   ) =>
     RunningServer.StartAsync(
       converter,
@@ -75,7 +86,21 @@ internal static class GatewayHost
           .Select(variable =>
             $"--{variable.Key.Replace("__", ":", StringComparison.Ordinal)}={variable.Value}"
           ),
+        .. settings,
       ]
+    );
+
+  /// <summary>
+  /// Shortens the connect timeout of the gateway's renderer client, which is 10 seconds, so tests
+  /// of a stalled connection run quickly. Runs after the gateway's own handler setup.
+  /// </summary>
+  public static void ShortenConnectTimeout(WebApplicationBuilder builder, TimeSpan timeout) =>
+    builder.Services.PostConfigure<HttpClientFactoryOptions>(
+      RendererClientName,
+      options =>
+        options.HttpMessageHandlerBuilderActions.Add(handler =>
+          ((SocketsHttpHandler)handler.PrimaryHandler).ConnectTimeout = timeout
+        )
     );
 
   /// <summary>A converter that writes <paramref name="pdf"/>.</summary>
@@ -159,7 +184,10 @@ internal sealed record Problem(
   TimeSpan? RetryAfter
 );
 
-/// <summary>A record store whose records and failures a test controls, counting its calls.</summary>
+/// <summary>
+/// A record store whose records and failures a test controls, counting its calls and noting the
+/// ambient activity each lookup ran under.
+/// </summary>
 internal sealed class FakeRecordStore : IRendererRecordStore
 {
   private int _gets;
@@ -174,9 +202,17 @@ internal sealed class FakeRecordStore : IRendererRecordStore
 
   public int Lists => Volatile.Read(ref _lists);
 
+  /// <summary>The tenant IDs looked up, in order.</summary>
+  public ConcurrentQueue<string> Lookups { get; } = new();
+
+  /// <summary>The <see cref="Activity.Current"/> of each lookup, null included.</summary>
+  public ConcurrentQueue<Activity?> Activities { get; } = new();
+
   public Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken)
   {
     Interlocked.Increment(ref _gets);
+    Lookups.Enqueue(tenantId);
+    Activities.Enqueue(Activity.Current);
     return Failure is { } failure
       ? Task.FromException<RendererRecord?>(failure)
       : Task.FromResult(Records.GetValueOrDefault(tenantId));
@@ -198,28 +234,55 @@ internal sealed class FakeRecordStore : IRendererRecordStore
 }
 
 /// <summary>
-/// A Sandboxes data plane that only resumes: each call runs the test's callback, which wakes the
-/// fake platform or fails.
+/// A Sandboxes data plane that only reads and resumes sandboxes. <paramref name="state"/> is a
+/// sandbox's state (<see langword="null"/> for one that does not exist), or throws; each resume runs
+/// <paramref name="onResume"/>, which wakes the fake platform or fails, and answers with the state
+/// after it. Calls are counted and timed, and note the ambient activity they ran under.
 /// </summary>
-internal sealed class FakeSandboxesClient(Func<string, CancellationToken, Task> onResume)
-  : ISandboxesClient
+internal sealed class FakeSandboxesClient(
+  Func<string, string?> state,
+  Func<string, CancellationToken, Task> onResume
+) : ISandboxesClient
 {
   private int _resumes;
+  private int _gets;
 
   public int Resumes => Volatile.Read(ref _resumes);
+
+  public int Gets => Volatile.Read(ref _gets);
+
+  /// <summary>When each resume call started.</summary>
+  public ConcurrentQueue<DateTimeOffset> ResumeTimes { get; } = new();
+
+  /// <summary>The <see cref="Activity.Current"/> of each call, null included.</summary>
+  public ConcurrentQueue<Activity?> Activities { get; } = new();
 
   public async Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken)
   {
     Interlocked.Increment(ref _resumes);
+    ResumeTimes.Enqueue(DateTimeOffset.UtcNow);
+    Activities.Enqueue(Activity.Current);
     await onResume(sandboxId, cancellationToken);
-    return new SandboxView { Id = sandboxId, State = SandboxStates.Running };
+    return new SandboxView
+    {
+      Id = sandboxId,
+      State = state(sandboxId) ?? throw new SandboxesException("Gone.", HttpStatusCode.NotFound),
+    };
+  }
+
+  public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    Interlocked.Increment(ref _gets);
+    Activities.Enqueue(Activity.Current);
+    return Task.FromResult(
+      state(sandboxId) is { } current
+        ? new SandboxView { Id = sandboxId, State = current }
+        : (SandboxView?)null
+    );
   }
 
   public Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only resumes sandboxes.");
-
-  public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only resumes sandboxes.");
+    throw new NotSupportedException("The gateway only reads and resumes sandboxes.");
 
   public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken) =>
     throw new NotSupportedException("The gateway only resumes sandboxes.");
@@ -248,12 +311,27 @@ internal sealed class RawHttpResponder : IAsyncDisposable
   private readonly Task _loop;
 
   public RawHttpResponder(string response)
+    : this(Encoding.ASCII.GetBytes(response)) { }
+
+  public RawHttpResponder(byte[] response)
   {
     _listener = new TcpListener(IPAddress.Loopback, 0);
     _listener.Start();
     BaseUrl = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
-    _loop = ServeAsync(Encoding.ASCII.GetBytes(response));
+    _loop = ServeAsync(response);
   }
+
+  /// <summary>
+  /// A complete response with <paramref name="body"/>'s bytes as they are, which may be invalid
+  /// UTF-8, and a <c>Content-Length</c>.
+  /// </summary>
+  public static byte[] Response(string statusLine, string contentType, byte[] body) =>
+    [
+      .. Encoding.ASCII.GetBytes(
+        $"HTTP/1.1 {statusLine}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n"
+      ),
+      .. body,
+    ];
 
   public string BaseUrl { get; }
 
@@ -304,6 +382,55 @@ internal sealed class RawHttpResponder : IAsyncDisposable
     _listener.Stop();
     _listener.Dispose();
     await _loop;
+  }
+}
+
+/// <summary>
+/// A TCP listener that accepts connections and never sends a byte: a renderer whose TCP or TLS
+/// handshake stalls.
+/// </summary>
+internal sealed class SilentListener : IAsyncDisposable
+{
+  private readonly TcpListener _listener;
+  private readonly ConcurrentQueue<Socket> _accepted = new();
+  private readonly Task _loop;
+
+  public SilentListener()
+  {
+    _listener = new TcpListener(IPAddress.Loopback, 0);
+    _listener.Start();
+    Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+    _loop = AcceptAsync();
+  }
+
+  public int Port { get; }
+
+  public int Accepted => _accepted.Count;
+
+  private async Task AcceptAsync()
+  {
+    while (true)
+    {
+      try
+      {
+        _accepted.Enqueue(await _listener.AcceptSocketAsync());
+      }
+      catch (Exception exception) when (exception is SocketException or ObjectDisposedException)
+      {
+        return;
+      }
+    }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _listener.Stop();
+    _listener.Dispose();
+    await _loop;
+    while (_accepted.TryDequeue(out var socket))
+    {
+      socket.Dispose();
+    }
   }
 }
 

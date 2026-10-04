@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Atli.Reports.Engine.Tests.Support;
 using Atli.Reports.Hosting.Renderers;
@@ -25,6 +28,7 @@ public class GatewayConfigurationTests
     [
       "--ReportsServer:Mode=Gateway",
       "--ReportsServer:Authentication:Mode=None",
+      "--ReportsServer:Gateway:AllowAnonymousCallers=true",
       .. Membership(0, "anonymous", "acme"),
       .. Renderer(0, "acme", Url, TestKey),
     ];
@@ -44,6 +48,8 @@ public class GatewayConfigurationTests
   [Arguments("--ReportsServer:Gateway:Tenants:0:Tenants:0=Acme", "tenant IDs")]
   [Arguments("--ReportsServer:Gateway:Tenants:0:Tenants:1=acme", "distinct")]
   [Arguments("--ReportsServer:Gateway:Tenants:1:CallerId=anonymous", "unique")]
+  [Arguments("--ReportsServer:Gateway:Tenants:0:Tenants:1=readiness-probe", "reserves")]
+  [Arguments("--ReportsServer:Gateway:Records:Renderers:0:TenantId=readiness-probe", "TenantId")]
   [Arguments("--ReportsServer:Gateway:TenantHeader=X Tenant", "TenantHeader")]
   [Arguments("--ReportsServer:Gateway:TenantHeader=X-Reports-Api-Key", "TenantHeader")]
   [Arguments("--ReportsServer:Gateway:Records:Store=", "Records:Store")]
@@ -97,12 +103,53 @@ public class GatewayConfigurationTests
         ReportsServerApplication.Create([
           "--ReportsServer:Mode=Gateway",
           "--ReportsServer:Authentication:Mode=None",
+          "--ReportsServer:Gateway:AllowAnonymousCallers=true",
           .. Renderer(0, "acme", Url, TestKey),
         ])
       )
       .Throws<InvalidOperationException>();
 
     await Assert.That(exception!.Message).Contains("ReportsServer:Gateway:Tenants");
+  }
+
+  [Test]
+  public async Task Anonymous_callers_need_the_development_flag()
+  {
+    string[] anonymous =
+    [
+      "--ReportsServer:Mode=Gateway",
+      "--ReportsServer:Authentication:Mode=None",
+      .. Membership(0, "anonymous", "acme"),
+      .. Renderer(0, "acme", Url, TestKey),
+    ];
+
+    var refused = await Assert
+      .That(() => ReportsServerApplication.Create(anonymous))
+      .Throws<InvalidOperationException>();
+    await using var allowed = ReportsServerApplication.Create([
+      .. anonymous,
+      "--ReportsServer:Gateway:AllowAnonymousCallers=true",
+    ]);
+    // Authenticated callers need no flag.
+    await using var authenticated = ReportsServerApplication.Create([
+      "--ReportsServer:Mode=Gateway",
+      "--ReportsServer:Authentication:Mode=ApiKey",
+      .. KeySettings(
+        0,
+        "primary",
+        "primary.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+        caller: "billing-app"
+      ),
+      .. Membership(0, "billing-app", "acme"),
+      .. Renderer(0, "acme", Url, TestKey),
+    ]);
+
+    await Assert.That(refused!.Message).Contains("AllowAnonymousCallers");
+    await Assert.That(refused.Message).Contains("ReportsServer:Authentication:Mode");
+    await Assert.That(allowed.Services.GetRequiredService<IRendererRecordStore>()).IsNotNull();
+    await Assert
+      .That(authenticated.Services.GetRequiredService<IRendererRecordStore>())
+      .IsNotNull();
   }
 
   [Test]
@@ -246,8 +293,155 @@ public class GatewayConfigurationTests
     await Assert.That(failing.Body).DoesNotContain("browser");
     await Assert.That(recovered.Status).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(again.Status).IsEqualTo(HttpStatusCode.OK);
-    await Assert.That(store.Lists).IsEqualTo(2).Because("a recent success is reused");
+    await Assert.That(store.Gets).IsEqualTo(2).Because("a recent success is reused");
+    // One lookup of the reserved tenant, never a listing of every record.
+    await Assert.That(store.Lookups).IsEquivalentTo(["readiness-probe", "readiness-probe"]);
+    await Assert.That(store.Lists).IsEqualTo(0);
     await Assert.That(live.Status).IsEqualTo(HttpStatusCode.OK);
+  }
+
+  [Test]
+  public async Task A_damaged_record_fails_only_its_own_tenant()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    var directory = Directory.CreateTempSubdirectory("gateway-records-");
+    try
+    {
+      await File.WriteAllTextAsync(
+        Path.Combine(directory.FullName, "acme.json"),
+        $$"""{"tenantId":"acme","url":"{{renderer.BaseUrl}}","apiKey":"{{TestKey}}"}""",
+        TestToken
+      );
+      // Another tenant's record names acme, and the reserved name holds no record at all.
+      await File.WriteAllTextAsync(
+        Path.Combine(directory.FullName, "globex.json"),
+        $$"""{"tenantId":"acme","url":"{{renderer.BaseUrl}}","apiKey":"{{TestKey}}"}""",
+        TestToken
+      );
+      await File.WriteAllTextAsync(
+        Path.Combine(directory.FullName, "readiness-probe.json"),
+        "not a record",
+        TestToken
+      );
+      await using var gateway = await GatewayHost.StartAsync([
+        .. Membership(0, "anonymous", "acme", "globex"),
+        "--ReportsServer:Gateway:Records:Store=File",
+        $"--ReportsServer:Gateway:Records:Path={directory.FullName}",
+      ]);
+
+      var ready = await GetHealthAsync(gateway, "/health/ready");
+      using var acme = await SendAsync(gateway, "acme");
+      var globex = await ReadProblemAsync(await SendAsync(gateway, "globex"));
+
+      await Assert.That(ready.Status).IsEqualTo(HttpStatusCode.OK);
+      await Assert.That(acme.StatusCode).IsEqualTo(HttpStatusCode.OK);
+      await Assert.That(globex.Status).IsEqualTo(503);
+      await Assert.That(globex.Kind).IsEqualTo("BrowserUnavailable");
+      await Assert.That(renderer.Requests.Count).IsEqualTo(1);
+    }
+    finally
+    {
+      directory.Delete(recursive: true);
+    }
+  }
+
+  [Test]
+  public async Task A_record_whose_renderer_cannot_be_reached_is_read_again()
+  {
+    int port;
+    using (System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0))
+    {
+      probe.Start();
+      port = ((IPEndPoint)probe.LocalEndpoint).Port;
+    }
+
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", $"http://127.0.0.1:{port}");
+    await using var gateway = await StartWithStoreAsync(store, []);
+
+    var unreachable = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+    // A rollout recreated the renderer elsewhere; the record cache must not keep the old one.
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    using var moved = await gateway.PostAsync("""{"html":"<p>x</p>"}""");
+
+    await Assert.That(unreachable.Status).IsEqualTo(503);
+    await Assert.That(moved.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(store.Gets).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task A_record_whose_credential_is_rejected_is_read_again()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      context.Request.Headers["X-Reports-Api-Key"] == "reports-000000000000.rotated"
+        ? FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+        : FakeRenderer.WriteProblemAsync(
+          context,
+          StatusCodes.Status401Unauthorized,
+          """{"kind":"Unauthorized"}"""
+        )
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    await using var gateway = await StartWithStoreAsync(store, []);
+
+    var rejected = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+    // The provisioner rotated the renderer's credential and wrote the new record.
+    store.Records["acme"] = Record("acme", renderer.BaseUrl) with
+    {
+      ApiKey = "reports-000000000000.rotated",
+    };
+    using var rotated = await gateway.PostAsync("""{"html":"<p>x</p>"}""");
+
+    await Assert.That(rejected.Status).IsEqualTo(503);
+    await Assert.That(rotated.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(store.Gets).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task Shared_lookups_carry_none_of_the_callers_trace_context()
+  {
+    ConcurrentQueue<Activity> requests = new();
+    using ActivityListener listener = new()
+    {
+      ShouldListenTo = source => source.Name == "Microsoft.AspNetCore",
+      Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
+        ActivitySamplingResult.AllDataAndRecorded,
+      ActivityStarted = requests.Enqueue,
+    };
+    ActivitySource.AddActivityListener(listener);
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    await using var gateway = await StartWithStoreAsync(store, []);
+
+    using HttpRequestMessage request = new(HttpMethod.Post, "/convert")
+    {
+      Content = new StringContent("""{"html":"<p>x</p>"}""", Encoding.UTF8, "application/json"),
+    };
+    request.Headers.Add("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+    request.Headers.Add("baggage", "secret=caller-baggage");
+    using var response = await gateway.Client.SendAsync(request, TestToken);
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    // The request ran under the caller's trace...
+    await Assert
+      .That(
+        requests.Any(activity =>
+          activity.TraceId.ToHexString() == "0af7651916cd43dd8448eb211c80319c"
+        )
+      )
+      .IsTrue();
+    // ...and the record lookup it started did not.
+    await Assert.That(store.Activities).HasSingleItem();
+    await Assert.That(store.Activities.Single()).IsNull();
   }
 
   [Test]
@@ -357,6 +551,16 @@ public class GatewayConfigurationTests
         configure?.Invoke(builder);
       }
     );
+
+  private static async Task<HttpResponseMessage> SendAsync(RunningServer gateway, string tenant)
+  {
+    using HttpRequestMessage request = new(HttpMethod.Post, "/convert")
+    {
+      Content = new StringContent("""{"html":"<p>x</p>"}""", Encoding.UTF8, "application/json"),
+    };
+    request.Headers.Add("X-Reports-Tenant", tenant);
+    return await gateway.Client.SendAsync(request, TestToken);
+  }
 
   private static async Task<(HttpStatusCode Status, string Body)> GetHealthAsync(
     RunningServer server,

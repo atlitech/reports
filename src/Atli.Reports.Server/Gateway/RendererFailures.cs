@@ -8,7 +8,9 @@ namespace Atli.Reports.Server.Gateway;
 
 /// <summary>
 /// Reads a renderer's error response, which may come from a compromised renderer: at most
-/// <see cref="MaxBodyBytes"/> of it, and only the members the gateway needs.
+/// <see cref="MaxBodyBytes"/> of it, and only the members the gateway needs. Nothing in it can make
+/// the gateway throw: a body that is not JSON, not an object, or not valid text in a member counts
+/// as that member missing.
 /// </summary>
 internal static class RendererFailures
 {
@@ -20,9 +22,19 @@ internal static class RendererFailures
 
   /// <summary>
   /// What the Azure Container Apps Sandboxes proxy answers, with <c>403</c>, for a suspended
-  /// sandbox. The renderer's own <c>403</c> is problem details, so the two cannot be confused.
+  /// sandbox. The renderer's own <c>403</c> is problem details, so the two cannot be confused; a
+  /// compromised renderer can still send this, so the gateway checks the sandbox's state before it
+  /// resumes it (see <see cref="SandboxWaker"/>).
   /// </summary>
   private const string SandboxNotRunning = "Sandbox is not running";
+
+  /// <summary>The kinds a renderer's problem may name, by name.</summary>
+  private static readonly (string Name, ConversionErrorKind Kind)[] Kinds =
+  [
+    .. Enum.GetValues<ConversionErrorKind>()
+      .Where(kind => kind != ConversionErrorKind.Canceled)
+      .Select(kind => (kind.ToString(), kind)),
+  ];
 
   public static async Task<RendererFailure> ReadAsync(
     HttpResponseMessage response,
@@ -41,9 +53,18 @@ internal static class RendererFailures
       return new RendererFailure(status, isProblem, null, null, false);
     }
 
+    JsonDocument document;
     try
     {
-      using var document = JsonDocument.Parse(body.Value);
+      document = JsonDocument.Parse(body.Value);
+    }
+    catch (JsonException)
+    {
+      return new RendererFailure(status, isProblem, null, null, false);
+    }
+
+    using (document)
+    {
       var root = document.RootElement;
       if (root.ValueKind != JsonValueKind.Object)
       {
@@ -52,38 +73,15 @@ internal static class RendererFailures
 
       if (isProblem)
       {
-        return new RendererFailure(
-          status,
-          true,
-          ReadString(root, "kind"),
-          ReadString(root, "detail"),
-          false
-        );
+        return new RendererFailure(status, true, ReadKind(root), ReadString(root, "detail"), false);
       }
 
       var notRunning =
         response.StatusCode == HttpStatusCode.Forbidden
-        && ReadString(root, "error") == SandboxNotRunning;
+        && StringEquals(root, "error", SandboxNotRunning);
       return new RendererFailure(status, false, null, null, notRunning);
     }
-    catch (JsonException)
-    {
-      return new RendererFailure(status, isProblem, null, null, false);
-    }
   }
-
-  /// <summary>
-  /// The <see cref="ConversionErrorKind"/> a problem's <c>kind</c> names, if it names one other than
-  /// <see cref="ConversionErrorKind.Canceled"/>, which only the caller's own cancellation produces.
-  /// </summary>
-  public static ConversionErrorKind? ParseKind(string? kind) =>
-    kind is { Length: > 0 }
-    && char.IsAsciiLetter(kind[0])
-    && Enum.TryParse<ConversionErrorKind>(kind, out var parsed)
-    && Enum.IsDefined(parsed)
-    && parsed != ConversionErrorKind.Canceled
-      ? parsed
-      : null;
 
   /// <summary>
   /// <paramref name="detail"/> without control or formatting characters (which could rewrite a
@@ -164,22 +162,85 @@ internal static class RendererFailures
     }
   }
 
-  private static string? ReadString(JsonElement element, string name) =>
-    element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
-      ? value.GetString()
-      : null;
+  /// <summary>
+  /// The <see cref="ConversionErrorKind"/> a problem's <c>kind</c> names exactly, if it names one
+  /// other than <see cref="ConversionErrorKind.Canceled"/>, which only the caller's own cancellation
+  /// produces. Compared in place, so the renderer's string is never decoded.
+  /// </summary>
+  private static ConversionErrorKind? ReadKind(JsonElement problem)
+  {
+    foreach (var (name, kind) in Kinds)
+    {
+      if (StringEquals(problem, "kind", name))
+      {
+        return kind;
+      }
+    }
+
+    return null;
+  }
+
+  /// <summary>
+  /// The string member <paramref name="name"/>, or <see langword="null"/> when it is missing, not a
+  /// string, or not valid text: a lone surrogate escape or invalid UTF-8 makes
+  /// <see cref="JsonElement.GetString"/> throw <see cref="InvalidOperationException"/>, as an
+  /// escaped member name can make the lookup itself.
+  /// </summary>
+  private static string? ReadString(JsonElement element, string name)
+  {
+    try
+    {
+      return element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+        ? value.GetString()
+        : null;
+    }
+    catch (InvalidOperationException)
+    {
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Whether the string member <paramref name="name"/> is exactly <paramref name="expected"/>;
+  /// <see langword="false"/> for text that is not valid, as in <see cref="ReadString"/>.
+  /// </summary>
+  private static bool StringEquals(JsonElement element, string name, string expected)
+  {
+    try
+    {
+      return element.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && value.ValueEquals(expected);
+    }
+    catch (InvalidOperationException)
+    {
+      return false;
+    }
+  }
 }
 
 /// <summary>A renderer's error response, as far as the gateway reads it.</summary>
 /// <param name="Status">The HTTP status.</param>
 /// <param name="IsProblem">Whether the body was declared <c>application/problem+json</c>.</param>
-/// <param name="Kind">The problem's <c>kind</c>, unvalidated.</param>
+/// <param name="Kind">
+/// The <see cref="ConversionErrorKind"/> a problem names, other than
+/// <see cref="ConversionErrorKind.Canceled"/>; <see langword="null"/> for any other <c>kind</c>.
+/// </param>
 /// <param name="Detail">The problem's <c>detail</c>, unsanitized.</param>
 /// <param name="SandboxNotRunning">Whether this is the Sandboxes proxy's answer for a suspended sandbox.</param>
 internal sealed record RendererFailure(
   int Status,
   bool IsProblem,
-  string? Kind,
+  ConversionErrorKind? Kind,
   string? Detail,
   bool SandboxNotRunning
-);
+)
+{
+  /// <summary>
+  /// The renderer had no room for the conversion: its per-caller limit (<c>429</c>) or its own
+  /// capacity (<c>503</c> with the kind <c>Busy</c>).
+  /// </summary>
+  public bool IsBusy =>
+    Status == StatusCodes.Status429TooManyRequests
+    || (Status == StatusCodes.Status503ServiceUnavailable && Kind == ConversionErrorKind.Busy);
+}

@@ -32,6 +32,18 @@ internal static partial class GatewayRegistration
     var settings = new GatewayOptions();
     builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(settings);
     settings.Validate();
+    // Under Authentication:Mode=None every caller is "anonymous", so whoever reaches the gateway
+    // converts as that caller's tenants.
+    if (
+      builder.Configuration[GatewayOptions.AuthenticationModeKey] == "None"
+      && !settings.AllowAnonymousCallers
+    )
+    {
+      throw new InvalidOperationException(
+        "Gateway mode needs authenticated callers: set ReportsServer:Authentication:Mode to ApiKey or JwtBearer. "
+          + "For development only, ReportsServer:Gateway:AllowAnonymousCallers=true admits every caller as 'anonymous'."
+      );
+    }
 
     var services = builder.Services;
     services.AddSingleton(settings);
@@ -79,6 +91,9 @@ internal static partial class GatewayRegistration
             // The Sandboxes client keeps this HttpClient for the process's lifetime; recycling
             // connections keeps it following DNS changes.
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            // No trace context or baggage reaches the Azure data plane: a resume serves every
+            // request waiting for that sandbox, and none of their callers' context belongs there.
+            ActivityHeadersPropagator = null,
           }
         )
         .RemoveAllLoggers();
@@ -190,7 +205,7 @@ internal static partial class GatewayRegistration
         }
 
         // The caller identity the security middleware established; "anonymous" only when
-        // authentication is explicitly None.
+        // authentication is explicitly None and AllowAnonymousCallers admits that.
         var caller =
           context.User.FindFirst(ReportsSecurityRegistration.CallerClaim)?.Value ?? "anonymous";
         var resolution = membership.Resolve(caller, context.Request.Headers[settings.TenantHeader]);
@@ -277,9 +292,16 @@ internal static partial class GatewayRegistration
 
 /// <summary>
 /// Readiness in gateway mode: the renderer record store answers. The configuration store always
-/// does; any other must have listed its records within the last <see cref="SuccessLifetime"/>,
-/// so probes do not call a remote store each time.
+/// does; any other must have answered a lookup within the last <see cref="SuccessLifetime"/>, so
+/// probes do not call a remote store each time.
 /// </summary>
+/// <remarks>
+/// The lookup is for <see cref="GatewayOptions.ReadinessProbeTenantId"/>, which no caller can be a
+/// member of: one secret or file read, whatever the store holds, and no tenant's record is decoded.
+/// Whether it finds nothing or something it cannot read, the store answered; only a store that fails
+/// (unreachable, refusing the gateway's identity, timing out) makes the gateway unready. A damaged
+/// record of a real tenant fails only that tenant's conversions.
+/// </remarks>
 internal sealed class RendererRecordsHealthCheck(
   IRendererRecordStore store,
   TimeProvider timeProvider
@@ -293,7 +315,6 @@ internal sealed class RendererRecordsHealthCheck(
 
   private readonly SemaphoreSlim _gate = new(1, 1);
   private long? _succeededAt;
-  private int _records;
 
   public async Task<HealthCheckResult> CheckHealthAsync(
     HealthCheckContext context,
@@ -317,9 +338,11 @@ internal sealed class RendererRecordsHealthCheck(
       timeout.CancelAfter(StoreTimeout);
       try
       {
-        _records = (await store.ListAsync(timeout.Token)).Count;
-        _succeededAt = timeProvider.GetTimestamp();
-        return Healthy();
+        _ = await store.GetAsync(GatewayOptions.ReadinessProbeTenantId, timeout.Token);
+      }
+      catch (InvalidDataException)
+      {
+        // Something unreadable under the reserved name: the store answered, and nobody routes to it.
       }
       catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
       {
@@ -327,6 +350,9 @@ internal sealed class RendererRecordsHealthCheck(
           $"The renderer record store did not answer ({exception.GetType().Name})."
         );
       }
+
+      _succeededAt = timeProvider.GetTimestamp();
+      return Healthy();
     }
     finally
     {
@@ -336,6 +362,6 @@ internal sealed class RendererRecordsHealthCheck(
 
   public void Dispose() => _gate.Dispose();
 
-  private HealthCheckResult Healthy() =>
-    HealthCheckResult.Healthy($"The renderer record store answered with {_records} record(s).");
+  private static HealthCheckResult Healthy() =>
+    HealthCheckResult.Healthy("The renderer record store answered.");
 }

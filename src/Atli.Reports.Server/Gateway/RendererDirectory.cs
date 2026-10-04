@@ -7,12 +7,14 @@ namespace Atli.Reports.Server.Gateway;
 /// Looks up a tenant's renderer record, reusing a found record for
 /// <see cref="GatewayRecordsOptions.CacheDuration"/> and a missing one for a few seconds, so a
 /// remote store (Key Vault) is not asked on every conversion. Concurrent lookups for one tenant share
-/// one store call. Store failures are not cached.
+/// one store call, which runs apart from the request that starts it (see <see cref="SharedWork"/>).
+/// Store failures, a damaged record among them, are not cached, and affect only that tenant.
 /// </summary>
 /// <remarks>
 /// A record the provisioner replaces (a rotated credential, a recreated renderer) reaches the
-/// gateway when the cached one expires; until then conversions may fail as
-/// <c>BrowserUnavailable</c>.
+/// gateway when the cached one expires, or sooner: the gateway evicts a record whose renderer
+/// rejected its credential, could not be reached, or names a sandbox that no longer exists, so the
+/// next conversion reads the store again.
 /// </remarks>
 internal sealed class RendererDirectory(
   IRendererRecordStore store,
@@ -50,16 +52,26 @@ internal sealed class RendererDirectory(
     var load = _loads.GetOrAdd(
       tenantId,
       static (tenant, directory) =>
-        new Lazy<Task<RendererRecord?>>(() => directory.LoadAsync(tenant)),
+        new Lazy<Task<RendererRecord?>>(() => SharedWork.Run(() => directory.LoadAsync(tenant))),
       this
     );
     return await load.Value.WaitAsync(cancellationToken);
   }
 
+  /// <summary>
+  /// Forgets <paramref name="record"/> if it is still the tenant's cached record, so the next lookup
+  /// reads the store. A record loaded since stays.
+  /// </summary>
+  public void Evict(string tenantId, RendererRecord record)
+  {
+    if (_entries.TryGetValue(tenantId, out var entry) && ReferenceEquals(entry.Record, record))
+    {
+      _entries.TryRemove(KeyValuePair.Create(tenantId, entry));
+    }
+  }
+
   private async Task<RendererRecord?> LoadAsync(string tenantId)
   {
-    // Run the store call off the caller's stack: GetOrAdd's Lazy runs this synchronously.
-    await Task.Yield();
     try
     {
       using var timeout = new CancellationTokenSource(StoreTimeout, timeProvider);

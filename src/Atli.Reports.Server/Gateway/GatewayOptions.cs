@@ -29,6 +29,15 @@ internal sealed class GatewayOptions
 
   public const string SectionName = "ReportsServer:Gateway";
 
+  /// <summary>The security setting that gateway mode refuses <c>None</c> for, unless allowed.</summary>
+  public const string AuthenticationModeKey = "ReportsServer:Authentication:Mode";
+
+  /// <summary>
+  /// The tenant ID readiness looks up to see whether the record store answers. Reserved: no caller
+  /// and no configured renderer may name it, so the gateway never routes a conversion to it.
+  /// </summary>
+  public const string ReadinessProbeTenantId = "readiness-probe";
+
   /// <summary>Product-tenant membership per authenticated caller ID.</summary>
   public GatewayCallerTenants[] Tenants { get; set; } = [];
 
@@ -56,6 +65,13 @@ internal sealed class GatewayOptions
 
   /// <summary>Allows <c>http</c> renderer URLs. For tests and development only.</summary>
   public bool AllowHttpRenderers { get; set; }
+
+  /// <summary>
+  /// Allows <c>ReportsServer:Authentication:Mode=None</c>, under which every caller is
+  /// <c>anonymous</c> and converts for that caller ID's tenants. For tests and development only;
+  /// without it gateway mode refuses to start with no authentication.
+  /// </summary>
+  public bool AllowAnonymousCallers { get; set; }
 
   /// <summary>
   /// Reads <c>ReportsServer:Mode</c>. Missing or empty is <see cref="ReportsServerMode.Integrated"/>.
@@ -165,6 +181,13 @@ internal sealed class GatewayOptions
           $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' must list distinct tenant IDs: 1 to 63 lowercase letters, digits, and hyphens, starting with a letter or digit."
         );
       }
+
+      if (tenants.Contains(ReadinessProbeTenantId))
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' names the tenant ID '{ReadinessProbeTenantId}', which readiness reserves."
+        );
+      }
     }
   }
 }
@@ -264,10 +287,14 @@ internal sealed class GatewayRecordsOptions
     HashSet<string> tenants = new(StringComparer.Ordinal);
     foreach (var renderer in Renderers)
     {
-      if (!TenantId.IsValid(renderer.TenantId) || !tenants.Add(renderer.TenantId))
+      if (
+        !TenantId.IsValid(renderer.TenantId)
+        || renderer.TenantId == GatewayOptions.ReadinessProbeTenantId
+        || !tenants.Add(renderer.TenantId)
+      )
       {
         throw new InvalidOperationException(
-          "ReportsServer:Gateway:Records:Renderers need distinct, valid TenantId values."
+          $"ReportsServer:Gateway:Records:Renderers need distinct, valid TenantId values other than '{GatewayOptions.ReadinessProbeTenantId}'."
         );
       }
 

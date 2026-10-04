@@ -1,8 +1,11 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using Atli.Reports.Engine.Tests.Support;
+using Atli.Reports.Hosting.Renderers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using static Atli.Reports.Engine.Tests.Server.Gateway.GatewayHost;
 
 namespace Atli.Reports.Engine.Tests.Server.Gateway;
@@ -376,6 +379,24 @@ public class GatewayResponseTests
     "The tenant's renderer is not running.",
     5
   )]
+  [Arguments(
+    413,
+    ProblemJson,
+    """{"kind":"InvalidRequest","detail":"The request body is larger than the server accepts."}""",
+    400,
+    "InvalidRequest",
+    "The document is larger than the tenant's renderer accepts once encoded for it. Emoji and other characters outside the Basic Multilingual Plane count up to three times their size; send a smaller document.",
+    0
+  )]
+  [Arguments(
+    429,
+    "text/plain",
+    "slow down",
+    503,
+    "Busy",
+    "The tenant's renderer is busy. Retry later.",
+    1
+  )]
   public async Task Renderer_errors_become_the_callers_problem(
     int rendererStatus,
     string contentType,
@@ -403,6 +424,218 @@ public class GatewayResponseTests
     await Assert
       .That(problem.RetryAfter)
       .IsEqualTo(retryAfterSeconds == 0 ? null : TimeSpan.FromSeconds(retryAfterSeconds));
+    // Only a busy renderer gets the conversion again: the first send and eight resends.
+    await Assert.That(under.Renderer.Requests.Count).IsEqualTo(kind == "Busy" ? 9 : 1);
+  }
+
+  [Test]
+  [Arguments(
+    "a lone surrogate in the detail",
+    """{"kind":"InvalidRequest","detail":"bad \uD800 here"}""",
+    400,
+    "InvalidRequest",
+    "The tenant's renderer rejected the request."
+  )]
+  [Arguments(
+    "a lone surrogate in the kind",
+    """{"kind":"\uDC00Busy","detail":"x"}""",
+    500,
+    "RenderFailed",
+    "The tenant's renderer could not convert the document."
+  )]
+  [Arguments(
+    "an escaped kind",
+    """{"kind":"Policy\u0044enied","detail":"The document fetched an asset."}""",
+    422,
+    "PolicyDenied",
+    "The document fetched an asset."
+  )]
+  [Arguments(
+    "a lone surrogate in a member name before the others",
+    """{"\uD800":1,"kind":"SignalTimeout","detail":"never ready"}""",
+    422,
+    "SignalTimeout",
+    "never ready"
+  )]
+  [Arguments(
+    "a lone surrogate in a member name after the others",
+    """{"kind":"SignalTimeout","detail":"never ready","\uD800":1}""",
+    500,
+    "RenderFailed",
+    "The tenant's renderer could not convert the document."
+  )]
+  [Arguments(
+    "two kinds joined with a comma",
+    """{"kind":"RenderFailed, InvalidRequest","detail":"x"}""",
+    500,
+    "RenderFailed",
+    "The tenant's renderer could not convert the document."
+  )]
+  public async Task Renderer_error_text_that_is_not_valid_never_fails_the_gateway(
+    string body,
+    string json,
+    int status,
+    string kind,
+    string detail
+  )
+  {
+    _ = body;
+    await using var renderer = new RawHttpResponder(
+      RawHttpResponder.Response(
+        "422 Unprocessable Content",
+        "application/problem+json",
+        Encoding.UTF8.GetBytes(json)
+      )
+    );
+    await using var gateway = await GatewayHost.StartAsync(OneTenant(renderer.BaseUrl));
+
+    var problem = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+
+    await Assert.That(problem.Status).IsEqualTo(status);
+    await Assert.That(problem.Kind).IsEqualTo(kind);
+    await Assert.That(problem.Detail).IsEqualTo(detail);
+  }
+
+  [Test]
+  public async Task Renderer_bytes_that_are_not_utf8_never_fail_the_gateway()
+  {
+    byte[] json =
+    [
+      .. """{"kind":"InvalidRequest","detail":"bad """u8.ToArray(),
+      0xFF,
+      0xED,
+      0xA0,
+      0x80,
+      .. """ here"}"""u8.ToArray(),
+    ];
+    await using var renderer = new RawHttpResponder(
+      RawHttpResponder.Response("400 Bad Request", "application/problem+json", json)
+    );
+    await using var gateway = await GatewayHost.StartAsync(OneTenant(renderer.BaseUrl));
+
+    var problem = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+
+    // Either the body is not JSON at all, or its detail cannot be read: never an unhandled 500,
+    // whose detail would be empty.
+    await Assert
+      .That(
+        problem.Detail
+          is "The tenant's renderer rejected the request."
+            or "The tenant's renderer could not convert the document."
+      )
+      .IsTrue();
+  }
+
+  [Test]
+  public async Task A_not_running_answer_that_is_not_valid_text_wakes_nothing()
+  {
+    await using var renderer = new RawHttpResponder(
+      RawHttpResponder.Response(
+        "403 Forbidden",
+        "application/json",
+        """{"error":"Sandbox is not running\uD800"}"""u8.ToArray()
+      )
+    );
+    await using var gateway = await GatewayHost.StartAsync(OneTenant(renderer.BaseUrl));
+
+    var problem = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+
+    await Assert.That(problem.Status).IsEqualTo(500);
+    await Assert.That(problem.Kind).IsEqualTo("RenderFailed");
+    await Assert
+      .That(problem.Detail)
+      .IsEqualTo("The tenant's renderer could not convert the document.");
+  }
+
+  [Test]
+  public async Task A_busy_renderer_gets_the_conversion_again()
+  {
+    var answers = 0;
+    await using var under = await GatewayUnderTest.StartAsync(context =>
+      Interlocked.Increment(ref answers) switch
+      {
+        1 => FakeRenderer.WriteProblemAsync(context, 429, """{"kind":"Busy"}"""),
+        2 => FakeRenderer.WriteProblemAsync(context, 503, """{"kind":"Busy"}"""),
+        _ => FakeRenderer.WritePdfAsync(context, "%PDF-1.7 at last"),
+      }
+    );
+
+    using var response = await under.PostAsync();
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert
+      .That(await response.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("%PDF-1.7 at last");
+    await Assert.That(under.Renderer.Requests.Count).IsEqualTo(3);
+    foreach (var request in under.Renderer.Requests)
+    {
+      await Assert.That(request.Body).Contains("\"html\":\"<p>x</p>\"");
+    }
+  }
+
+  [Test]
+  public async Task A_burst_beyond_the_renderers_concurrency_succeeds()
+  {
+    const int requests = 4;
+    var key = RendererCredential.Generate();
+    var conversions = 0;
+    FakeConverter converter = new(
+      async (destination, cancellationToken) =>
+      {
+        Interlocked.Increment(ref conversions);
+        await Task.Delay(150, cancellationToken);
+        await destination.WriteAsync("%PDF-1.7"u8.ToArray(), cancellationToken);
+        return null;
+      }
+    );
+    // A medium renderer admits the gateway twice at once and answers 429 beyond that.
+    await using var renderer = await StartRendererAsync(converter, key);
+    await using var gateway = await GatewayHost.StartAsync(
+      OneTenant(renderer.Client.BaseAddress!.ToString(), apiKey: key.Credential)
+    );
+
+    var responses = await Task.WhenAll(
+      Enumerable.Range(0, requests).Select(_ => gateway.PostAsync("""{"html":"<p>x</p>"}"""))
+    );
+
+    foreach (var response in responses)
+    {
+      using (response)
+      {
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+      }
+    }
+
+    await Assert.That(Volatile.Read(ref conversions)).IsEqualTo(requests);
+  }
+
+  [Test]
+  public async Task A_document_too_large_for_the_renderer_once_encoded_is_the_callers_problem()
+  {
+    var key = RendererCredential.Generate();
+    var converter = PdfConverter("%PDF-1.7");
+    // The renderer takes 4 KiB; the gateway takes far more.
+    await using var renderer = await StartRendererAsync(
+      converter,
+      key,
+      "--Kestrel:Limits:MaxRequestBodySize=4096"
+    );
+    LogCollector logs = new();
+    await using var gateway = await GatewayHost.StartAsync(
+      OneTenant(renderer.Client.BaseAddress!.ToString(), apiKey: key.Credential),
+      builder => builder.Logging.AddProvider(logs)
+    );
+    // 2,400 bytes of emoji as raw UTF-8 from the caller; the client's wire format escapes each
+    // one's 4 bytes as 12, so the renderer gets over 7 KiB.
+    var html = "<p>" + string.Concat(Enumerable.Repeat("\U0001F600", 600)) + "</p>";
+
+    var problem = await ReadProblemAsync(await gateway.PostAsync($$"""{"html":"{{html}}"}"""));
+
+    await Assert.That(problem.Status).IsEqualTo(400);
+    await Assert.That(problem.Kind).IsEqualTo("InvalidRequest");
+    await Assert.That(problem.Detail).Contains("larger than the tenant's renderer accepts");
+    await Assert.That(converter.Calls).IsEqualTo(0);
+    await Assert.That(logs.WithEventId(45).Single()["StatusCode"]).IsEqualTo(413);
   }
 
   [Test]
@@ -463,6 +696,33 @@ public class GatewayResponseTests
     await Assert.That(problem.Status).IsEqualTo(503);
     await Assert.That(problem.Kind).IsEqualTo("BrowserUnavailable");
     await Assert.That(problem.Detail).IsEqualTo("The tenant's renderer could not be reached.");
+  }
+
+  [Test]
+  public async Task A_renderer_whose_handshake_stalls_is_unavailable()
+  {
+    // Accepts the connection and never answers the TLS ClientHello.
+    await using var renderer = new SilentListener();
+    LogCollector logs = new();
+    await using var gateway = await GatewayHost.StartAsync(
+      OneTenant($"https://127.0.0.1:{renderer.Port}"),
+      builder =>
+      {
+        builder.Logging.AddProvider(logs);
+        ShortenConnectTimeout(builder, TimeSpan.FromSeconds(1));
+      }
+    );
+
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    var problem = await ReadProblemAsync(await gateway.PostAsync("""{"html":"<p>x</p>"}"""));
+    watch.Stop();
+
+    await Assert.That(problem.Status).IsEqualTo(503);
+    await Assert.That(problem.Kind).IsEqualTo("BrowserUnavailable");
+    await Assert.That(problem.Detail).IsEqualTo("The tenant's renderer could not be reached.");
+    await Assert.That(renderer.Accepted).IsGreaterThanOrEqualTo(1);
+    await Assert.That(watch.Elapsed).IsLessThan(TimeSpan.FromSeconds(30));
+    await Assert.That(logs.WithEventId(43).Single()["Reason"]).IsEqualTo("ConnectTimeout");
   }
 
   [Test]
