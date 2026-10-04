@@ -14,6 +14,7 @@ internal sealed class ListingRecordStore(IRendererRecordStore inner) : IRenderer
     TaskCreationOptions.RunContinuationsAsynchronously
   );
   private int _listings;
+  private int _fullListings;
 
   /// <summary>Fails every listing of tenant IDs with this exception, when set.</summary>
   public Exception? FailListing { get; set; }
@@ -29,6 +30,9 @@ internal sealed class ListingRecordStore(IRendererRecordStore inner) : IRenderer
 
   /// <summary>The tenants whose records were read, in order.</summary>
   public IReadOnlyList<string> Gets => [.. _gets];
+
+  /// <summary>How many times every record was read and listed.</summary>
+  public int FullListings => Volatile.Read(ref _fullListings);
 
   public async Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken)
   {
@@ -53,11 +57,17 @@ internal sealed class ListingRecordStore(IRendererRecordStore inner) : IRenderer
     return inner.GetAsync(tenantId, cancellationToken);
   }
 
-  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-    inner.ListAsync(cancellationToken);
+  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken)
+  {
+    Interlocked.Increment(ref _fullListings);
+    return inner.ListAsync(cancellationToken);
+  }
 
-  public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken) =>
-    inner.ListWithUnreadableAsync(cancellationToken);
+  public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken)
+  {
+    Interlocked.Increment(ref _fullListings);
+    return inner.ListWithUnreadableAsync(cancellationToken);
+  }
 
   public Task PutAsync(RendererRecord record, CancellationToken cancellationToken) =>
     inner.PutAsync(record, cancellationToken);

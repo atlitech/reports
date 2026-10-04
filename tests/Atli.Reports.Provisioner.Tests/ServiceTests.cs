@@ -637,8 +637,8 @@ public class ServiceTests
     records.FailListing = new InvalidOperationException("The vault is unavailable.");
 
     using var full = await service.PutAsync("myapp-b", TestToken);
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
     await service.Logs.WaitForAsync<RetirementLoop>(20);
     using var freed = await service.PutAsync("myapp-b", TestToken);
 
@@ -1033,8 +1033,8 @@ public class ServiceTests
 
     var creating = service.PutAsync("myapp-1", TestToken);
     await probing.Task.WaitAsync(TestToken);
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
     await service.Logs.WaitForAsync<RetirementLoop>(20);
     ready.SetResult();
     using var created = await creating;
@@ -1072,7 +1072,7 @@ public class ServiceTests
   }
 
   [Test]
-  public async Task Retires_idle_renderers_one_interval_after_starting_and_every_interval_after()
+  public async Task Retires_idle_renderers_a_minute_after_starting_and_every_interval_after()
   {
     using Provisioning provisioning = new();
     provisioning.AddRenderer("myapp-1", "disk-1");
@@ -1080,8 +1080,8 @@ public class ServiceTests
     provisioning.Sandboxes.Suspend("old-myapp-1", TimeSpan.FromDays(8));
     await using var service = await RunningService.StartAsync(provisioning);
 
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour - TestClock.Tick);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter - TestClock.Tick);
     await Assert.That(provisioning.Records["myapp-1"]).IsNotNull();
     provisioning.Clock.Advance(TestClock.Tick);
     await service.Logs.WaitForAsync<RetirementLoop>(20);
@@ -1223,7 +1223,7 @@ public class ServiceTests
   }
 
   [Test]
-  public async Task The_retirement_loop_runs_one_interval_after_starting_then_one_after_each_run()
+  public async Task The_retirement_loop_runs_a_minute_after_starting_then_an_interval_after_each_run()
   {
     using Provisioning provisioning = new();
     using LogCapture logs = new();
@@ -1250,8 +1250,8 @@ public class ServiceTests
     );
 
     await loop.StartAsync(TestToken);
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour - TestClock.Tick);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter - TestClock.Tick);
     await Assert.That(Volatile.Read(ref runs)).IsEqualTo(0);
     provisioning.Clock.Advance(TestClock.Tick);
     await run.WaitAsync(TestToken);
@@ -1295,8 +1295,9 @@ public class ServiceTests
     await loop.StartAsync(TestToken);
     for (var expected = 1; expected <= 3; expected++)
     {
-      await provisioning.Clock.WaitForTimerAsync(Hour);
-      provisioning.Clock.Advance(Hour);
+      var interval = expected == 1 ? RetirementLoop.FirstRunAfter : Hour;
+      await provisioning.Clock.WaitForTimerAsync(interval);
+      provisioning.Clock.Advance(interval);
     }
 
     await logs.WaitForAsync<RetirementLoop>(21);
@@ -1309,17 +1310,18 @@ public class ServiceTests
     await Assert.That(failures[0].Level).IsEqualTo(LogLevel.Error);
     await Assert
       .That(logs.Of<RetirementLoop>(21).Single().Message)
-      .IsEqualTo("Could not retire the renderer of tenant myapp-1: it was busy.");
+      .IsEqualTo("Could not retire tenant myapp-1, or delete its leftovers: it was busy.");
     await Assert.That(loop.ExecuteTask!.IsFaulted).IsFalse();
   }
 
   [Test]
-  public async Task Nothing_is_retired_when_RetireAfterIdle_is_zero()
+  public async Task With_RetireAfterIdle_zero_the_loop_still_runs_to_delete_leftovers()
   {
     using Provisioning provisioning = new();
     using LogCapture logs = new();
     using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs));
     var runs = 0;
+    var run = new SemaphoreSlim(0);
     using TenantCensus census = new(
       provisioning.Records,
       new ProvisioningServiceOptions(),
@@ -1331,6 +1333,7 @@ public class ServiceTests
       _ =>
       {
         Interlocked.Increment(ref runs);
+        run.Release();
         return Task.FromResult(Retired());
       },
       census,
@@ -1339,12 +1342,43 @@ public class ServiceTests
     );
 
     await loop.StartAsync(TestToken);
-    await loop.ExecuteTask!.WaitAsync(TestToken);
-    provisioning.Clock.Advance(TimeSpan.FromDays(1));
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await run.WaitAsync(TestToken);
     await loop.StopAsync(TestToken);
 
-    await Assert.That(runs).IsEqualTo(0);
+    await Assert.That(runs).IsEqualTo(1);
     await Assert.That(logs.Of<RetirementLoop>(23)).HasSingleItem();
+    run.Dispose();
+  }
+
+  [Test]
+  public async Task Deletes_the_managed_tenants_leftovers_a_minute_after_starting()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Sandboxes.Add("left-myapp-1", RendererLabels.For("myapp-1", RendererSize.Medium));
+    provisioning.Sandboxes.Add("left-other-1", RendererLabels.For("other-1", RendererSize.Medium));
+    // Stopped long enough, but with retirement off, kept.
+    provisioning.AddRenderer("myapp-2", "disk-1");
+    provisioning.Sandboxes.Suspend("old-myapp-2", TimeSpan.FromDays(30));
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.RetireAfterIdle = TimeSpan.Zero
+    );
+    var drain = provisioning.Options.DrainDelay;
+
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    await Assert.That(provisioning.Sandboxes.Ids).Contains("left-myapp-1");
+    provisioning.Clock.Advance(drain);
+    await service.Logs.WaitForAsync<RetirementLoop>(20);
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-other-1", "old-myapp-2"]);
+    await Assert.That(provisioning.Records["myapp-2"]).IsNotNull();
+    await Assert
+      .That(service.Logs.Of<RetirementLoop>(20).Single().Message)
+      .IsEqualTo("Retired 0 idle renderers and deleted 1 leftover sandboxes; 0 tenants failed.");
   }
 
   private static RetireResult Retired(Dictionary<string, string>? failures = null) =>

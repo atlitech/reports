@@ -149,7 +149,7 @@ internal static class ProvisioningService
       cancellation =>
         provider
           .GetRequiredService<RendererProvisioner>()
-          .RetireIdleAsync(options.Service, cancellation),
+          .RetireIdleAsync(options.Service, pruneLeftovers: true, cancellation),
       provider.GetRequiredService<TenantCensus>(),
       time,
       provider.GetRequiredService<ILogger<RetirementLoop>>()
