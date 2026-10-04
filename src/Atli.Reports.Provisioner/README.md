@@ -294,10 +294,9 @@ and only sandboxes in the run's listing are deleted. It keeps:
   tenant's next conversion, and `delete` removes the tenant;
 - every tenant outside the prefixes.
 
-A tenant under the prefixes is retired by the same rule whoever created it: with `create`, or one
-the gateway lists for a caller. The gateway has the service create renderers only for tenants under
-a caller's prefixes that it does not list, so a listed tenant, once retired, stays without a
-renderer until `create`. Keep the operator's own tenants outside the managed prefixes.
+A tenant under the prefixes is retired by the same rule whoever created it, with `create` too:
+everything under a managed prefix is its application's, and the gateway refuses to list a tenant
+under any prefix. Keep the operator's own tenants outside the managed prefixes.
 
 Just before deleting, `retire` reads the sandbox again, and keeps the renderer until the next run
 if it is no longer stopped (a request may be waking it) or has been disabled. That leaves a short
