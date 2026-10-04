@@ -26,4 +26,10 @@ public sealed record RendererRecord
 
   /// <summary>When the provisioner created the renderer.</summary>
   public DateTimeOffset CreatedAt { get; init; }
+
+  /// <summary>Describes the record without <see cref="ApiKey"/>, so it can be logged and printed.</summary>
+  public override string ToString() =>
+    $"RendererRecord {{ TenantId = {TenantId}, Url = {Url}, SandboxId = {SandboxId}, "
+    + $"DiskImageId = {DiskImageId}, "
+    + $"CreatedAt = {CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)} }}";
 }
