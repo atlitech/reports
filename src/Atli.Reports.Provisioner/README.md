@@ -43,7 +43,8 @@ reconfigure renderers, run commands in them, or read their files. In the
 [production-shaped run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md),
 the gateway's user-assigned identity, holding only that role, the vault role, and `AcrPull` on its
 registry, resumed every `Manual` renderer it was asked to. The renderer sandbox group itself has no
-managed identity.
+managed identity. `aca sandboxgroup create` grants Data Owner on the new group to whoever created
+it; remove that assignment once setup is done, so that only the provisioner's identities hold it.
 
 The provisioner authenticates as the user-assigned managed identity named by
 `Sandboxes:ManagedIdentityClientId` (and `Records:ManagedIdentityClientId` for the vault), or
@@ -110,7 +111,10 @@ gateway, the rest waiting in its queue, and its record says so, so the gateway s
 
 `AllowedSourceCidrs` applies to every request to the port, the provisioner's own included: it asks
 each new renderer whether it is ready through the port, so the address it runs from must be in the
-list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. A changed list
+list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. Run those commands
+from where the gateway's outbound address already covers them, such as a Container Apps job in the
+gateway's environment behind its NAT gateway, rather than adding an operator's address to every
+renderer's list. A changed list
 applies to renderers created from then on; `rollout` does not replace renderers on the current disk
 image, so recreate them (`delete`, then `create`) to apply it to existing ones. The same holds for
 `PortActivation` and `NetworkConnection`, and a rollout's replacements take the settings it runs with, not their
@@ -431,7 +435,9 @@ rotate, add the new key as `ApiKeys__1`, move the gateway to it, then remove the
 - **Internal ingress, TLS at the platform.** The service listens on plain HTTP, where
   `ASPNETCORE_URLS` or `ASPNETCORE_HTTP_PORTS` says, and on `http://+:8080` when neither is set.
   Expose it on internal ingress only, behind TLS that the platform terminates; the gateway's
-  `Provisioning:Url` is its `https` address. Nothing else should reach it.
+  `Provisioning:Url` is its `https` address. Nothing else should reach it. On Azure Container
+  Apps the internal name resolves in public DNS, but in the
+  [measured run](../../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md) every request to it from the internet got the platform's `404` or `421`.
 - **An identity of its own**, with the roles in [Azure roles](#azure-roles). Data Owner stays off
   the request path: the gateway reaches the service only through this API, which can neither run
   commands in a renderer nor read its files. The service asks each new renderer whether it is ready

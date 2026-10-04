@@ -265,6 +265,12 @@ ran the gateway and renderers as production would, in one region. What they esta
   minutes, 388 conversions still ended in `503 Busy`, and tail latency rose. The renderers' own
   admission kept them from running out of memory. The gateway's `Replicas` setting, added since,
   makes each replica admit only its share.
+- **Listing a group's sandboxes is paged.** On `2026-02-01-preview` the data plane answers with
+  the first 25 sandboxes (100 at most, with `pageSize`) and no way to the rest; on
+  `2026-09-01-preview` each page carries a `nextLink`, which the client follows. In a
+  [later run](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md),
+  deleting a stopped renderer took 0.3 to 0.8 s and a running one 9 to 10 s, and one retirement
+  pass deleted 43 idle renderers in 20 s.
 - **Clones of one memory snapshot share the browser's memory layout and environment.** Two
   sandboxes started from a snapshot of a warm renderer had the same browser executable, libc,
   and stack addresses as the original, and the original's environment, credentials included. The
@@ -325,7 +331,8 @@ reaches, and the runtime and node pool decide how hard the next step is.
 
 ## Applications with many tenants
 
-Status: being built. An application whose own users keep separate workspaces can give each
+Status: built, and validated on Azure in a [run with two applications](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md). An application
+whose own users keep separate workspaces can give each
 workspace a renderer of its own, so that one workspace's documents never render on the machine
 that renders another's: the separation this design gives customers, one level down. The
 application chooses the level, the workspace or the person, by where its users' trust ends.
@@ -372,7 +379,32 @@ application chooses the level, the workspace or the person, by where its users' 
   deletes sandboxes of its prefixes that no record points to, left by an interrupted command.
 - **Cost and latency.** A workspace costs only while its renderer runs: each burst of use plus the
   idle time before it suspends. The first conversion of a new workspace waits for a renderer to be
-  created, and the first after a quiet period for one to wake.
+  created, and the first after a quiet period for one to wake. Recreating a deleted or retired
+  workspace's renderer took about 2.3 s longer than a first creation, while Key Vault recovered the
+  record's soft-deleted secret.
+
+The [run](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md) put two applications with prefixes of their own behind one gateway, on renderers in a
+virtual network without DNS, with the provisioning service on internal ingress:
+
+- Every cross-application, out-of-prefix, and reserved tenant was refused, and nothing was created
+  for it.
+- 40 new workspaces at once all got a PDF within 66.6 s: the first 20 in 2.2 to 4.7 s, the rest
+  after the prefix's 20 creates a minute allowed them. There were exactly 40 renderers, with no
+  duplicate or leftover. Ten simultaneous first requests to one workspace made one renderer.
+- Ten minutes of 30 workspaces converting every 5 s returned 3,609 of 3,609 PDFs: a warm invoice
+  in 0.086 s at the median, a first request that created a renderer in 1.91 s, and one that woke
+  it in 1.56 s.
+- One application flooding new workspace IDs at 4,041 requests a second for 70 s was refused by
+  its own budget in 6 ms. The other application's workspaces, existing and new, kept working, and
+  Key Vault throttled nothing. The flood saturated the gateway replica's one vCPU and wrote 250 MB
+  of logs, and the flooding application's own workspaces that had been idle for more than about
+  ten minutes waited for its budget.
+- Deleting, the kill switch's refusal of a delete, retirement, a rollout that retired stopped
+  renderers under load (1,800 of 1,800 requests), and leftover cleanup all worked.
+
+The run found that the data plane's sandbox listing, on the API version the client then used,
+returned only the first 25 sandboxes, so with more renderers the kill switch and deletes could
+miss theirs; the client now follows every page.
 
 ## Exception: end users who distrust each other
 
@@ -443,6 +475,9 @@ renderer template.
   divides each renderer's admitted requests by a fixed count, which leaves renderers partly unused
   while fewer replicas run, and cannot divide a renderer that admits fewer requests than there
   are replicas. Measure two replicas with `Replicas=2` at twice the admitted concurrency.
+- Put a rate limit in front of the gateway, and throttle its per-request logs (events 20 and 70)
+  under a flood: one caller's 4,000 refused requests a second saturated a one-vCPU replica and
+  wrote 250 MB of logs in 70 s, about 13 GB an hour if it went on.
 - Test Chromium's sandbox on Ubuntu 23.10 and later renderer nodes, with the containerd versions
   the platform runs.
 - Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a

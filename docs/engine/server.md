@@ -225,7 +225,10 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   that the signed-in user may use a workspace before naming the workspace's tenant. This runs
   after caller admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
   or this replica's share of its record's `MaxConcurrentRequests` (the requests its renderer
-  admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant at its
+  admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant whose
+  record the gateway has not read yet, such as a new one under a prefix, gets
+  `MaxConcurrentRequestsPerTenant` until it has; its renderer refuses the excess, which the gateway
+  resends. A tenant at its
   limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway. The limit
   holds per replica, which knows nothing of the others' traffic, so `Replicas` must count every
   replica that may run: in a [measured run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md)
@@ -324,7 +327,8 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   refusals reach the caller as the gateway's own errors, never in the service's words:
   `NotAllowed`, which means that the gateway's and the service's prefixes disagree, is `503`
   `BrowserUnavailable` and logged as an error; `QuotaExceeded` is `503` `BrowserUnavailable` with a
-  message that the prefix's renderer quota is full, until tenants are deleted or retire;
+  message that the prefix's renderer quota is full, until tenants are deleted or retire (its
+  `Retry-After: 5`, as on every `BrowserUnavailable`, does not mean the quota frees up by then);
   `RateLimited` is `503` `Busy` with the service's `Retry-After`, kept between 1 and 60 seconds;
   `Disabled`, a renderer the operator disabled, is `503` `BrowserUnavailable`; and `Failed`, any
   other answer, a service that cannot be reached, and `Provisioning:Timeout` are `503`
@@ -524,6 +528,9 @@ docker build -f src/Atli.Reports.Server/Dockerfile -t atli-reports-server \
   --build-arg CHROME_VERSION=stable --no-cache-filter browser .
 docker run --rm --entrypoint /opt/chrome-headless-shell/chrome-headless-shell atli-reports-server --version
 ```
+
+The image gives its files fixed modes, so a checkout made under a strict `umask` (such as `077`)
+builds the same image.
 
 `.github/scripts/smoke-test-server-image.sh atli-reports-server` runs the checks CI runs on every
 image change: under the seccomp profile, the server becomes ready, rejects anonymous conversions,
