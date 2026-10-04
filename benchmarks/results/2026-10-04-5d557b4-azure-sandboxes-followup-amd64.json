@@ -1,0 +1,2593 @@
+{
+  "commit": "5d557b4",
+  "dirty": true,
+  "location": "eastus2",
+  "aca_cli": "aca 1.0.0-preview.4 (sha 6d679be, build 20260916.1)",
+  "data_plane_api_version": "2026-02-01-preview",
+  "data_plane_api_versions_advertised": [
+    "2026-02-01-preview",
+    "2026-09-01-preview"
+  ],
+  "arm_api_versions_sandbox_groups": [
+    "2026-07-01",
+    "2026-02-01-preview"
+  ],
+  "started_utc": "2026-10-04T01:52:38Z",
+  "finished_utc": "2026-10-04T03:04:00Z",
+  "setup": {
+    "role_propagation_s": {
+      "reports-followup-20261004015238": 4.3,
+      "reports-tester-20261004015238": 6.5
+    },
+    "disk_build_s": 125.5,
+    "disk_built_from": "src/Atli.Reports.Server/Dockerfile at 5d557b4 (git archive of Engine and Server only)"
+  },
+  "ingress": {
+    "entra_port_view": {
+      "port": 8080,
+      "auth": {
+        "anonymous": false,
+        "entraId": {
+          "enabled": true,
+          "emails": [],
+          "emailSuffixes": [],
+          "objectIds": [
+            "<signed-in user's object ID>"
+          ],
+          "tenantIds": []
+        }
+      },
+      "activationMode": "Manual",
+      "protocol": "Http"
+    },
+    "entra_anonymous": {
+      "status": 401,
+      "www_authenticate": "Bearer realm=\"eastus2.adcproxy.io\"",
+      "body": "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}"
+    },
+    "entra_browser": {
+      "first": "302 -> auth.eastus2.adcproxy.io/auth/entra",
+      "second": "302 -> login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "client_id": "409cf302-c83f-43c3-94eb-ca581ab18c6d",
+      "scope": "openid profile email",
+      "redirect_uri": "https://auth.eastus2.adcproxy.io/auth/entra/callback",
+      "cookies": [
+        "adc_entra_state"
+      ]
+    },
+    "entra_bearer": {
+      "https://dynamicsessions.io": "401 (RS256)",
+      "https://management.azuredevcompute.io": "401 (RS256)",
+      "https://management.azure.com/": "401 (RS256)",
+      "https://graph.microsoft.com": "401 (RS256)",
+      "409cf302-c83f-43c3-94eb-ca581ab18c6d": "401 (encrypted JWE)",
+      "api://409cf302-c83f-43c3-94eb-ca581ab18c6d": "no token: az login --tenant \"<tenant>\" --scope \"api://409cf302-c83f-43c3-94eb-ca581ab18c6d/.default\"",
+      "https://eastus2.adcproxy.io": "no token: az login --tenant \"<tenant>\" --scope \"https://eastus2.adcproxy.io/.default\""
+    },
+    "ip_access_control": {
+      "allowed": "200 ok\n",
+      "not_allowed": "403 {\"error\":\"Access denied by IP access control policy\",\"errorCode\":\"IpAccessDenied\"}"
+    },
+    "on_demand": [
+      {
+        "status": 200,
+        "first_request_from_laptop_s": 0.54,
+        "state_after": "Running"
+      },
+      {
+        "status": 200,
+        "first_request_from_laptop_s": 0.48,
+        "state_after": "Running"
+      },
+      {
+        "status": 200,
+        "first_request_from_laptop_s": 0.56,
+        "state_after": "Running"
+      }
+    ],
+    "refused_requests_wake": {
+      "ip_denied": {
+        "status": 403,
+        "state_10s_later": "Stopped"
+      },
+      "entra_unauthenticated": {
+        "status": 401,
+        "state_10s_later": "Stopped"
+      }
+    }
+  },
+  "role": {
+    "denied_phase": [
+      {
+        "call": "GET sandbox",
+        "status": 200,
+        "seconds": 0.07,
+        "detail": ""
+      },
+      {
+        "call": "GET sandboxes (list)",
+        "status": 200,
+        "seconds": 0.022,
+        "detail": ""
+      },
+      {
+        "call": "GET ports",
+        "status": 403,
+        "seconds": 0.016,
+        "detail": ""
+      },
+      {
+        "call": "POST stop",
+        "status": 403,
+        "seconds": 0.026,
+        "detail": ""
+      },
+      {
+        "call": "POST executeShellCommand",
+        "status": 403,
+        "seconds": 0.023,
+        "detail": ""
+      },
+      {
+        "call": "POST executeCommand",
+        "status": 403,
+        "seconds": 0.016,
+        "detail": ""
+      },
+      {
+        "call": "GET files (read /etc/hostname)",
+        "status": 403,
+        "seconds": 0.013,
+        "detail": ""
+      },
+      {
+        "call": "GET files/list",
+        "status": 403,
+        "seconds": 0.011,
+        "detail": ""
+      },
+      {
+        "call": "PUT files (write /tmp/role-probe)",
+        "status": 403,
+        "seconds": 0.012,
+        "detail": ""
+      },
+      {
+        "call": "POST egresspolicy (Allow all)",
+        "status": 403,
+        "seconds": 0.012,
+        "detail": ""
+      },
+      {
+        "call": "POST lifecycle",
+        "status": 403,
+        "seconds": 0.012,
+        "detail": ""
+      },
+      {
+        "call": "POST ports/add (anonymous 9999)",
+        "status": 403,
+        "seconds": 0.013,
+        "detail": ""
+      },
+      {
+        "call": "POST snapshot",
+        "status": 403,
+        "seconds": 0.016,
+        "detail": ""
+      },
+      {
+        "call": "POST commit",
+        "status": 403,
+        "seconds": 0.018,
+        "detail": ""
+      },
+      {
+        "call": "POST disable",
+        "status": 403,
+        "seconds": 0.013,
+        "detail": ""
+      },
+      {
+        "call": "GET stats",
+        "status": 403,
+        "seconds": 0.012,
+        "detail": ""
+      },
+      {
+        "call": "GET egress-decisions",
+        "status": 403,
+        "seconds": 0.014,
+        "detail": ""
+      },
+      {
+        "call": "PUT sandboxes (create)",
+        "status": 403,
+        "seconds": 0.016,
+        "detail": ""
+      },
+      {
+        "call": "DELETE sandbox",
+        "status": 403,
+        "seconds": 0.02,
+        "detail": ""
+      },
+      {
+        "call": "GET secrets",
+        "status": 403,
+        "seconds": 0.013,
+        "detail": ""
+      },
+      {
+        "call": "GET diskimages",
+        "status": 403,
+        "seconds": 0.014,
+        "detail": ""
+      },
+      {
+        "call": "GET snapshots",
+        "status": 403,
+        "seconds": 0.017,
+        "detail": ""
+      }
+    ],
+    "denied_phase_s": 2.7,
+    "target_state_after_denied_phase": "Running",
+    "resume_phase": [
+      {
+        "call": "GET sandbox (before)",
+        "status": 200,
+        "seconds": 0.014,
+        "detail": ""
+      },
+      {
+        "call": "POST resume",
+        "status": 200,
+        "seconds": 0.641,
+        "detail": ""
+      },
+      {
+        "call": "state after resume",
+        "status": "Running",
+        "seconds": 0.52
+      }
+    ],
+    "target_state_after_resume": "Running",
+    "port_phase": [
+      {
+        "call": "GET port with identity token for https://dynamicsessions.io",
+        "status": 401,
+        "detail": "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}"
+      },
+      {
+        "call": "GET port with identity token for https://management.azure.com/",
+        "status": 401,
+        "detail": "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}"
+      },
+      {
+        "call": "GET port with identity token for 409cf302-c83f-43c3-94eb-ca581ab18c6d",
+        "status": 401,
+        "detail": "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}"
+      },
+      {
+        "call": "identity token for https://d871473d-1c8c-4bab-a391-3732831be00b--8080.eastus2.adcproxy.io",
+        "status": "502 {\"error\":\"token_acquisition_failed\",\"error_description\":\"Failed to acquire token from Entra ID: AADSTS500011: The resource principal named https://d871473d-1c8c-4bab-a391-3732831be00b--8080.eastus2.ad"
+      }
+    ],
+    "role_definition": {
+      "Actions": [],
+      "DataActions": [
+        "Microsoft.App/sandboxGroups/sandboxes/read",
+        "Microsoft.App/sandboxGroups/sandboxes/resume/action"
+      ],
+      "AssignableScopes": [
+        "<the run's resource group>"
+      ]
+    },
+    "assignment_scope": "the renderer sandbox group",
+    "assignment_created_utc": "02:07:49",
+    "first_call_utc": "02:15:21",
+    "get_sandbox_view_keys": [
+      "connections",
+      "contentPackageDownloads",
+      "createdAt",
+      "credentialRefs",
+      "egressPolicy",
+      "id",
+      "labels",
+      "lifecycle",
+      "managementUrl",
+      "outboundIpAddresses",
+      "ports",
+      "region",
+      "resources",
+      "sourcesRef",
+      "state",
+      "vmmType",
+      "volumes"
+    ]
+  },
+  "dns": {
+    "deny_default": [
+      "nameserver 168.63.129.16",
+      "options timeout:2 attempts:5",
+      "resolver=168.63.129.16",
+      "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+      "udp53_168_63_129_16_TXT_example_com=NOERROR/answers=2",
+      "udp53_168_63_129_16_A_random_example_com=NOERROR/answers=0",
+      "udp53_168_63_129_16_TXT_microsoft_com=NOERROR/answers=15",
+      "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+      "udp53_8_8_8_8_A_example_com=timeout",
+      "udp53_1_1_1_1_A_example_com=timeout"
+    ],
+    "deny_rules": {
+      "rules": [
+        "*.example.com:Deny",
+        "example.com:Deny",
+        "*.microsoft.com:Deny"
+      ],
+      "probe": [
+        "nameserver 168.63.129.16",
+        "options timeout:2 attempts:5",
+        "resolver=168.63.129.16",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_TXT_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_A_random_example_com=NOERROR/answers=0",
+        "udp53_168_63_129_16_TXT_microsoft_com=NOERROR/answers=15",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_8_8_8_8_A_example_com=timeout",
+        "udp53_1_1_1_1_A_example_com=timeout"
+      ],
+      "network": [
+        "http_example_com=403",
+        "tcp_1_1_1_1_443=open",
+        "tcp_8_8_8_8_53=blocked",
+        "tcp_imds_169_254_169_254_80=blocked",
+        "dns_resolves_example_com=yes",
+        "identity_endpoint_status=401",
+        "identity_token_issued=no",
+        "identity_error=unauthorized_client"
+      ]
+    },
+    "allow_rule": {
+      "rules": [
+        "example.com:Allow"
+      ],
+      "probe": [
+        "nameserver 168.63.129.16",
+        "options timeout:2 attempts:5",
+        "resolver=168.63.129.16",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_TXT_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_A_random_example_com=NOERROR/answers=0",
+        "udp53_168_63_129_16_TXT_microsoft_com=NOERROR/answers=15",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_8_8_8_8_A_example_com=timeout",
+        "udp53_1_1_1_1_A_example_com=timeout"
+      ],
+      "network": [
+        "http_example_com=403",
+        "tcp_1_1_1_1_443=open",
+        "tcp_8_8_8_8_53=blocked",
+        "tcp_imds_169_254_169_254_80=blocked",
+        "dns_resolves_example_com=yes",
+        "identity_endpoint_status=401",
+        "identity_token_issued=no",
+        "identity_error=unauthorized_client"
+      ]
+    },
+    "vnet": {
+      "vnet": "10.42.0.0/16, DNS server 10.42.0.4 (nothing there), subnet 10.42.0.0/24 delegated to Microsoft.App/environments",
+      "connection_create_s": 10,
+      "sandbox_create_s": 33.31,
+      "resolv_conf": [
+        "nameserver 10.42.0.4",
+        "options timeout:2 attempts:5"
+      ],
+      "probe_no_nsg": [
+        "resolver=10.42.0.4",
+        "udp53_10_42_0_4_A_example_com=timeout",
+        "udp53_10_42_0_4_TXT_example_com=timeout",
+        "udp53_10_42_0_4_A_random_example_com=timeout",
+        "udp53_10_42_0_4_TXT_microsoft_com=timeout",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_8_8_8_8_A_example_com=timeout",
+        "udp53_1_1_1_1_A_example_com=timeout"
+      ],
+      "probe_nsg_deny_168_63_129_16_port_53_after_50s": [
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2"
+      ],
+      "probe_nsg_deny_AzurePlatformDNS_after_2min": [
+        "resolver=10.42.0.4",
+        "udp53_10_42_0_4_A_example_com=timeout",
+        "udp53_10_42_0_4_TXT_example_com=timeout",
+        "udp53_10_42_0_4_A_random_example_com=timeout",
+        "udp53_10_42_0_4_TXT_microsoft_com=timeout",
+        "udp53_168_63_129_16_A_example_com=timeout",
+        "udp53_8_8_8_8_A_example_com=timeout",
+        "udp53_1_1_1_1_A_example_com=timeout"
+      ],
+      "egress_with_service_tag_rule": [
+        "http_1.1.1.1_80=[HTTP/1.1 403 Forbidden]",
+        "tcp_1.1.1.1_443=open",
+        "tcp_8.8.8.8_53=blocked",
+        "tcp_169.254.169.254_80=blocked",
+        "tcp_10.42.0.4_53=blocked"
+      ],
+      "port_8080_via_public_proxy": [
+        200,
+        200,
+        200
+      ],
+      "same_probe_without_vnet_same_disk": [
+        "nameserver 168.63.129.16",
+        "options timeout:2 attempts:5",
+        "resolver=168.63.129.16",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_TXT_example_com=NOERROR/answers=2",
+        "udp53_168_63_129_16_A_random_example_com=NOERROR/answers=0",
+        "udp53_168_63_129_16_TXT_microsoft_com=NOERROR/answers=15",
+        "udp53_168_63_129_16_A_example_com=NOERROR/answers=2",
+        "udp53_8_8_8_8_A_example_com=timeout",
+        "udp53_1_1_1_1_A_example_com=timeout",
+        "http_example_com=403",
+        "tcp_1_1_1_1_443=open",
+        "tcp_8_8_8_8_53=blocked",
+        "tcp_imds_169_254_169_254_80=blocked",
+        "dns_resolves_example_com=yes"
+      ]
+    }
+  },
+  "load": {
+    "client": [
+      "2",
+      "Python",
+      "3.12.14"
+    ],
+    "sweep-L": {
+      "size": "L",
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "MaxConcurrentConversions": 8,
+      "MaxConcurrentRequestsPerCaller": 16,
+      "ready_after_create_s": 0.36,
+      "cells": [
+        {
+          "label": "invoice-c1",
+          "concurrency": 1,
+          "duration_s": 20.0,
+          "elapsed_s": 20.009,
+          "requests": 410,
+          "pdfs": 410,
+          "statuses": {
+            "200": 410
+          },
+          "pdfs_per_s": 20.491,
+          "p50_s": 0.0475,
+          "p95_s": 0.0557,
+          "min_s": 0.037,
+          "max_s": 0.3514,
+          "mean_s": 0.0488,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "324",
+            "peak_mib": "410",
+            "cpu_busy_pct": "62",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.064,
+          "requests": 474,
+          "pdfs": 474,
+          "statuses": {
+            "200": 474
+          },
+          "pdfs_per_s": 23.625,
+          "p50_s": 0.0838,
+          "p95_s": 0.1069,
+          "min_s": 0.0521,
+          "max_s": 0.1641,
+          "mean_s": 0.0846,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "408",
+            "peak_mib": "459",
+            "cpu_busy_pct": "76",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c4",
+          "concurrency": 4,
+          "duration_s": 20.0,
+          "elapsed_s": 20.074,
+          "requests": 492,
+          "pdfs": 492,
+          "statuses": {
+            "200": 492
+          },
+          "pdfs_per_s": 24.51,
+          "p50_s": 0.1602,
+          "p95_s": 0.2193,
+          "min_s": 0.0666,
+          "max_s": 0.3041,
+          "mean_s": 0.1629,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "389",
+            "peak_mib": "474",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.227,
+          "requests": 502,
+          "pdfs": 502,
+          "statuses": {
+            "200": 502
+          },
+          "pdfs_per_s": 24.818,
+          "p50_s": 0.3202,
+          "p95_s": 0.3962,
+          "min_s": 0.1166,
+          "max_s": 0.452,
+          "mean_s": 0.3213,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "517",
+            "peak_mib": "527",
+            "cpu_busy_pct": "77",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c1",
+          "concurrency": 1,
+          "duration_s": 45.0,
+          "elapsed_s": 46.576,
+          "requests": 22,
+          "pdfs": 22,
+          "statuses": {
+            "200": 22
+          },
+          "pdfs_per_s": 0.472,
+          "p50_s": 2.0809,
+          "p95_s": 2.2339,
+          "min_s": 2.0298,
+          "max_s": 2.4922,
+          "mean_s": 2.1171,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "390",
+            "peak_mib": "916",
+            "cpu_busy_pct": "55",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 47.262,
+          "requests": 40,
+          "pdfs": 40,
+          "statuses": {
+            "200": 40
+          },
+          "pdfs_per_s": 0.846,
+          "p50_s": 2.3364,
+          "p95_s": 2.5076,
+          "min_s": 2.2241,
+          "max_s": 2.677,
+          "mean_s": 2.3621,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "418",
+            "peak_mib": "1401",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c4",
+          "concurrency": 4,
+          "duration_s": 45.0,
+          "elapsed_s": 46.12,
+          "requests": 36,
+          "pdfs": 36,
+          "statuses": {
+            "200": 36
+          },
+          "pdfs_per_s": 0.781,
+          "p50_s": 5.0464,
+          "p95_s": 5.786,
+          "min_s": 4.4228,
+          "max_s": 5.799,
+          "mean_s": 5.09,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "582",
+            "peak_mib": "2349",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 49.738,
+          "requests": 32,
+          "pdfs": 32,
+          "statuses": {
+            "200": 32
+          },
+          "pdfs_per_s": 0.643,
+          "p50_s": 12.1408,
+          "p95_s": 13.1764,
+          "min_s": 10.8794,
+          "max_s": 13.2256,
+          "mean_s": 12.262,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "321",
+            "peak_mib": "4119",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "planned-L": {
+      "size": "L",
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "MaxConcurrentConversions": 4,
+      "MaxConcurrentRequestsPerCaller": 4,
+      "ready_after_create_s": 0.22,
+      "cells": [
+        {
+          "label": "invoice-c4",
+          "concurrency": 4,
+          "duration_s": 20.0,
+          "elapsed_s": 20.085,
+          "requests": 512,
+          "pdfs": 512,
+          "statuses": {
+            "200": 512
+          },
+          "pdfs_per_s": 25.492,
+          "p50_s": 0.1538,
+          "p95_s": 0.2086,
+          "min_s": 0.0653,
+          "max_s": 0.2479,
+          "mean_s": 0.1567,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "319",
+            "peak_mib": "468",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.083,
+          "requests": 611,
+          "pdfs": 531,
+          "statuses": {
+            "429": 80,
+            "200": 531
+          },
+          "pdfs_per_s": 26.44,
+          "p50_s": 0.1519,
+          "p95_s": 0.1998,
+          "min_s": 0.0611,
+          "max_s": 0.2532,
+          "mean_s": 0.151,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-9f6b266a5"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "315",
+            "peak_mib": "451",
+            "cpu_busy_pct": "79",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c4",
+          "concurrency": 4,
+          "duration_s": 45.0,
+          "elapsed_s": 46.986,
+          "requests": 36,
+          "pdfs": 36,
+          "statuses": {
+            "200": 36
+          },
+          "pdfs_per_s": 0.766,
+          "p50_s": 5.0385,
+          "p95_s": 6.217,
+          "min_s": 4.5558,
+          "max_s": 6.3476,
+          "mean_s": 5.1972,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "409",
+            "peak_mib": "2332",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 47.96,
+          "requests": 219,
+          "pdfs": 39,
+          "statuses": {
+            "429": 180,
+            "200": 39
+          },
+          "pdfs_per_s": 0.813,
+          "p50_s": 4.8237,
+          "p95_s": 6.4097,
+          "min_s": 2.9836,
+          "max_s": 6.4194,
+          "mean_s": 4.8207,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-639c5528d"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "399",
+            "peak_mib": "2313",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "sweep-M": {
+      "size": "M",
+      "cpu": "1000m",
+      "memory": "2048Mi",
+      "MaxConcurrentConversions": 8,
+      "MaxConcurrentRequestsPerCaller": 16,
+      "ready_after_create_s": 0.21,
+      "cells": [
+        {
+          "label": "invoice-c1",
+          "concurrency": 1,
+          "duration_s": 20.0,
+          "elapsed_s": 20.028,
+          "requests": 288,
+          "pdfs": 288,
+          "statuses": {
+            "200": 288
+          },
+          "pdfs_per_s": 14.38,
+          "p50_s": 0.0684,
+          "p95_s": 0.0777,
+          "min_s": 0.0632,
+          "max_s": 0.0935,
+          "mean_s": 0.0695,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "233",
+            "peak_mib": "292",
+            "cpu_busy_pct": "78",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.051,
+          "requests": 267,
+          "pdfs": 267,
+          "statuses": {
+            "200": 267
+          },
+          "pdfs_per_s": 13.316,
+          "p50_s": 0.1455,
+          "p95_s": 0.1881,
+          "min_s": 0.0893,
+          "max_s": 0.4002,
+          "mean_s": 0.15,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "291",
+            "peak_mib": "327",
+            "cpu_busy_pct": "82",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c4",
+          "concurrency": 4,
+          "duration_s": 20.0,
+          "elapsed_s": 20.131,
+          "requests": 264,
+          "pdfs": 264,
+          "statuses": {
+            "200": 264
+          },
+          "pdfs_per_s": 13.114,
+          "p50_s": 0.3031,
+          "p95_s": 0.3761,
+          "min_s": 0.1642,
+          "max_s": 0.4322,
+          "mean_s": 0.3041,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "312",
+            "peak_mib": "381",
+            "cpu_busy_pct": "84",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.24,
+          "requests": 256,
+          "pdfs": 256,
+          "statuses": {
+            "200": 256
+          },
+          "pdfs_per_s": 12.648,
+          "p50_s": 0.6393,
+          "p95_s": 0.7553,
+          "min_s": 0.2735,
+          "max_s": 1.114,
+          "mean_s": 0.6296,
+          "pdf_bytes": 69600,
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "358",
+            "peak_mib": "471",
+            "cpu_busy_pct": "86",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c1",
+          "concurrency": 1,
+          "duration_s": 45.0,
+          "elapsed_s": 47.182,
+          "requests": 21,
+          "pdfs": 21,
+          "statuses": {
+            "200": 21
+          },
+          "pdfs_per_s": 0.445,
+          "p50_s": 2.2239,
+          "p95_s": 2.3187,
+          "min_s": 2.1867,
+          "max_s": 2.5156,
+          "mean_s": 2.2467,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "382",
+            "peak_mib": "854",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 45.63,
+          "requests": 18,
+          "pdfs": 18,
+          "statuses": {
+            "200": 18
+          },
+          "pdfs_per_s": 0.394,
+          "p50_s": 4.9861,
+          "p95_s": 5.4145,
+          "min_s": 4.8225,
+          "max_s": 5.4145,
+          "mean_s": 5.0691,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "423",
+            "peak_mib": "1358",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c4",
+          "concurrency": 4,
+          "duration_s": 45.0,
+          "elapsed_s": 45.818,
+          "requests": 16,
+          "pdfs": 16,
+          "statuses": {
+            "200": 16
+          },
+          "pdfs_per_s": 0.349,
+          "p50_s": 11.2055,
+          "p95_s": 12.4646,
+          "min_s": 10.987,
+          "max_s": 12.4646,
+          "mean_s": 11.4495,
+          "pdf_bytes": 7186708,
+          "workers_finished": 4,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "234",
+            "peak_mib": "2184",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 78.698,
+          "requests": 16,
+          "pdfs": 2,
+          "statuses": {
+            "500": 8,
+            "504": 6,
+            "200": 2
+          },
+          "pdfs_per_s": 0.025,
+          "p50_s": 36.9426,
+          "p95_s": 37.0245,
+          "min_s": 36.9426,
+          "max_s": 37.0245,
+          "mean_s": 36.9836,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "500": {
+              "retry_after": null,
+              "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The document could not be converted.\",\"status\":500,\"detail\":\"PDF generation failed: The pa"
+            },
+            "504": {
+              "retry_after": null,
+              "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.5\",\"title\":\"The conversion did not finish in time.\",\"status\":504,\"detail\":\"PDF generation failed: The "
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "322",
+            "peak_mib": "2218",
+            "cpu_busy_pct": "98",
+            "oom_kills": "5"
+          },
+          "ready_after": 503
+        }
+      ]
+    },
+    "planned-M": {
+      "size": "M",
+      "cpu": "1000m",
+      "memory": "2048Mi",
+      "MaxConcurrentConversions": 2,
+      "MaxConcurrentRequestsPerCaller": 2,
+      "ready_after_create_s": 0.21,
+      "cells": [
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.04,
+          "requests": 284,
+          "pdfs": 284,
+          "statuses": {
+            "200": 284
+          },
+          "pdfs_per_s": 14.172,
+          "p50_s": 0.1389,
+          "p95_s": 0.1699,
+          "min_s": 0.1024,
+          "max_s": 0.3079,
+          "mean_s": 0.141,
+          "pdf_bytes": 69600,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "233",
+            "peak_mib": "308",
+            "cpu_busy_pct": "82",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.066,
+          "requests": 409,
+          "pdfs": 289,
+          "statuses": {
+            "429": 120,
+            "200": 289
+          },
+          "pdfs_per_s": 14.403,
+          "p50_s": 0.1374,
+          "p95_s": 0.1724,
+          "min_s": 0.0869,
+          "max_s": 0.2261,
+          "mean_s": 0.1388,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-3d923e6d5"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "308",
+            "peak_mib": "328",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 45.581,
+          "requests": 18,
+          "pdfs": 18,
+          "statuses": {
+            "200": 18
+          },
+          "pdfs_per_s": 0.395,
+          "p50_s": 5.0478,
+          "p95_s": 5.392,
+          "min_s": 4.7204,
+          "max_s": 5.392,
+          "mean_s": 5.058,
+          "pdf_bytes": 7186708,
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "371",
+            "peak_mib": "1267",
+            "cpu_busy_pct": "99",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 48.476,
+          "requests": 290,
+          "pdfs": 20,
+          "statuses": {
+            "429": 270,
+            "200": 20
+          },
+          "pdfs_per_s": 0.413,
+          "p50_s": 4.8018,
+          "p95_s": 5.0852,
+          "min_s": 4.6819,
+          "max_s": 5.1618,
+          "mean_s": 4.8464,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-1333dae52"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "328",
+            "peak_mib": "1302",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ],
+      "on_demand": {
+        "cycles": [
+          {
+            "first_invoice": [
+              "200",
+              "3.547288"
+            ],
+            "second_invoice": [
+              "200",
+              "0.101118"
+            ],
+            "state_after": "Running"
+          },
+          {
+            "first_invoice": [
+              "200",
+              "0.871349"
+            ],
+            "second_invoice": [
+              "200",
+              "0.094152"
+            ],
+            "state_after": "Running"
+          },
+          {
+            "first_invoice": [
+              "200",
+              "0.866711"
+            ],
+            "second_invoice": [
+              "200",
+              "0.090703"
+            ],
+            "state_after": "Running"
+          }
+        ],
+        "disable_call": 200,
+        "request_while_disabled": [
+          "403",
+          "0.039542"
+        ],
+        "state_while_disabled": "Stopped",
+        "state_details_while_disabled": {
+          "stoppedReason": "Disabled",
+          "stoppedAt": "2026-10-04T02:39:21.9303207+00:00"
+        },
+        "resume_while_disabled": [
+          409,
+          "{'title': 'SandboxAdminDisabled', 'status': 409, 'detail': \"Sandbox 'c08d296b-f00d-402d-87e9-0fe26f568f1b' is administratively disabled and cannot be resumed\", 'errorCode': 29, 'traceId': '4a9e167bd2c"
+        ],
+        "enable_call": 200
+      }
+    },
+    "recommended-L": {
+      "size": "L",
+      "cpu": "2000m",
+      "memory": "4096Mi",
+      "MaxConcurrentConversions": 2,
+      "MaxConcurrentRequestsPerCaller": 4,
+      "ready_after_create_s": 0.21,
+      "cells": [
+        {
+          "label": "invoice-c4",
+          "concurrency": 4,
+          "duration_s": 20.0,
+          "elapsed_s": 20.14,
+          "requests": 526,
+          "pdfs": 526,
+          "statuses": {
+            "200": 526
+          },
+          "pdfs_per_s": 26.117,
+          "p50_s": 0.1517,
+          "p95_s": 0.178,
+          "min_s": 0.0586,
+          "max_s": 0.279,
+          "mean_s": 0.1528,
+          "pdf_bytes": 69600,
+          "workers_finished": 4,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "315",
+            "peak_mib": "442",
+            "cpu_busy_pct": "82",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.121,
+          "requests": 604,
+          "pdfs": 524,
+          "statuses": {
+            "429": 80,
+            "200": 524
+          },
+          "pdfs_per_s": 26.043,
+          "p50_s": 0.1509,
+          "p95_s": 0.1787,
+          "min_s": 0.0539,
+          "max_s": 0.3912,
+          "mean_s": 0.1532,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-1e53e02c2"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "425",
+            "peak_mib": "450",
+            "cpu_busy_pct": "82",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c4",
+          "concurrency": 4,
+          "duration_s": 45.0,
+          "elapsed_s": 49.512,
+          "requests": 40,
+          "pdfs": 40,
+          "statuses": {
+            "200": 40
+          },
+          "pdfs_per_s": 0.808,
+          "p50_s": 4.9155,
+          "p95_s": 5.1955,
+          "min_s": 2.434,
+          "max_s": 5.278,
+          "mean_s": 4.8184,
+          "pdf_bytes": 7186708,
+          "workers_finished": 4,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "377",
+            "peak_mib": "1396",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 49.426,
+          "requests": 220,
+          "pdfs": 40,
+          "statuses": {
+            "429": 180,
+            "200": 40
+          },
+          "pdfs_per_s": 0.809,
+          "p50_s": 4.9079,
+          "p95_s": 5.2148,
+          "min_s": 2.4638,
+          "max_s": 5.3425,
+          "mean_s": 4.8205,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-19163ee97"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "568",
+            "peak_mib": "1411",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "recommended-M": {
+      "size": "M",
+      "cpu": "1000m",
+      "memory": "2048Mi",
+      "MaxConcurrentConversions": 1,
+      "MaxConcurrentRequestsPerCaller": 2,
+      "ready_after_create_s": 0.22,
+      "cells": [
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.095,
+          "requests": 305,
+          "pdfs": 305,
+          "statuses": {
+            "200": 305
+          },
+          "pdfs_per_s": 15.178,
+          "p50_s": 0.1287,
+          "p95_s": 0.1457,
+          "min_s": 0.0813,
+          "max_s": 0.2849,
+          "mean_s": 0.1314,
+          "pdf_bytes": 69600,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "232",
+            "peak_mib": "289",
+            "cpu_busy_pct": "83",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.113,
+          "requests": 425,
+          "pdfs": 305,
+          "statuses": {
+            "429": 120,
+            "200": 305
+          },
+          "pdfs_per_s": 15.164,
+          "p50_s": 0.1296,
+          "p95_s": 0.1421,
+          "min_s": 0.0669,
+          "max_s": 0.3309,
+          "mean_s": 0.1317,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-7660f9957"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "289",
+            "peak_mib": "312",
+            "cpu_busy_pct": "84",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 48.112,
+          "requests": 22,
+          "pdfs": 22,
+          "statuses": {
+            "200": 22
+          },
+          "pdfs_per_s": 0.457,
+          "p50_s": 4.3329,
+          "p95_s": 4.6301,
+          "min_s": 2.241,
+          "max_s": 4.6468,
+          "mean_s": 4.2773,
+          "pdf_bytes": 7186708,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "312",
+            "peak_mib": "815",
+            "cpu_busy_pct": "97",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 48.816,
+          "requests": 292,
+          "pdfs": 22,
+          "statuses": {
+            "429": 270,
+            "200": 22
+          },
+          "pdfs_per_s": 0.451,
+          "p50_s": 4.4103,
+          "p95_s": 4.6845,
+          "min_s": 2.1721,
+          "max_s": 4.8048,
+          "mean_s": 4.3402,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-a104e60b9"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "373",
+            "peak_mib": "842",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "sweep-S": {
+      "size": "S",
+      "cpu": "500m",
+      "memory": "1024Mi",
+      "MaxConcurrentConversions": 8,
+      "MaxConcurrentRequestsPerCaller": 16,
+      "ready_after_create_s": 0.22,
+      "cells": [
+        {
+          "label": "invoice-c1",
+          "concurrency": 1,
+          "duration_s": 20.0,
+          "elapsed_s": 20.001,
+          "requests": 291,
+          "pdfs": 291,
+          "statuses": {
+            "200": 291
+          },
+          "pdfs_per_s": 14.549,
+          "p50_s": 0.0663,
+          "p95_s": 0.0843,
+          "min_s": 0.0555,
+          "max_s": 0.204,
+          "mean_s": 0.0687,
+          "pdf_bytes": 69600,
+          "workers_finished": 1,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "227",
+            "peak_mib": "282",
+            "cpu_busy_pct": "80",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.064,
+          "requests": 283,
+          "pdfs": 283,
+          "statuses": {
+            "200": 283
+          },
+          "pdfs_per_s": 14.105,
+          "p50_s": 0.1385,
+          "p95_s": 0.182,
+          "min_s": 0.1003,
+          "max_s": 0.2294,
+          "mean_s": 0.1417,
+          "pdf_bytes": 69600,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "282",
+            "peak_mib": "319",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c1",
+          "concurrency": 1,
+          "duration_s": 45.0,
+          "elapsed_s": 46.688,
+          "requests": 16,
+          "pdfs": 16,
+          "statuses": {
+            "200": 16
+          },
+          "pdfs_per_s": 0.343,
+          "p50_s": 2.8942,
+          "p95_s": 3.1886,
+          "min_s": 2.851,
+          "max_s": 3.1886,
+          "mean_s": 2.918,
+          "pdf_bytes": 7186708,
+          "workers_finished": 1,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "319",
+            "peak_mib": "708",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 50.863,
+          "requests": 16,
+          "pdfs": 16,
+          "statuses": {
+            "200": 16
+          },
+          "pdfs_per_s": 0.315,
+          "p50_s": 6.1472,
+          "p95_s": 6.9939,
+          "min_s": 6.0209,
+          "max_s": 6.9939,
+          "mean_s": 6.3574,
+          "pdf_bytes": 7186708,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "352",
+            "peak_mib": "1102",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "planned-S": {
+      "size": "S",
+      "cpu": "500m",
+      "memory": "1024Mi",
+      "MaxConcurrentConversions": 1,
+      "MaxConcurrentRequestsPerCaller": 1,
+      "ready_after_create_s": 0.22,
+      "cells": [
+        {
+          "label": "invoice-c1",
+          "concurrency": 1,
+          "duration_s": 20.0,
+          "elapsed_s": 20.044,
+          "requests": 275,
+          "pdfs": 275,
+          "statuses": {
+            "200": 275
+          },
+          "pdfs_per_s": 13.72,
+          "p50_s": 0.0706,
+          "p95_s": 0.0824,
+          "min_s": 0.062,
+          "max_s": 0.2461,
+          "mean_s": 0.0729,
+          "pdf_bytes": 69600,
+          "workers_finished": 1,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "227",
+            "peak_mib": "284",
+            "cpu_busy_pct": "80",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.043,
+          "requests": 419,
+          "pdfs": 279,
+          "statuses": {
+            "429": 140,
+            "200": 279
+          },
+          "pdfs_per_s": 13.92,
+          "p50_s": 0.0709,
+          "p95_s": 0.0791,
+          "min_s": 0.0641,
+          "max_s": 0.13,
+          "mean_s": 0.0718,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-297517a2c"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "284",
+            "peak_mib": "304",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c1",
+          "concurrency": 1,
+          "duration_s": 45.0,
+          "elapsed_s": 47.787,
+          "requests": 16,
+          "pdfs": 16,
+          "statuses": {
+            "200": 16
+          },
+          "pdfs_per_s": 0.335,
+          "p50_s": 2.9451,
+          "p95_s": 3.1545,
+          "min_s": 2.914,
+          "max_s": 3.1545,
+          "mean_s": 2.9866,
+          "pdf_bytes": 7186708,
+          "workers_finished": 1,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "304",
+            "peak_mib": "708",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 46.863,
+          "requests": 323,
+          "pdfs": 15,
+          "statuses": {
+            "429": 308,
+            "200": 15
+          },
+          "pdfs_per_s": 0.32,
+          "p50_s": 3.1213,
+          "p95_s": 3.246,
+          "min_s": 2.9792,
+          "max_s": 3.246,
+          "mean_s": 3.1243,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-ad91a1ab2"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "351",
+            "peak_mib": "738",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    },
+    "recommended-S": {
+      "size": "S",
+      "cpu": "500m",
+      "memory": "1024Mi",
+      "MaxConcurrentConversions": 1,
+      "MaxConcurrentRequestsPerCaller": 2,
+      "ready_after_create_s": 0.22,
+      "cells": [
+        {
+          "label": "invoice-c2",
+          "concurrency": 2,
+          "duration_s": 20.0,
+          "elapsed_s": 20.124,
+          "requests": 297,
+          "pdfs": 297,
+          "statuses": {
+            "200": 297
+          },
+          "pdfs_per_s": 14.759,
+          "p50_s": 0.1319,
+          "p95_s": 0.1565,
+          "min_s": 0.0704,
+          "max_s": 0.3571,
+          "mean_s": 0.1353,
+          "pdf_bytes": 69600,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "228",
+            "peak_mib": "281",
+            "cpu_busy_pct": "82",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "invoice-c8",
+          "concurrency": 8,
+          "duration_s": 20.0,
+          "elapsed_s": 20.098,
+          "requests": 421,
+          "pdfs": 301,
+          "statuses": {
+            "429": 120,
+            "200": 301
+          },
+          "pdfs_per_s": 14.977,
+          "p50_s": 0.1324,
+          "p95_s": 0.1462,
+          "min_s": 0.0714,
+          "max_s": 0.1794,
+          "mean_s": 0.1334,
+          "pdf_bytes": 69600,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-2232281c9"
+            }
+          },
+          "fixture": "invoice",
+          "vm": {
+            "before_mib": "281",
+            "peak_mib": "309",
+            "cpu_busy_pct": "81",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c2",
+          "concurrency": 2,
+          "duration_s": 45.0,
+          "elapsed_s": 49.772,
+          "requests": 17,
+          "pdfs": 17,
+          "statuses": {
+            "200": 17
+          },
+          "pdfs_per_s": 0.342,
+          "p50_s": 5.8343,
+          "p95_s": 6.1147,
+          "min_s": 2.8794,
+          "max_s": 6.1147,
+          "mean_s": 5.6839,
+          "pdf_bytes": 7186708,
+          "workers_finished": 2,
+          "errors": {},
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "309",
+            "peak_mib": "716",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        },
+        {
+          "label": "long-table-c8",
+          "concurrency": 8,
+          "duration_s": 45.0,
+          "elapsed_s": 49.225,
+          "requests": 287,
+          "pdfs": 17,
+          "statuses": {
+            "429": 270,
+            "200": 17
+          },
+          "pdfs_per_s": 0.345,
+          "p50_s": 5.744,
+          "p95_s": 6.0941,
+          "min_s": 3.011,
+          "max_s": 6.0941,
+          "mean_s": 5.629,
+          "pdf_bytes": 7186708,
+          "workers_finished": 8,
+          "errors": {
+            "429": {
+              "retry_after": "1",
+              "body": "{\"title\":\"Conversion capacity is exhausted.\",\"status\":429,\"detail\":\"The in-flight request limit was reached. Retry later.\",\"kind\":\"Busy\",\"traceId\":\"00-15d906295"
+            }
+          },
+          "fixture": "long-table",
+          "vm": {
+            "before_mib": "377",
+            "peak_mib": "735",
+            "cpu_busy_pct": "98",
+            "oom_kills": "0"
+          },
+          "ready_after": 200
+        }
+      ]
+    }
+  },
+  "load_discarded_first_attempt": {
+    "sweep-L": [
+      {
+        "error": "Error: Network issue \u2014 retry policy expired and the request will no longer be retried\n\nCheck your network connection and try again.\n",
+        "fixture": "long-table",
+        "vm": {
+          "before_mib": "569",
+          "peak_mib": "4163",
+          "cpu_busy_pct": "99",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      }
+    ],
+    "planned-L": [
+      {
+        "label": "invoice-c8",
+        "concurrency": 8,
+        "duration_s": 20.0,
+        "elapsed_s": 20.134,
+        "requests": 571,
+        "pdfs": 491,
+        "statuses": {
+          "429": 80,
+          "200": 491
+        },
+        "pdfs_per_s": 24.386,
+        "p50_s": 0.1582,
+        "p95_s": 0.2162,
+        "min_s": 0.0784,
+        "max_s": 0.4667,
+        "mean_s": 0.1638,
+        "pdf_bytes": 69600,
+        "fixture": "invoice",
+        "vm": {
+          "before_mib": "398",
+          "peak_mib": "481",
+          "cpu_busy_pct": "82",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      },
+      {
+        "label": "long-table-c8",
+        "concurrency": 8,
+        "duration_s": 45.0,
+        "elapsed_s": 46.453,
+        "requests": 216,
+        "pdfs": 36,
+        "statuses": {
+          "429": 180,
+          "200": 36
+        },
+        "pdfs_per_s": 0.775,
+        "p50_s": 5.0733,
+        "p95_s": 6.2062,
+        "min_s": 4.1543,
+        "max_s": 6.3117,
+        "mean_s": 5.1023,
+        "pdf_bytes": 7186708,
+        "fixture": "long-table",
+        "vm": {
+          "before_mib": "515",
+          "peak_mib": "2333",
+          "cpu_busy_pct": "99",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      }
+    ],
+    "sweep-M": [
+      {
+        "error": "Error: Network issue \u2014 retry policy expired and the request will no longer be retried\n\nCheck your network connection and try again.\n",
+        "fixture": "long-table",
+        "vm": {
+          "before_mib": "441",
+          "peak_mib": "2218",
+          "cpu_busy_pct": "99",
+          "oom_kills": "2"
+        },
+        "ready_after": 200
+      },
+      {
+        "error": "Error: Network issue \u2014 retry policy expired and the request will no longer be retried\n\nCheck your network connection and try again.\n",
+        "fixture": "long-table",
+        "vm": {
+          "before_mib": "1369",
+          "peak_mib": "2218",
+          "cpu_busy_pct": "99",
+          "oom_kills": "5"
+        },
+        "ready_after": 503
+      }
+    ],
+    "planned-M": [
+      {
+        "label": "invoice-c2",
+        "concurrency": 2,
+        "duration_s": 20.0,
+        "elapsed_s": 10.843,
+        "requests": 163,
+        "pdfs": 161,
+        "statuses": {
+          "200": 161,
+          "429": 2
+        },
+        "pdfs_per_s": 14.848,
+        "p50_s": 0.1311,
+        "p95_s": 0.1649,
+        "min_s": 0.0911,
+        "max_s": 0.1841,
+        "mean_s": 0.1344,
+        "pdf_bytes": 69600,
+        "fixture": "invoice",
+        "vm": {
+          "before_mib": "232",
+          "peak_mib": "300",
+          "cpu_busy_pct": "45",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      },
+      {
+        "label": "invoice-c8",
+        "concurrency": 8,
+        "duration_s": 20.0,
+        "elapsed_s": 0.002,
+        "requests": 8,
+        "pdfs": 0,
+        "statuses": {
+          "429": 8
+        },
+        "pdfs_per_s": 0.0,
+        "p50_s": null,
+        "p95_s": null,
+        "min_s": null,
+        "max_s": null,
+        "mean_s": null,
+        "pdf_bytes": null,
+        "fixture": "invoice",
+        "vm": {
+          "before_mib": "300",
+          "peak_mib": "300",
+          "cpu_busy_pct": "1",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      },
+      {
+        "label": "long-table-c8",
+        "concurrency": 8,
+        "duration_s": 45.0,
+        "elapsed_s": 45.731,
+        "requests": 288,
+        "pdfs": 18,
+        "statuses": {
+          "429": 270,
+          "200": 18
+        },
+        "pdfs_per_s": 0.394,
+        "p50_s": 5.0547,
+        "p95_s": 5.4621,
+        "min_s": 4.849,
+        "max_s": 5.4621,
+        "mean_s": 5.0773,
+        "pdf_bytes": 7186708,
+        "fixture": "long-table",
+        "vm": {
+          "before_mib": "323",
+          "peak_mib": "1278",
+          "cpu_busy_pct": "99",
+          "oom_kills": "0"
+        },
+        "ready_after": 200
+      }
+    ]
+  },
+  "ondemand": {
+    "size": "M",
+    "ready_after_create_s": 0.3,
+    "warm": [
+      {
+        "mode": "burst",
+        "requests": [
+          {
+            "status": 200,
+            "seconds": 0.41,
+            "bytes": 69600,
+            "pdf": true,
+            "detail": "",
+            "body": "invoice.json"
+          }
+        ],
+        "first_pdf_s": 0.41,
+        "all_done_s": 0.433
+      },
+      {
+        "mode": "burst",
+        "requests": [
+          {
+            "status": 200,
+            "seconds": 2.257,
+            "bytes": 7186708,
+            "pdf": true,
+            "detail": "",
+            "body": "long-table.json"
+          }
+        ],
+        "first_pdf_s": 2.257,
+        "all_done_s": 2.269
+      }
+    ],
+    "on_demand_invoice": [
+      {
+        "stopped_after_s": 14.12,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:34:36.6992397+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.893,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.893,
+          "all_done_s": 0.905
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.197,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.197,
+          "all_done_s": 0.209
+        },
+        "state_after": "Running"
+      },
+      {
+        "stopped_after_s": 10.48,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:34:54.7905971+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 1.501,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 1.501,
+          "all_done_s": 1.513
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.112,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.112,
+          "all_done_s": 0.124
+        },
+        "state_after": "Running"
+      },
+      {
+        "stopped_after_s": 13.86,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:35:16.91129+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.63,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.63,
+          "all_done_s": 0.644
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.092,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.092,
+          "all_done_s": 0.103
+        },
+        "state_after": "Running"
+      }
+    ],
+    "on_demand_long_table": [
+      {
+        "stopped_after_s": 17.13,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:35:41.3034009+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 2.841,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            }
+          ],
+          "first_pdf_s": 2.841,
+          "all_done_s": 2.853
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.089,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.089,
+          "all_done_s": 0.101
+        },
+        "state_after": "Running"
+      },
+      {
+        "stopped_after_s": 11.92,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:36:01.9483614+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 4.044,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            }
+          ],
+          "first_pdf_s": 4.044,
+          "all_done_s": 4.056
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.11,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.11,
+          "all_done_s": 0.121
+        },
+        "state_after": "Running"
+      }
+    ],
+    "on_demand_burst_4_invoices_2_long_tables": [
+      {
+        "stopped_after_s": 11.64,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:36:24.4656291+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 2.348,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 2.221,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 2.327,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 2.45,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 7.219,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            },
+            {
+              "status": 200,
+              "seconds": 7.227,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            }
+          ],
+          "first_pdf_s": 2.221,
+          "all_done_s": 7.289
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.107,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.107,
+          "all_done_s": 0.119
+        },
+        "state_after": "Running"
+      },
+      {
+        "stopped_after_s": 11.57,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:36:50.9872971+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 4.165,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 3.99,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 4.075,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 3.944,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            },
+            {
+              "status": 200,
+              "seconds": 10.684,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            },
+            {
+              "status": 200,
+              "seconds": 10.806,
+              "bytes": 7186708,
+              "pdf": true,
+              "detail": "",
+              "body": "long-table.json"
+            }
+          ],
+          "first_pdf_s": 3.944,
+          "all_done_s": 10.875
+        },
+        "next_invoice": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.112,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.112,
+          "all_done_s": 0.123
+        },
+        "state_after": "Running"
+      }
+    ],
+    "manual_resume": [
+      {
+        "stopped_after_s": 10.77,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:37:20.3820042+00:00"
+        },
+        "manual": {
+          "mode": "manual",
+          "first": {
+            "status": 403,
+            "seconds": 0.048,
+            "bytes": 34,
+            "pdf": false,
+            "detail": "{\"error\":\"Sandbox is not running\"}"
+          },
+          "resume_status": 200,
+          "resume_call_s": 0.72,
+          "statuses_after_resume": [
+            200
+          ],
+          "first_pdf_s": 1.861
+        }
+      },
+      {
+        "stopped_after_s": 15.63,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:37:43.6564523+00:00"
+        },
+        "manual": {
+          "mode": "manual",
+          "first": {
+            "status": 403,
+            "seconds": 0.05,
+            "bytes": 34,
+            "pdf": false,
+            "detail": "{\"error\":\"Sandbox is not running\"}"
+          },
+          "resume_status": 200,
+          "resume_call_s": 1.456,
+          "statuses_after_resume": [
+            200
+          ],
+          "first_pdf_s": 2.895
+        }
+      },
+      {
+        "stopped_after_s": 14.69,
+        "state_details": {
+          "stoppedReason": "UserStopped",
+          "stoppedAt": "2026-10-04T02:38:07.0111736+00:00"
+        },
+        "manual": {
+          "mode": "manual",
+          "first": {
+            "status": 403,
+            "seconds": 0.052,
+            "bytes": 34,
+            "pdf": false,
+            "detail": "{\"error\":\"Sandbox is not running\"}"
+          },
+          "resume_status": 200,
+          "resume_call_s": 0.758,
+          "statuses_after_resume": [
+            200
+          ],
+          "first_pdf_s": 1.556
+        }
+      }
+    ],
+    "auto_suspend": [
+      {
+        "request_before": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.131,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.131,
+          "all_done_s": 0.142
+        },
+        "stopped_observed_after_s": 126.5,
+        "state_details": {
+          "stoppedReason": "Idle",
+          "stoppedAt": "2026-10-04T02:40:22.254933+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 3.252,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 3.252,
+          "all_done_s": 3.264
+        }
+      },
+      {
+        "request_before": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.099,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.099,
+          "all_done_s": 0.11
+        },
+        "stopped_observed_after_s": 141.9,
+        "state_details": {
+          "stoppedReason": "Idle",
+          "stoppedAt": "2026-10-04T02:42:54.8791272+00:00"
+        },
+        "wake": {
+          "mode": "burst",
+          "requests": [
+            {
+              "status": 200,
+              "seconds": 0.988,
+              "bytes": 69600,
+              "pdf": true,
+              "detail": "",
+              "body": "invoice.json"
+            }
+          ],
+          "first_pdf_s": 0.988,
+          "all_done_s": 1.0
+        }
+      }
+    ]
+  },
+  "cleanup": {
+    "role_assignment": "deleted",
+    "role_definition": "deleted",
+    "user_assigned_identity": "deleted",
+    "tester_sandbox_group_delete_s": 31,
+    "renderer_sandbox_group_delete_s": 601,
+    "resource_group": "deleted; az group exists false at 03:16:21 UTC"
+  }
+}
