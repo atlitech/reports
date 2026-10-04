@@ -194,6 +194,37 @@ public class SandboxesClientRequestTests
 
     await Assert.That(sandbox!.StoppedReason).IsNull();
     await Assert.That(sandbox.IsDisabled).IsFalse();
+    await Assert.That(sandbox.StoppedAt).IsNull();
+  }
+
+  [Test]
+  public async Task Get_reads_when_a_sandbox_stopped_and_leaves_an_unreadable_time_unknown()
+  {
+    static string Stopped(string stateDetails) =>
+      $$"""
+        { "id": "{{Id}}", "state": "Stopped", "stateDetails": {{stateDetails}}, "ports": [] }
+        """;
+    using TestSandboxes sandboxes = new(
+      FakeDataPlane.Ok(
+        Stopped("""{ "stoppedReason": "Idle", "stoppedAt": "2026-10-04T03:58:04.6124235+00:00" }""")
+      ),
+      FakeDataPlane.Ok(Stopped("""{ "stoppedReason": "Idle", "stoppedAt": "a while ago" }""")),
+      FakeDataPlane.Ok(Stopped("""{ "stoppedReason": "Idle" }"""))
+    );
+
+    var sandbox = await sandboxes.Client.GetAsync(Id, TestToken);
+    var unreadable = await sandboxes.Client.GetAsync(Id, TestToken);
+    var absent = await sandboxes.Client.GetAsync(Id, TestToken);
+
+    await Assert
+      .That(sandbox!.StoppedAt)
+      .IsEqualTo(new DateTimeOffset(2026, 10, 4, 3, 58, 4, TimeSpan.Zero).AddTicks(6124235));
+    // The rest of the sandbox is read all the same.
+    await Assert.That(unreadable!.StoppedAt).IsNull();
+    await Assert.That(unreadable.State).IsEqualTo(SandboxStates.Stopped);
+    await Assert.That(unreadable.StoppedReason).IsEqualTo(SandboxStoppedReasons.Idle);
+    await Assert.That(absent!.StoppedAt).IsNull();
+    await Assert.That(absent.StoppedReason).IsEqualTo(SandboxStoppedReasons.Idle);
   }
 
   [Test]
