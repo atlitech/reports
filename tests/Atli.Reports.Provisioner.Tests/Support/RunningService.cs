@@ -65,8 +65,10 @@ internal sealed class RunningService : IAsyncDisposable
       new ManagedTenantPrefix { Prefix = "myapp-", MaxTenants = 10 },
       new ManagedTenantPrefix { Prefix = "big-", Size = "L" },
     ]);
+    // The gateway's address, as serve requires.
+    options.AllowedSourceCidrs.Add("203.0.113.7/32");
     configure?.Invoke(options.Service);
-    options.Service.Validate(requireApiKeys: true);
+    options.ValidateServe();
 
     LogCapture logs = new();
     var app = ProvisioningService.Build(

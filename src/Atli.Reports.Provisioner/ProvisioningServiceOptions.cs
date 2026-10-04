@@ -12,6 +12,12 @@ internal sealed class ProvisioningServiceOptions
 {
   public const string SectionName = ProvisionerOptions.SectionName + ":Service";
 
+  /// <summary>
+  /// The tenant ID the gateway's readiness looks up, which no tenant may have; no managed prefix
+  /// may own it.
+  /// </summary>
+  public const string ReservedTenantId = "readiness-probe";
+
   /// <summary>The longest <see cref="RetireAfterIdle"/>.</summary>
   public static readonly TimeSpan MaxRetireAfterIdle = TimeSpan.FromDays(365);
 
@@ -67,6 +73,14 @@ internal sealed class ProvisioningServiceOptions
           $"{SectionName}:TenantPrefixes:{i}:Prefix is '{prefix.Prefix}': use 2 to "
             + $"{TenantPrefix.MaxLength} lowercase letters, digits, and hyphens, starting with a "
             + "letter or digit and ending with a hyphen."
+        );
+      }
+
+      if (TenantPrefix.Owns(prefix.Prefix, ReservedTenantId))
+      {
+        throw new InvalidOperationException(
+          $"{SectionName}:TenantPrefixes:{i}:Prefix '{prefix.Prefix}' owns the tenant ID "
+            + $"'{ReservedTenantId}', which the gateway's readiness reserves."
         );
       }
 

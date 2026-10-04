@@ -260,6 +260,10 @@ public class ServiceTests
       .That(await response.Content.ReadAsStringAsync(TestToken))
       .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
     await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    // Its port admits only Provisioner:AllowedSourceCidrs, which serve requires.
+    await Assert
+      .That(provisioning.Journal.Matching("port"))
+      .IsEquivalentTo(["port sandbox-1 8080 anonymous OnDemand from 203.0.113.7/32"]);
     var spec = provisioning.Sandboxes.Created.Single();
     await Assert.That(spec.DiskImageId).IsEqualTo("disk-1");
     // The prefix names no size, so Provisioner:Size.

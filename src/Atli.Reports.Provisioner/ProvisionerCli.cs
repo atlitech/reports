@@ -65,9 +65,13 @@ internal static class ProvisionerCli
         );
       }
 
-      if (command is ServeCommand or RetireCommand or RolloutCommand { RetireStopped: true })
+      if (command is ServeCommand)
       {
-        options.Service.Validate(requireApiKeys: command is ServeCommand);
+        options.ValidateServe();
+      }
+      else if (command is RetireCommand or RolloutCommand { RetireStopped: true })
+      {
+        options.Service.Validate(requireApiKeys: false);
       }
 
       services = createServices(options);

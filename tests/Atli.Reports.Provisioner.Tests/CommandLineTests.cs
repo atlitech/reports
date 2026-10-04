@@ -277,6 +277,12 @@ public class CommandLineTests
     "0",
     "Provisioner:Service:MaxCreatesPerMinute must be between 1 and 10000."
   )]
+  [Arguments(
+    "Provisioner:Service:TenantPrefixes:1:Prefix",
+    "readiness-",
+    "Provisioner:Service:TenantPrefixes:1:Prefix 'readiness-' owns the tenant ID "
+      + "'readiness-probe', which the gateway's readiness reserves."
+  )]
   public async Task Wrong_service_configuration_is_a_configuration_error(
     string key,
     string value,
@@ -294,6 +300,35 @@ public class CommandLineTests
 
     await Assert.That(exitCode).IsEqualTo(2);
     await Assert.That(error).IsEqualTo($"error: configuration: {message}\n");
+    await Assert.That(output).IsEmpty();
+    await Assert.That(provisioning.Journal.Entries).IsEmpty();
+  }
+
+  [Test]
+  public async Task Serve_needs_the_source_ranges_its_renderers_admit()
+  {
+    using Provisioning provisioning = new();
+    var gateway = RendererCredential.Generate();
+
+    var (exitCode, output, error) = await RunAsync(
+      provisioning,
+      new(Configured)
+      {
+        ["Provisioner:Service:TenantPrefixes:0:Prefix"] = "app-",
+        ["Provisioner:Service:ApiKeys:0:Id"] = gateway.KeyId,
+        ["Provisioner:Service:ApiKeys:0:Hash"] = gateway.Verifier,
+      },
+      "serve"
+    );
+
+    await Assert.That(exitCode).IsEqualTo(2);
+    await Assert
+      .That(error)
+      .IsEqualTo(
+        "error: configuration: Provisioner:AllowedSourceCidrs is empty: serve creates renderers on "
+          + "demand, whose ports must admit only the gateway's outbound addresses and the "
+          + "service's own, such as [\"203.0.113.7/32\"].\n"
+      );
     await Assert.That(output).IsEmpty();
     await Assert.That(provisioning.Journal.Entries).IsEmpty();
   }
