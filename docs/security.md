@@ -221,6 +221,7 @@ the profile lets processes hold belong to an unprivileged range of host user IDs
 | Aspire, local runs | `AddReportsServer` passes the profile to Docker or Podman |
 | Aspire deployment targets | Configure the profile on the target, or opt out explicitly; see [the Aspire guide](aspire.md#deploy) |
 | Azure Container Apps | No seccomp setting; [the template](../deploy/azure/reports.bicep) opts out explicitly. Whether its runtime permits user namespaces is unverified. |
+| Azure Container Apps Sandboxes | Nothing to configure: each sandbox is a microVM with its own kernel, no platform seccomp filter, and unprivileged user namespaces allowed. The sandbox ran there in [one recorded run](../benchmarks/results/2026-10-03-5b667b4-azure-sandboxes-amd64.md). |
 | gVisor | On arm64, Chromium's own seccomp filter crashed under gVisor in a probe of the worker image, and the browser then hung instead of exiting at startup, so the engine does not report it as a sandbox failure. The [experiment](isolated-workers.md) kept the worker's browser unsandboxed inside the gVisor boundary. The server image under gVisor was not tested; on arm64, opt out there too. amd64 was not tested. |
 
 **AppArmor.** Ubuntu 23.10 and later (24.04 included) also restrict unprivileged user namespaces
@@ -343,10 +344,11 @@ a read-only filesystem, resource limits, and no application secrets, service ide
 service-account token. The image runs Chromium's sandbox by default and fails closed where the
 platform does not allow it, so renderers need the seccomp profile in
 [`deploy/seccomp`](../deploy/seccomp/README.md) and nodes that allow unprivileged user namespaces
-(see [Chromium's sandbox](#chromiums-sandbox)). Azure Container Apps cannot apply that profile,
-and the [Container Apps template](../deploy/azure/reports.bicep) opts out of the sandbox, so a
-renderer there does not meet this requirement until Container Apps is shown to permit the sandbox
-without the profile. A renderer accepts only the API, which presents a credential unique to that
+(see [Chromium's sandbox](#chromiums-sandbox)). Azure Container Apps apps cannot apply that
+profile, and the [Container Apps template](../deploy/azure/reports.bicep) opts out of the sandbox,
+so a renderer there does not meet this requirement until Container Apps is shown to permit the
+sandbox without the profile. Azure Container Apps Sandboxes, microVMs with their own kernel, run it
+without one; see [the hosted renderer design](hosted-renderers.md#azure-container-apps-sandboxes). A renderer accepts only the API, which presents a credential unique to that
 renderer so that a compromised renderer cannot replay it against another. The API treats renderer
 responses as untrusted. Renderers run on a node pool separate from the API. The API derives the
 renderer from the authenticated product tenant, never from a caller-provided header.

@@ -31,6 +31,14 @@ startup and teardown from rendering, compares the `vfs` and `overlay2` storage d
 tagged PDFs, and tests Chromium's own sandbox under runc and gVisor. Its probes were ad hoc and
 exploratory; the worker experiment records how they change the design.
 
+The [Azure Container Apps Sandboxes run](results/2026-10-03-5b667b4-azure-sandboxes-amd64.md)
+runs the server image as a per-customer renderer in Azure's microVM sandboxes: Chromium's sandbox,
+warm and cold conversion times, suspend and resume, snapshots, egress, and smaller sizes.
+[`azure-sandboxes/run.py`](azure-sandboxes/run.py) reproduces it in a resource group of its own,
+which it deletes afterwards; it needs an Azure subscription and the `aca` CLI. The
+[hosted renderer design](../docs/hosted-renderers.md#azure-container-apps-sandboxes) records what it
+changes.
+
 ## What runs
 
 | Suite | Project | Measures |

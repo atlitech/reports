@@ -1,0 +1,313 @@
+{
+  "commit": "5b667b4",
+  "dirty": true,
+  "location": "eastus2",
+  "aca_cli": "aca 1.0.0-preview.4",
+  "started_utc": "2026-10-03T23:27:58Z",
+  "samples": 5,
+  "role_propagation_s": 805.0,
+  "disk_build_s": 371.8,
+  "renderer": {
+    "create_call_s": 2.84,
+    "port_call_s": 1.69,
+    "ready_after_create_s": 5.23
+  },
+  "rest_get_s": 0.4439,
+  "cli_get_s": 3.2054,
+  "laptop_rtt_health_s": 0.2012,
+  "anonymous_convert_status": 401,
+  "vm": [
+    "6.12.8+",
+    "x86_64",
+    "2",
+    "INTEL(R) XEON(R) PLATINUM 8573C",
+    "MemTotal:        4263288 kB",
+    "1654",
+    "Seccomp:\t0"
+  ],
+  "chromium_sandbox": {
+    "exit": 0,
+    "output": "browser_userns=user:[4026531837] self_userns=user:[4026531837] separate=2"
+  },
+  "renderer_process_seccomp": [
+    "Seccomp:0",
+    "Seccomp:2"
+  ],
+  "seccomp_probe": {
+    "exit": 1,
+    "lines": [
+      "  FAIL clone3 (must stay ENOSYS)                  errno 22 (expected errno 38)",
+      "  ok   clone without namespaces                   allowed",
+      "  ok   clone user                                 allowed",
+      "  ok   clone user+pid+net (Chromium's zygote)     allowed",
+      "  FAIL clone user+mount                           allowed (expected errno 1)",
+      "  FAIL clone user+cgroup                          allowed (expected errno 1)",
+      "  FAIL clone user+uts                             allowed (expected errno 1)",
+      "  FAIL clone user+ipc                             allowed (expected errno 1)",
+      "  ok   unshare user                               allowed",
+      "  FAIL unshare user+mount                         allowed (expected errno 1)",
+      "  FAIL unshare user+net                           allowed (expected errno 1)",
+      "  FAIL unshare user+pid                           allowed (expected errno 1)",
+      "  ok   chroot in a user namespace                 allowed"
+    ]
+  },
+  "in_vm_L": {
+    "invoice": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.0554,
+      "median_s": 0.0377,
+      "min_s": 0.0339,
+      "max_s": 0.0414,
+      "samples": 5,
+      "bytes": 69600
+    },
+    "chart": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.0722,
+      "median_s": 0.0665,
+      "min_s": 0.0627,
+      "max_s": 0.0694,
+      "samples": 5,
+      "bytes": 62335
+    },
+    "long-table": {
+      "statuses": [
+        200
+      ],
+      "first_s": 2.182,
+      "median_s": 2.0971,
+      "min_s": 2.0037,
+      "max_s": 2.1431,
+      "samples": 5,
+      "bytes": 7186708
+    }
+  },
+  "memory_L_mib": {
+    "before": "379",
+    "peak": "854",
+    "total": "4163",
+    "result": "200_2.1346_7186708_pdf"
+  },
+  "via_proxy_L": {
+    "invoice": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.1083,
+      "median_s": 0.0578,
+      "min_s": 0.0569,
+      "max_s": 0.0712,
+      "samples": 5,
+      "bytes": 69600
+    },
+    "chart": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.0884,
+      "median_s": 0.0799,
+      "min_s": 0.0758,
+      "max_s": 0.0852,
+      "samples": 5,
+      "bytes": 62335
+    },
+    "long-table": {
+      "statuses": [
+        200
+      ],
+      "first_s": 2.0571,
+      "median_s": 2.0913,
+      "min_s": 2.0236,
+      "max_s": 2.4427,
+      "samples": 5,
+      "bytes": 7186708
+    },
+    "health": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.015,
+      "median_s": 0.0158,
+      "min_s": 0.0152,
+      "max_s": 0.0303,
+      "samples": 5,
+      "bytes": 0
+    }
+  },
+  "cold_starts": [
+    {
+      "create_call_s": 1.23,
+      "port_call_s": 0.2,
+      "ready_after_create_s": 1.87,
+      "first_invoice_status": 200,
+      "first_invoice_from_laptop_s": 0.488
+    },
+    {
+      "create_call_s": 0.87,
+      "port_call_s": 1.7,
+      "ready_after_create_s": 2.88,
+      "first_invoice_status": 200,
+      "first_invoice_from_laptop_s": 0.537
+    },
+    {
+      "create_call_s": 0.87,
+      "port_call_s": 0.21,
+      "ready_after_create_s": 1.4,
+      "first_invoice_status": 200,
+      "first_invoice_from_laptop_s": 0.403
+    }
+  ],
+  "suspend_resume": [
+    {
+      "stop_call_s": 6.6,
+      "stopped_after_s": 6.77,
+      "request_while_stopped": "403 {\"error\":\"Sandbox is not running\"}",
+      "resume_call_s": 1.24,
+      "statuses_until_pdf": [
+        200
+      ],
+      "resume_to_first_pdf_from_laptop_s": 1.744,
+      "second_invoice_from_laptop_s": 0.275
+    },
+    {
+      "stop_call_s": 14.61,
+      "stopped_after_s": 14.78,
+      "resume_call_s": 1.48,
+      "statuses_until_pdf": [
+        200
+      ],
+      "resume_to_first_pdf_from_laptop_s": 1.86,
+      "second_invoice_from_laptop_s": 0.286
+    },
+    {
+      "stop_call_s": 13.8,
+      "stopped_after_s": 14.0,
+      "resume_call_s": 1.24,
+      "statuses_until_pdf": [
+        200
+      ],
+      "resume_to_first_pdf_from_laptop_s": 1.749,
+      "second_invoice_from_laptop_s": 0.29
+    }
+  ],
+  "snapshot": {
+    "snapshot_s": 8.92,
+    "size_mb": 201,
+    "vmm": "cloudhypervisor",
+    "clone_create_s": [
+      3.62,
+      11.32
+    ],
+    "same_browser_layout": true,
+    "same_boot_id": false,
+    "same_urandom": false,
+    "same_api_key_id": true
+  },
+  "network": {
+    "http_example_com": "403",
+    "tcp_1_1_1_1_443": "open",
+    "tcp_8_8_8_8_53": "blocked",
+    "tcp_imds_169_254_169_254_80": "blocked",
+    "dns_resolves_example_com": "yes",
+    "identity_endpoint_status": "401",
+    "identity_token_issued": "no",
+    "identity_error": "unauthorized_client"
+  },
+  "egress_decisions_denied_hosts": [],
+  "auto_suspend_observed_after_s": 92.8,
+  "in_vm_M": {
+    "invoice": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.2854,
+      "median_s": 0.061,
+      "min_s": 0.0598,
+      "max_s": 0.0727,
+      "samples": 5,
+      "bytes": 69600
+    },
+    "chart": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.0739,
+      "median_s": 0.0705,
+      "min_s": 0.0667,
+      "max_s": 0.0761,
+      "samples": 5,
+      "bytes": 62335
+    },
+    "long-table": {
+      "statuses": [
+        200
+      ],
+      "first_s": 2.1745,
+      "median_s": 2.0517,
+      "min_s": 2.0347,
+      "max_s": 2.0973,
+      "samples": 5,
+      "bytes": 7186708
+    }
+  },
+  "memory_M_mib": {
+    "before": "268",
+    "peak": "759",
+    "total": "2218",
+    "result": "200_2.3042_7186708_pdf"
+  },
+  "ready_after_create_M_s": 3.77,
+  "in_vm_S": {
+    "invoice": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.1894,
+      "median_s": 0.065,
+      "min_s": 0.0625,
+      "max_s": 0.0745,
+      "samples": 5,
+      "bytes": 69600
+    },
+    "chart": {
+      "statuses": [
+        200
+      ],
+      "first_s": 0.0813,
+      "median_s": 0.076,
+      "min_s": 0.0673,
+      "max_s": 0.0805,
+      "samples": 5,
+      "bytes": 62335
+    },
+    "long-table": {
+      "statuses": [
+        200
+      ],
+      "first_s": 3.1808,
+      "median_s": 2.8791,
+      "min_s": 2.8348,
+      "max_s": 3.0341,
+      "samples": 5,
+      "bytes": 7186708
+    }
+  },
+  "memory_S_mib": {
+    "before": "305",
+    "peak": "660",
+    "total": "1213",
+    "result": "200_2.9924_7186708_pdf"
+  },
+  "ready_after_create_S_s": 1.37,
+  "cost_per_running_hour_usd": {
+    "L": 0.216,
+    "M": 0.108,
+    "S": 0.054
+  },
+  "snapshot_storage_usd_month": 0.0402,
+  "finished_utc": "2026-10-04T00:09:43Z"
+}
