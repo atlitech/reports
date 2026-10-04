@@ -19,8 +19,10 @@ namespace Atli.Reports.Server.Gateway;
 /// </para>
 /// <para>
 /// A record the provisioning service has just written is read with <see cref="ReloadAsync"/>, past
-/// the cached missing answer and any lookup that may have started before the write. A lookup that
-/// finishes after a later one never replaces the later one's answer.
+/// the cached missing answer and any lookup that may have started before the write. A record it has
+/// just deleted is forgotten with <see cref="Evict(string)"/>. A lookup that finishes after a later
+/// one, or after an eviction, never replaces the later one's answer: it may have read the store
+/// before the write or the deletion.
 /// </para>
 /// </remarks>
 internal sealed class RendererDirectory(
@@ -60,10 +62,7 @@ internal sealed class RendererDirectory(
   /// </summary>
   public async Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken)
   {
-    if (
-      _entries.TryGetValue(tenantId, out var cached)
-      && timeProvider.GetTimestamp() < cached.ExpiresAt
-    )
+    if (_entries.TryGetValue(tenantId, out var cached) && IsFresh(cached))
     {
       return cached.Record;
     }
@@ -77,6 +76,14 @@ internal sealed class RendererDirectory(
   }
 
   /// <summary>
+  /// Whether looking the tenant up now would read nothing from the store: an answer, a record or
+  /// none, is cached, or a lookup is in flight for it to join.
+  /// </summary>
+  public bool HasAnswer(string tenantId) =>
+    (_entries.TryGetValue(tenantId, out var cached) && IsFresh(cached))
+    || _loads.ContainsKey(tenantId);
+
+  /// <summary>
   /// Reads the tenant's record from the store again, past its cached answer and any lookup already
   /// in flight, which may have started before the record was written; lookups from now on share
   /// this one. Throws what the store throws.
@@ -86,7 +93,7 @@ internal sealed class RendererDirectory(
     CancellationToken cancellationToken
   )
   {
-    _entries.TryRemove(tenantId, out _);
+    Evict(tenantId);
     var load = NewLoad(tenantId);
     _loads[tenantId] = load;
     return await load.Value.WaitAsync(cancellationToken);
@@ -106,9 +113,29 @@ internal sealed class RendererDirectory(
 
   /// <summary>
   /// Forgets the tenant's cached answer, whatever it is, so the next lookup reads the store: after
-  /// the tenant's renderer was deleted.
+  /// the tenant's renderer was deleted. Every lookup already started may have read the store before
+  /// the deletion, so none of them is cached when it finishes, and lookups from now on start their
+  /// own rather than join one of them.
   /// </summary>
-  public void Evict(string tenantId) => _entries.TryRemove(tenantId, out _);
+  public void Evict(string tenantId)
+  {
+    // Numbered after every lookup started so far, so only a later one replaces it, and never taken
+    // as an answer. It outlasts the store calls it must outrank, which StoreTimeout bounds.
+    var evicted = new Entry(
+      null,
+      timeProvider.GetTimestamp()
+        + (long)(StoreTimeout.TotalSeconds * timeProvider.TimestampFrequency),
+      Interlocked.Increment(ref _lookups),
+      Evicted: true
+    );
+    _entries.AddOrUpdate(
+      tenantId,
+      static (_, entry) => entry,
+      static (_, cached, entry) => cached.Lookup > entry.Lookup ? cached : entry,
+      evicted
+    );
+    _loads.TryRemove(tenantId, out _);
+  }
 
   /// <summary>A store lookup for the tenant, not yet started; it runs on its first use.</summary>
   private Lazy<Task<RendererRecord?>> NewLoad(string tenantId)
@@ -141,7 +168,8 @@ internal sealed class RendererDirectory(
         var expiresAt =
           timeProvider.GetTimestamp()
           + (long)(lifetime.TotalSeconds * timeProvider.TimestampFrequency);
-        // A lookup that started earlier but finished later read an older store.
+        // A lookup that started earlier but finished later, or that an eviction overtook, read an
+        // older store.
         _entries.AddOrUpdate(
           tenantId,
           static (_, entry) => entry,
@@ -181,7 +209,23 @@ internal sealed class RendererDirectory(
     }
   }
 
-  private sealed record Entry(RendererRecord? Record, long ExpiresAt, long Lookup);
+  /// <summary>Whether <paramref name="entry"/> answers a lookup now.</summary>
+  private bool IsFresh(Entry entry) =>
+    !entry.Evicted && timeProvider.GetTimestamp() < entry.ExpiresAt;
+
+  /// <param name="Record">The tenant's record, or <see langword="null"/> when it has none.</param>
+  /// <param name="ExpiresAt">When the entry stops answering and may be cleared out.</param>
+  /// <param name="Lookup">The number of the lookup that read it, or of the eviction.</param>
+  /// <param name="Evicted">
+  /// Whether this marks an eviction rather than an answer: it answers no lookup, and only keeps
+  /// earlier lookups from being cached.
+  /// </param>
+  private sealed record Entry(
+    RendererRecord? Record,
+    long ExpiresAt,
+    long Lookup,
+    bool Evicted = false
+  );
 }
 
 /// <summary>

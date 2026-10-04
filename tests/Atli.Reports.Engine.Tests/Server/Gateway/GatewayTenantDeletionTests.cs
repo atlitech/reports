@@ -8,6 +8,7 @@ using Atli.Reports.Server;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -76,6 +77,83 @@ public class GatewayTenantDeletionTests
     await AssertPdfAsync(await under.ConvertAsync(Tenant), "%PDF-1.7 second");
     await Assert.That(service.Ensures).IsEqualTo(1);
     await Assert.That(first.Requests).HasSingleItem();
+  }
+
+  [Test]
+  public async Task A_lookup_that_read_the_store_before_a_deletion_does_not_bring_the_record_back()
+  {
+    await using var first = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 first")
+    );
+    await using var second = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 second")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, second)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, first);
+    await using var under = await StartAsync(service);
+    // A request reads the tenant's record and is held before it answers.
+    HeldLookup held = new(service.Store, Tenant);
+    var stale = under.LookUpAsync(Tenant);
+    await held.Read.WaitAsync(TestToken);
+
+    using var deleted = await under.DeleteAsync(Tenant);
+    // The lookup finishes after the deletion, with the record it read before it.
+    held.Release();
+    using var rejected = await stale;
+
+    await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert.That(rejected.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    // The deleted renderer's record is not cached: the next conversion creates a new renderer.
+    await AssertPdfAsync(await under.ConvertAsync(Tenant), "%PDF-1.7 second");
+    await Assert.That(service.Ensures).IsEqualTo(1);
+    await Assert.That(first.Requests).IsEmpty();
+  }
+
+  [Test]
+  public async Task Lookups_after_a_deletion_do_not_join_one_that_started_before_it()
+  {
+    await using var first = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 first")
+    );
+    await using var second = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 second")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, second)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, first);
+    await using var under = await StartAsync(service);
+    HeldLookup held = new(service.Store, Tenant);
+    var stale = under.LookUpAsync(Tenant);
+    await held.Read.WaitAsync(TestToken);
+
+    HttpStatusCode deleted;
+    try
+    {
+      using (var response = await under.DeleteAsync(Tenant))
+      {
+        deleted = response.StatusCode;
+      }
+
+      // While the lookup from before the deletion is still held, a conversion reads the store
+      // itself and creates the tenant's new renderer.
+      await AssertPdfAsync(
+        await under.ConvertAsync(Tenant).WaitAsync(TestEngine.GenerousTimeout, TestToken),
+        "%PDF-1.7 second"
+      );
+    }
+    finally
+    {
+      held.Release();
+    }
+
+    using var rejected = await stale;
+    await Assert.That(deleted).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert.That(rejected.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    await Assert.That(service.Ensures).IsEqualTo(1);
+    await Assert.That(first.Requests).IsEmpty();
   }
 
   [Test]
@@ -220,6 +298,10 @@ public class GatewayTenantDeletionTests
     "--ReportsServer:Authentication:Jwt:TenantsPermission=reports.convert",
     "TenantsPermission"
   )]
+  [Arguments(
+    "--ReportsServer:Authentication:Jwt:TenantsPermission=reports.diagnostics",
+    "TenantsPermission must differ from Jwt:RequiredPermission and from reports.diagnostics"
+  )]
   public async Task An_invalid_jwt_tenants_permission_fails_at_startup(string setting, string named)
   {
     var exception = await Assert
@@ -260,6 +342,46 @@ public class GatewayTenantDeletionTests
     await Assert.That(refused.Detail).IsEqualTo("The tenant's renderer is unavailable.");
     await Assert.That(under.Logs.WithEventId(67).Single()["Operation"]).IsEqualTo("delete");
     await Assert.That(under.Logs.WithEventId(66).Count).IsEqualTo(2);
+    await Assert.That(under.Logs.WithEventId(68)).IsEmpty();
+  }
+
+  [Test]
+  public async Task Deleting_a_tenant_whose_renderer_the_operator_disabled_is_a_conflict()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(_ =>
+      throw new InvalidOperationException("Never created.")
+    );
+    service.Store.Records[Tenant] = Record(Tenant, renderer);
+    service.OnDelete = (context, _) =>
+      FakeProvisioningService.WriteProblemAsync(context, 409, "Disabled");
+    await using var under = await StartAsync(service);
+    // The record is cached from here.
+    await AssertPdfAsync(await under.ConvertAsync(Tenant), "%PDF-1.7");
+    var gets = service.Store.Gets;
+
+    var problem = await ReadProblemAsync(await under.DeleteAsync(Tenant));
+    using var again = await under.ConvertAsync(Tenant);
+
+    await Assert.That(problem.Status).IsEqualTo(409);
+    await Assert.That(problem.Kind).IsEqualTo("InvalidRequest");
+    await Assert.That(problem.Title).IsEqualTo("The tenant's renderer could not be deleted.");
+    await Assert
+      .That(problem.Detail)
+      .IsEqualTo(
+        "The operator disabled the tenant's renderer. The operator must enable or delete it before the tenant can be deleted."
+      );
+    await Assert.That(problem.RetryAfter).IsNull();
+    // Nothing was evicted: the next conversion uses the cached record.
+    await Assert.That(again.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(service.Store.Gets).IsEqualTo(gets);
+    await Assert.That(renderer.Requests.Count).IsEqualTo(2);
+    var refused = under.Logs.WithEventId(66).Single();
+    await Assert.That(refused.Level).IsEqualTo(LogLevel.Warning);
+    await Assert.That(refused["Operation"]).IsEqualTo("delete");
+    await Assert.That(refused["Kind"]).IsEqualTo("Disabled");
     await Assert.That(under.Logs.WithEventId(68)).IsEmpty();
   }
 
@@ -328,6 +450,88 @@ public class GatewayTenantDeletionTests
   }
 
   [Test]
+  public async Task Each_callers_deletions_in_flight_are_limited()
+  {
+    const string BetaKey = "beta.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    var inside = 0;
+    TaskCompletionSource limitReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var service = await FakeProvisioningService.StartAsync(_ =>
+      throw new InvalidOperationException("Never created.")
+    );
+    service.OnDelete = async (context, tenant) =>
+    {
+      if (Interlocked.Increment(ref inside) == 2)
+      {
+        limitReached.TrySetResult();
+      }
+
+      if (tenant.StartsWith("bill-held-", StringComparison.Ordinal))
+      {
+        await release.Task.WaitAsync(context.RequestAborted);
+      }
+
+      await service.DeleteAsync(context, tenant);
+    };
+    await using var under = await StartAsync(
+      service,
+      [
+        "--ReportsServer:Authentication:Mode=ApiKey",
+        .. KeySettings(0, "manager", ManagerKey, "reports.tenants", caller: "billing-app"),
+        .. KeySettings(1, "beta", BetaKey, "reports.tenants", caller: "beta-app"),
+        .. Billing(),
+      ]
+    );
+
+    // The default limit: two deletions in flight per caller.
+    Task<HttpResponseMessage>[] held =
+    [
+      DeleteAsync(under, "bill-held-1", ManagerKey),
+      DeleteAsync(under, "bill-held-2", ManagerKey),
+    ];
+    await limitReached.Task.WaitAsync(TestToken);
+    Problem busy;
+    HttpStatusCode otherCaller;
+    try
+    {
+      busy = await ReadProblemAsync(await DeleteAsync(under, "bill-3f2504e0", ManagerKey));
+      using var other = await DeleteAsync(under, "beta-3f2504e0", BetaKey);
+      otherCaller = other.StatusCode;
+    }
+    finally
+    {
+      release.TrySetResult();
+    }
+
+    var completed = await Task.WhenAll(held);
+    // The finished deletions gave their slots back.
+    using var next = await DeleteAsync(under, "bill-3f2504e0", ManagerKey);
+
+    await Assert.That(busy.Status).IsEqualTo(503);
+    await Assert.That(busy.Kind).IsEqualTo("Busy");
+    await Assert.That(busy.RetryAfter).IsEqualTo(TimeSpan.FromSeconds(1));
+    await Assert
+      .That(busy.Detail)
+      .IsEqualTo("The caller's in-flight deletion limit was reached. Retry later.");
+    await Assert.That(otherCaller).IsEqualTo(HttpStatusCode.NoContent);
+    foreach (var response in completed)
+    {
+      using (response)
+      {
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+      }
+    }
+
+    await Assert.That(next.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    // The refused deletion never reached the service.
+    await Assert.That(service.Deletes).IsEqualTo(4);
+    await Assert.That(service.Calls.Count(call => call.TenantId == "bill-3f2504e0")).IsEqualTo(1);
+    var refused = under.Logs.WithEventId(69).Single();
+    await Assert.That(refused["CallerId"]).IsEqualTo("billing-app");
+    await Assert.That(refused["Reason"]).IsEqualTo("Busy");
+  }
+
+  [Test]
   public async Task The_openapi_document_describes_the_deletion()
   {
     await using var service = await FakeProvisioningService.StartAsync(_ =>
@@ -350,7 +554,7 @@ public class GatewayTenantDeletionTests
     await Assert.That(parameter.GetProperty("in").GetString()).IsEqualTo("path");
     await Assert
       .That(operation.GetProperty("responses").EnumerateObject().Select(status => status.Name))
-      .IsEquivalentTo(["204", "400", "401", "403", "503"]);
+      .IsEquivalentTo(["204", "400", "401", "403", "409", "503"]);
   }
 
   private static async Task<HttpResponseMessage> DeleteAsync(

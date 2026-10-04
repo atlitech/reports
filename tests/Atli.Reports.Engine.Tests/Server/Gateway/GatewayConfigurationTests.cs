@@ -89,6 +89,22 @@ public class GatewayConfigurationTests
   )]
   [Arguments("--ReportsServer:Gateway:Replicas=0", "Replicas")]
   [Arguments("--ReportsServer:Gateway:Replicas=1001", "Replicas")]
+  [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=0",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=10001",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=0",
+    "MaxConcurrentDeletesPerCaller"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=101",
+    "MaxConcurrentDeletesPerCaller"
+  )]
   public async Task Invalid_settings_fail_at_startup_naming_the_setting(
     string setting,
     string named
@@ -96,6 +112,38 @@ public class GatewayConfigurationTests
   {
     var exception = await Assert
       .That(() => ReportsServerApplication.Create([.. Valid(), setting]))
+      .Throws<InvalidOperationException>();
+
+    await Assert.That(exception!.Message).Contains(named);
+  }
+
+  [Test]
+  // Over http the gateway's credential for the service would travel in clear.
+  [Arguments("http://provisioner.example.test/", false, "http needs AllowHttpRenderers=true")]
+  [Arguments("https://user:secret@provisioner.example.test/", true, "Provisioning:Url")]
+  [Arguments("https://provisioner.example.test/?key=1", true, "Provisioning:Url")]
+  [Arguments("provisioner/relative", true, "Provisioning:Url")]
+  public async Task An_unusable_provisioning_url_fails_at_startup(
+    string url,
+    bool allowHttp,
+    string named
+  )
+  {
+    var exception = await Assert
+      .That(() =>
+        ReportsServerApplication.Create([
+          "--ReportsServer:Mode=Gateway",
+          "--ReportsServer:Authentication:Mode=None",
+          "--ReportsServer:Gateway:AllowAnonymousCallers=true",
+          $"--ReportsServer:Gateway:AllowHttpRenderers={allowHttp}",
+          .. Membership(0, "anonymous", "acme"),
+          "--ReportsServer:Gateway:Records:Store=File",
+          $"--ReportsServer:Gateway:Records:Path={Path.GetTempPath()}",
+          "--ReportsServer:Gateway:Provisioning:Mode=OnDemand",
+          $"--ReportsServer:Gateway:Provisioning:Url={url}",
+          "--ReportsServer:Gateway:Provisioning:ApiKey=gateway.0123456789abcdefghijklmnopqrstuv",
+        ])
+      )
       .Throws<InvalidOperationException>();
 
     await Assert.That(exception!.Message).Contains(named);
@@ -757,18 +805,6 @@ public class GatewayConfigurationTests
         request.Dispose();
       }
     }
-  }
-
-  /// <summary>A clock that moves only when told to; timers still run on real time.</summary>
-  private sealed class ManualClock : TimeProvider
-  {
-    private long _ticks;
-
-    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-    public override long GetTimestamp() => Volatile.Read(ref _ticks);
-
-    public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
   }
 
   private static RendererRecord Record(string tenantId, string url) =>

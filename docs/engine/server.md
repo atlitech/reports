@@ -177,7 +177,7 @@ security settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other), and no caller may list a tenant under another's prefix. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
+| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other). No caller may list a tenant under any prefix, its own included: the provisioning service retires and deletes the renderers of a prefix's tenants, and the gateway never has it create a listed tenant's, so such a tenant would lose its renderer for good. Renderer records do not name the caller whose prefix a tenant is under, so a prefix moved to another caller gives that caller every renderer under it, with its memory snapshot. Do not assign a prefix to another caller while tenants remain under it; delete them first. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
 | `TenantHeader` | `X-Reports-Tenant` | The header a caller names its tenant in; only a caller with one listed tenant and no prefix may leave it out |
 | `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
 | `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId`, `MaxConcurrentRequests` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, its sandbox ID if it is a sandbox, and how many requests it admits at once |
@@ -186,14 +186,16 @@ security settings:
 | `Wake:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region`, `ManagedIdentityClientId` | | The renderers' sandbox group, for `Sandboxes` |
 | `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
 | `Provisioning:Mode` | `None` | `OnDemand` has the provisioning service create the renderer of a tenant under a caller's prefix on first use, and maps `DELETE /tenants/{tenantId}` (below). It needs a record store the service writes, `File` or `KeyVault` |
-| `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress (`http` only with `AllowHttpRenderers`) |
+| `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress. `http` needs `AllowHttpRenderers`, and sends the gateway's key for the service in clear |
 | `Provisioning:ApiKey` | | For `OnDemand`: the gateway's credential for the service, `<id>.<secret>` |
 | `Provisioning:Timeout` | `00:01:00` | How long the gateway waits for the service to create or delete a renderer; a conversion waits no longer than its `RendererTimeout` |
+| `Provisioning:MaxConcurrentDeletesPerCaller` | `2` | How many deletions (`DELETE /tenants/{tenantId}`, below) one caller may have in flight in this replica, 1 to 100; one more is `503` `Busy` |
 | `RendererTimeout` | `00:01:30` | The deadline of one forwarded conversion, from the record lookup to the PDF's last byte |
 | `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
 | `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when this replica's share of what the tenant's renderer admits is fewer |
 | `Replicas` | `1` | How many gateway replicas send conversions to the same renderers, 1 to 1000: each replica admits a tenant its record's `MaxConcurrentRequests` divided by this, rounded down and at least 1. Set it to the most replicas that run at once |
-| `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
+| `MaxNewTenantLookupsPerCallerPerSecond` | `20` | How many record lookups per second one caller may cause in this replica for tenants under its prefixes that the gateway has no answer for, 1 to 10000; see "New tenants have a budget" below |
+| `AllowHttpRenderers` | `false` | Allows `http` renderer and provisioning service URLs, over which the gateway's credentials for them travel in clear. For tests and development only |
 | `AllowAnonymousCallers` | `false` | Allows `Authentication:Mode=None`, under which anyone who reaches the gateway converts as `anonymous` for that caller ID's tenants. For tests and development only |
 
 ```text
@@ -216,13 +218,12 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   twice) is a `400` (`InvalidRequest`), and a tenant it does not belong to is a `403`. The header
   names one of the caller's tenants when the caller lists it, or when one of its prefixes owns it:
   a valid tenant ID that starts with the prefix and continues past it. The prefix alone, a tenant
-  under another caller's prefix, and an invalid tenant ID are all `403`s. A tenant that is both
-  listed and under one of the caller's prefixes counts as listed. An empty header counts as a
-  missing one, so it selects a single-tenant caller's tenant and is a `400` for any other caller.
-  The gateway lets a caller use every tenant under its prefixes and knows nothing of the caller's
-  own users, so an application that gives each of its workspaces a tenant must check that the
-  signed-in user may use a workspace before naming the workspace's tenant. This runs after caller
-  admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
+  under another caller's prefix, and an invalid tenant ID are all `403`s. An empty header counts
+  as a missing one, so it selects a single-tenant caller's tenant and is a `400` for any other
+  caller. The gateway lets a caller use every tenant under its prefixes and knows nothing of the
+  caller's own users, so an application that gives each of its workspaces a tenant must check
+  that the signed-in user may use a workspace before naming the workspace's tenant. This runs
+  after caller admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
   or this replica's share of its record's `MaxConcurrentRequests` (the requests its renderer
   admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant at its
   limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway. The limit
@@ -235,6 +236,21 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   renderer's `Busy` is retried as described below. Caller admission
   (`Limits:MaxConcurrentRequestsPerCaller`, 4 by default) applies before the tenant limits, so a
   caller that serves several tenants needs it raised to their combined limits.
+- **New tenants have a budget.** A caller with a prefix can name a tenant the gateway has not
+  seen on every request, and each such request reads the record store before its body is read,
+  and with `Provisioning:Mode=OnDemand` has the provisioning service read the store and create a
+  renderer. Key Vault throttles a vault at about 4,000 operations per 10 seconds, 400 a second,
+  and once one caller spends that, every tenant's record reads fail. So each caller may start at
+  most `MaxNewTenantLookupsPerCallerPerSecond` lookups a second in a replica, with a burst of as
+  many, for tenants under its prefixes whose answer the gateway does not have: neither cached (a
+  record or none) nor being read for another request. One more is `503` `Busy` with
+  `Retry-After: 1`, and reads nothing. Cached answers cost nothing, and listed tenants are never
+  limited. The budget holds per replica, so size it against the vault's limit with every replica
+  and every caller with a prefix counted: a new tenant costs up to about four vault operations
+  (the gateway's lookup, the service's lookup and its writing of the record, and the gateway's
+  reading of it), so the budget times the replicas times those callers times four must stay well
+  under 400 a second, with room left for the vault's other traffic. The default, 20, lets one
+  caller on two replicas cause about 160 operations a second.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
   record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
   the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no
@@ -308,22 +324,31 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `BrowserUnavailable` and logged as an error; `QuotaExceeded` is `503` `BrowserUnavailable` with a
   message that the prefix's renderer quota is full, until tenants are deleted or retire;
   `RateLimited` is `503` `Busy` with the service's `Retry-After`, kept between 1 and 60 seconds;
-  and `Failed`, any other answer, a service that cannot be reached, and `Provisioning:Timeout` are
-  `503` `BrowserUnavailable`. The gateway's client of the service follows no redirects and reads
-  at most 16 KiB of an answer.
+  `Disabled`, a renderer the operator disabled, is `503` `BrowserUnavailable`; and `Failed`, any
+  other answer, a service that cannot be reached, and `Provisioning:Timeout` are `503`
+  `BrowserUnavailable`. The gateway's client of the service follows no redirects and reads at most
+  16 KiB of an answer.
 - **Deleting tenants.** With `Provisioning:Mode=OnDemand`, `DELETE /tenants/{tenantId}` deletes
   the renderer of a tenant under one of the caller's prefixes, with its record and memory
   snapshot, through the service's `DELETE /tenants/{tenantId}/renderer`, and answers `204`, also
   for a tenant that has none. It needs the permission `reports.tenants` (see
   [Authentication](../security.md#authentication)). A listed tenant is a `403`, since the operator
   manages it, and so is a tenant that is not the caller's; an invalid tenant ID is a `400`
-  `InvalidRequest`. The service's refusals and failures map as for creation, with `503`
-  `BrowserUnavailable` when the renderer could not be deleted. The tenant header, caller
-  admission, and tenant admission take no part. The replica that serves the deletion forgets the
-  tenant's record, but other replicas may route the tenant's conversions to the deleted renderer
-  for up to `Records:CacheDuration`; such a conversion gets the proxy's `404` and creates a new
-  renderer. An application must therefore stop converting for a tenant before deleting it. The
-  OpenAPI document describes the route; without `OnDemand` it does not exist.
+  `InvalidRequest`. The service's refusals reach the caller as the gateway's own errors, never in
+  the service's words. A renderer the operator disabled (`Disabled`) is a `409` (`InvalidRequest`)
+  with a fixed message: the service neither deletes nor replaces it until the operator enables or
+  deletes it, and the gateway keeps the tenant's cached record. `NotAllowed`, `Failed`, any other
+  answer, a service that cannot be reached, and `Provisioning:Timeout` are `503`
+  `BrowserUnavailable`; retrying is safe, since deleting a tenant without a renderer succeeds. The
+  tenant header, caller admission, and tenant admission take no part. Instead, a caller may have
+  `Provisioning:MaxConcurrentDeletesPerCaller` deletions in flight in a replica, each waiting for
+  the service for up to `Provisioning:Timeout`; one more is `503` `Busy` with `Retry-After: 1`,
+  and does not reach the service. The replica that serves the deletion forgets the tenant's
+  record, and no lookup that started before the deletion brings it back, but other replicas may
+  route the tenant's conversions to the deleted renderer for up to `Records:CacheDuration`; such a
+  conversion gets the proxy's `404` and creates a new renderer. An application must therefore
+  stop converting for a tenant before deleting it. The OpenAPI document describes the route;
+  without `OnDemand` it does not exist.
 - **Readiness.** `/health/ready` has one check, `renderer_records`: always healthy for the
   `Configuration` store, and for the others healthy when the store answered a lookup of the
   reserved tenant `readiness-probe` within the last 30 seconds. Finding nothing there, or
@@ -339,11 +364,12 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   the gateway's address, 59 for a disabled sandbox, 60 to 63 for state reads and resumes, 64 to
   67 for the provisioning service (64 when the gateway asks for a renderer, 65 when the service
   created or found it, with the time it took, 66 for a refusal, at `Error` for `NotAllowed` and
-  `Warning` otherwise, and 67, an error, for a failure), and 68 and 69 for a deleted tenant and a
-  refused deletion. The request span carries the tenant as `atli.reports.tenant`. Record lookups,
-  sandbox checks, and renderer creations are shared by the requests waiting for them, so they run
-  without any request's trace context, and neither the renderer client, the Sandboxes client, nor
-  the provisioning client sends trace headers or baggage.
+  `Warning` otherwise, and 67, an error, for a failure), 68 and 69 for a deleted tenant and a
+  refused deletion, and 70 for a caller over its budget of new tenants. The request span carries
+  the tenant as `atli.reports.tenant`. Record lookups, sandbox checks, and renderer creations are
+  shared by the requests waiting for them, so they run without any request's trace context, and
+  neither the renderer client, the Sandboxes client, nor the provisioning client sends trace
+  headers or baggage.
 
 ## Telemetry
 
