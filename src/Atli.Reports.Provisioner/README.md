@@ -21,7 +21,9 @@ proxy answers `403 {"error":"Sandbox is not running"}` instead, and the gateway'
 
 An anonymous on-demand port lets anyone who learns its URL wake the renderer, and run up its
 compute, before the renderer checks a credential. Set `Provisioner:AllowedSourceCidrs` to the
-gateway's outbound addresses, so the platform's proxy refuses everyone else.
+gateway's outbound addresses, so the platform's proxy refuses everyone else. A gateway running as
+a Container App on a subnet with a NAT gateway reaches the ports from the NAT gateway's public
+address, so its `/32` is the gateway's entry.
 
 ## Azure roles
 
@@ -34,9 +36,11 @@ gateway's outbound addresses, so the platform's proxy refuses everyone else.
 
 Data Owner also allows running commands and reading files in every sandbox of the group, so
 nothing on the request path may hold it. The gateway's custom role cannot create, delete, or
-reconfigure renderers, run commands in them, or read their files. That role has not been tested
-yet; see the [open questions](../../docs/hosted-renderers.md#open-questions-and-next-measurements).
-The renderer sandbox group itself has no managed identity.
+reconfigure renderers, run commands in them, or read their files. In the
+[production-shaped run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md),
+the gateway's user-assigned identity, holding only that role, the vault role, and `AcrPull` on its
+registry, resumed every `Manual` renderer it was asked to. The renderer sandbox group itself has no
+managed identity.
 
 The provisioner authenticates as the user-assigned managed identity named by
 `Sandboxes:ManagedIdentityClientId` (and `Records:ManagedIdentityClientId` for the vault), or
@@ -54,7 +58,7 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | --- | --- | --- |
 | `Provisioner:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region` | Required | The renderer sandbox group: a subscription GUID, Azure resource names, and a region name such as `eastus2` |
 | `Provisioner:Sandboxes:ManagedIdentityClientId` | Empty | A user-assigned identity for the data plane; empty for the default chain |
-| `Provisioner:Records:Store` | Required | `KeyVault`, or `File` for development and tests |
+| `Provisioner:Records:Store` | Required | `KeyVault`, or `File` for development and tests. One store per renderer sandbox group: every record in it counts as a renderer of this group, so a store shared with another group shows that group's tenants as `missing`, and a `rollout` without `--tenant` recreates them here |
 | `Provisioner:Records:VaultUri` | | For `KeyVault`: the vault, such as `https://contoso.vault.azure.net/` |
 | `Provisioner:Records:ManagedIdentityClientId` | Empty | For `KeyVault`: a user-assigned identity for the vault |
 | `Provisioner:Records:Path` | | For `File`: the directory of record files, which only its owner may write to |
@@ -62,7 +66,7 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, one), or `L` (2 vCPU, 4 GiB, two) |
 | `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
 | `Provisioner:AllowedSourceCidrs` | Empty | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
-| `Provisioner:NetworkConnection` | Empty | The renderer group's virtual network connection (`aca sandboxgroup network create --name`) new renderers start in; empty for none. A network whose security group denies the `AzurePlatformDNS` service tag leaves renderers without DNS; see the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) |
+| `Provisioner:NetworkConnection` | Empty | The renderer group's virtual network connection (`aca sandboxgroup network create --name`) new renderers start in; empty for none. A network whose security group denies the `AzurePlatformDNS` service tag leaves renderers without DNS; see the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes). Renderers in such a network were ready 1.4 to 3.5 s after the create call started, against 1.2 to 1.3 s without one |
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
 | `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
 | `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
