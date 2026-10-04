@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using Atli.Reports.Engine;
 using Atli.Reports.Hosting;
+using Atli.Reports.Hosting.Provisioning;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Server.Endpoints;
@@ -109,6 +110,26 @@ internal static partial class GatewayRegistration
       services.AddSingleton<SandboxWaker>();
     }
 
+    if (settings.Provisioning.Enabled)
+    {
+      services
+        .AddHttpClient(TenantProvisioning.HttpClientName)
+        // No redirects (the credential header must not follow one), no trace context or baggage,
+        // and connections recycled, since the client keeps this HttpClient for the process's life.
+        .ConfigurePrimaryHttpMessageHandler(ProvisioningClient.CreateHandler)
+        // Provisioning:Timeout bounds each call.
+        .ConfigureHttpClient(client => client.Timeout = Timeout.InfiniteTimeSpan)
+        .RemoveAllLoggers();
+      services.TryAddSingleton<IProvisioningClient>(provider => new ProvisioningClient(
+        provider
+          .GetRequiredService<IHttpClientFactory>()
+          .CreateClient(TenantProvisioning.HttpClientName),
+        settings.Provisioning.Url!,
+        settings.Provisioning.ApiKey
+      ));
+      services.AddSingleton<TenantProvisioning>();
+    }
+
     services.AddSingleton(provider => new RendererGateway(
       provider.GetRequiredService<IHttpContextAccessor>(),
       provider.GetRequiredService<RendererDirectory>(),
@@ -116,7 +137,8 @@ internal static partial class GatewayRegistration
       settings,
       provider.GetRequiredService<TimeProvider>(),
       provider.GetRequiredService<ILogger<RendererGateway>>(),
-      provider.GetService<SandboxWaker>()
+      provider.GetService<SandboxWaker>(),
+      provider.GetService<TenantProvisioning>()
     ));
     // Not TryAdd: in gateway mode nothing converts in this process.
     services.AddSingleton<IHtmlToPdfConverter>(provider =>
@@ -175,16 +197,23 @@ internal static partial class GatewayRegistration
   /// <summary>
   /// Resolves each conversion's tenant from the authenticated caller, before the body is read, and
   /// holds a per-tenant admission lease for the rest of the request. Runs after caller admission,
-  /// so the caller's limits and deadline already apply.
+  /// so the caller's limits and deadline already apply. With <c>Provisioning:Mode=OnDemand</c>, also
+  /// maps <c>DELETE /tenants/{tenantId}</c> (see <see cref="TenantEndpoints"/>).
   /// </summary>
   public static void UseReportsGateway(this WebApplication app)
   {
-    // Built now rather than on the first request, so a store or Sandboxes client that cannot be
-    // created fails the start.
+    // Built now rather than on the first request, so a store, Sandboxes client, or provisioning
+    // client that cannot be created fails the start.
     _ = app.Services.GetRequiredService<IRendererRecordStore>();
     _ = app.Services.GetService<SandboxWaker>();
+    _ = app.Services.GetService<TenantProvisioning>();
 
     var settings = app.Services.GetRequiredService<GatewayOptions>();
+    if (settings.Provisioning.Enabled)
+    {
+      app.MapTenantEndpoints();
+    }
+
     var membership = app.Services.GetRequiredService<TenantMembership>();
     var admission = app.Services.GetRequiredService<TenantAdmission>();
     var directory = app.Services.GetRequiredService<RendererDirectory>();
