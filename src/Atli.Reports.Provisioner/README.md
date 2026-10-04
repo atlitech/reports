@@ -165,6 +165,7 @@ renderers. Tenant IDs are 1 to 63 lowercase letters, digits, and hyphens.
 
 ```bash
 atli-reports-provisioner rollout [--disk-image <id>] [--tenant <id>] [--max-parallel 4] [--drain 00:02:30]
+                                 [--stopped replace|retire]
 ```
 
 Replaces every renderer whose record names another disk image or a sandbox that no longer exists,
@@ -186,6 +187,15 @@ that names another tenant's sandbox is reported, and that sandbox is left alone.
 - Last, it prunes, as `prune` does (for the given tenant only, with `--tenant`): renderer sandboxes
   that an earlier, canceled or killed command left behind are deleted after one more drain. A
   canceled rollout skips this; its old sandboxes still draining are left to the next run.
+- `--stopped retire` retires, instead of replacing, the stopped renderers of tenants under
+  `Provisioner:Service:TenantPrefixes`, however long they have been stopped: each is deleted with
+  its record, as `retire` does, and the tenant's next conversion has the provisioning service
+  create a renderer from its disk image. Running and disabled renderers, records whose sandbox is
+  gone, and tenants outside the prefixes are replaced as without it; with `--tenant`, the same rule
+  applies to that tenant. Just before retiring a renderer, the rollout reads its record and sandbox
+  again: a renderer that has started meanwhile is replaced instead, and a record another command
+  changed is a failure. It needs valid `TenantPrefixes`, or it is a configuration error. The
+  default, `--stopped replace`, replaces stopped renderers like the others.
 
 ### delete
 
@@ -240,6 +250,45 @@ The others are deleted after the drain, in case the gateway still sends them wor
 have moved away from one moments ago), and only if no record points to them by then. A sandbox
 that cannot be deleted is reported, and the command exits with `1`.
 
+### retire
+
+```bash
+atli-reports-provisioner retire
+```
+
+Retires, once, the renderers of tenants under `Provisioner:Service:TenantPrefixes` that have been
+stopped for longer than `Provisioner:Service:RetireAfterIdle`; `serve` does the same every
+`RetireCheckInterval`. Retiring a renderer deletes its record, then every sandbox labeled for the
+tenant, as `delete` does, and with the sandbox its memory snapshot. The tenant's next conversion
+has the provisioning service create a renderer from its `DiskImageId`, so a workspace nobody uses
+costs nothing, and comes back on the current release.
+
+A renderer is retired when its sandbox is stopped, not disabled, and the data plane reports that
+it stopped more than `RetireAfterIdle` ago. A record whose sandbox no longer exists is retired too,
+and its progress line says so. It keeps:
+
+- running renderers, and disabled ones (`disable` keeps a renderer's disk for investigation);
+- a stopped renderer whose stop time the data plane does not report;
+- every sandbox of a tenant whose record cannot be read;
+- every tenant outside the prefixes, such as the operator's own.
+
+A record that names a sandbox labeled for another tenant is kept and reported as a failure. Just
+before deleting, `retire` reads the tenant's record and sandbox again, and keeps the renderer until
+the next run if another command changed the record meanwhile, or if the sandbox is no longer
+stopped (a request may be waking it) or has been disabled. That leaves a short window, between
+the second read and the delete, in which a conversion that wakes the renderer can still fail.
+
+With `RetireAfterIdle` at `00:00:00` it retires nothing, and says so. It needs valid
+`TenantPrefixes`, or it is a configuration error, but no disk image. A tenant that cannot be retired is reported, the others
+are still retired, and the command exits with `1`; a sandbox left behind after its record was
+deleted is deleted by `prune`.
+
+The gateway keeps a record for `ReportsServer:Gateway:Records:CacheDuration` (30 seconds by
+default), so for up to that long after a retirement it may still route the tenant's conversions to
+the retired renderer. The platform's proxy answers them with `404`, as for any sandbox that no
+longer exists, and with on-demand provisioning the gateway then has the provisioning service create
+the renderer again: the conversion succeeds, only slower, since it waits for the new renderer.
+
 ### disable and enable
 
 ```bash
@@ -287,6 +336,13 @@ of the rollout.
 4. Set `Provisioner:DiskImageId` to the new ID, so tenants created from now on start from it.
 5. Run `list`: every renderer is on the new disk image, every record can be read, and no renderer
    sandbox lacks a record.
+
+With tenants under `Provisioner:Service:TenantPrefixes`, step 2 can be
+`rollout --disk-image <id> --stopped retire`. Then, of those tenants, only running renderers (and
+disabled ones) are replaced; stopped ones are retired, and come back from the provisioning
+service's disk image on their next conversion, so the rollout creates no renderer that would only
+sit idle. Do step 4 for the provisioning service first: until it runs with the new
+`DiskImageId`, retired tenants come back on the old image.
 
 ## Why one sandbox per customer, and no shared snapshot
 

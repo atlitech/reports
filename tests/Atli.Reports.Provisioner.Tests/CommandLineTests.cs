@@ -50,6 +50,11 @@ public class CommandLineTests
   [Arguments("prune --size S", "Unknown option '--size'.")]
   [Arguments("disable", "--tenant is required.")]
   [Arguments("enable --tenant a --drain 0", "Unknown option '--drain'.")]
+  [Arguments("rollout --stopped delete", "--stopped is 'delete'; use replace or retire.")]
+  [Arguments("rollout --stopped", "--stopped needs a value.")]
+  [Arguments("rollout --stopped retire --stopped replace", "--stopped is given more than once.")]
+  [Arguments("retire --tenant a", "Unknown option '--tenant'.")]
+  [Arguments("retire now", "Unexpected argument 'now'.")]
   public async Task A_wrong_command_line_is_a_usage_error_that_changes_nothing(
     string commandLine,
     string message
@@ -77,6 +82,8 @@ public class CommandLineTests
   [Arguments("prune --help", "Usage: atli-reports-provisioner prune [--tenant <id>]")]
   [Arguments("disable --help", "Usage: atli-reports-provisioner disable --tenant <id>")]
   [Arguments("enable -h", "Usage: atli-reports-provisioner enable --tenant <id>")]
+  [Arguments("rollout --help", "[--drain <hh:mm:ss>] [--stopped replace|retire]")]
+  [Arguments("retire --help", "Usage: atli-reports-provisioner retire")]
   public async Task Help_needs_no_configuration(string commandLine, string expected)
   {
     using Provisioning provisioning = new();
@@ -234,6 +241,92 @@ public class CommandLineTests
     await Assert.That(exitCode).IsEqualTo(1);
     await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-b"]);
     await Assert.That(output).Contains("Deleted 1, failed 1.");
+  }
+
+  [Test]
+  [Arguments("rollout --stopped retire")]
+  [Arguments("retire")]
+  public async Task Retiring_needs_tenant_prefixes(string commandLine)
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+
+    var (exitCode, output, error) = await RunAsync(provisioning, Configured, commandLine);
+
+    await Assert.That(exitCode).IsEqualTo(2);
+    await Assert
+      .That(error)
+      .StartsWith("error: configuration: Provisioner:Service:TenantPrefixes is empty");
+    await Assert.That(output).IsEmpty();
+    await Assert.That(provisioning.Journal.Entries).IsEmpty();
+  }
+
+  [Test]
+  [Arguments("rollout --disk-image disk-2 --drain 0")]
+  [Arguments("rollout --disk-image disk-2 --drain 0 --stopped replace")]
+  public async Task A_rollout_replaces_stopped_renderers_unless_told_to_retire_them(
+    string commandLine
+  )
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+
+    // No tenant prefixes needed.
+    var (exitCode, output, _) = await RunAsync(provisioning, Configured, commandLine);
+
+    await Assert.That(exitCode).IsEqualTo(0);
+    await Assert.That(provisioning.Records["app-a"]!.DiskImageId).IsEqualTo("disk-2");
+    await Assert.That(output).Contains("Replaced 1, already on the image 0, failed 0.");
+  }
+
+  [Test]
+  public async Task A_rollout_with_stopped_retire_retires_managed_stopped_renderers()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+    provisioning.AddRenderer("app-b", "disk-1");
+
+    var (exitCode, output, _) = await RunAsync(
+      provisioning,
+      new(Configured) { ["Provisioner:Service:TenantPrefixes:0:Prefix"] = "app-" },
+      "rollout --disk-image disk-2 --drain 0 --stopped retire"
+    );
+
+    await Assert.That(exitCode).IsEqualTo(0);
+    await Assert.That(provisioning.Records["app-a"]).IsNull();
+    await Assert.That(provisioning.Records["app-b"]!.DiskImageId).IsEqualTo("disk-2");
+    await Assert.That(output).Contains("Replaced 1, retired 1, already on the image 0, failed 0.");
+  }
+
+  [Test]
+  public async Task Retire_retires_renderers_idle_for_the_configured_time_and_exits_with_1_when_one_fails()
+  {
+    using Provisioning provisioning = new();
+    foreach (var (tenant, stoppedFor) in new[] { ("app-a", 48), ("app-b", 48), ("app-c", 12) })
+    {
+      provisioning.AddRenderer(tenant, "disk-1");
+      provisioning.Sandboxes.Suspend($"old-{tenant}", TimeSpan.FromHours(stoppedFor));
+    }
+
+    provisioning.Sandboxes.FailDelete.Add("old-app-b");
+
+    var (exitCode, output, _) = await RunAsync(
+      provisioning,
+      new(Configured)
+      {
+        ["Provisioner:Service:TenantPrefixes:0:Prefix"] = "app-",
+        ["Provisioner:Service:RetireAfterIdle"] = "1.00:00:00",
+        // Not needed to retire.
+        ["Provisioner:DiskImageId"] = null,
+      },
+      "retire"
+    );
+
+    await Assert.That(exitCode).IsEqualTo(1);
+    await Assert.That(provisioning.Records["app-a"]).IsNull();
+    await Assert.That(provisioning.Records["app-c"]).IsNotNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-app-b", "old-app-c"]);
+    await Assert.That(output).Contains("Retired 1, failed 1.\n  app-b: Deleting old-app-b failed.");
   }
 
   [Test]

@@ -65,7 +65,7 @@ internal static class ProvisionerCli
         );
       }
 
-      if (command is ServeCommand or RetireCommand)
+      if (command is ServeCommand or RetireCommand or RolloutCommand { RetireStopped: true })
       {
         options.Service.Validate(requireApiKeys: command is ServeCommand);
       }
@@ -121,6 +121,7 @@ internal static class ProvisionerCli
             rollout.TenantId,
             rollout.MaxParallel,
             options.DrainDelay,
+            rollout.RetireStopped ? options.Service : null,
             cancellationToken
           );
           return result.Failures.Count == 0 ? 0 : 1;
