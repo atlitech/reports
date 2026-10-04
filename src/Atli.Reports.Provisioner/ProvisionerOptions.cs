@@ -63,6 +63,17 @@ internal sealed class ProvisionerOptions
   /// </summary>
   public List<string> AllowedSourceCidrs { get; } = [];
 
+  /// <summary>
+  /// The renderer group's virtual network connection new renderers start in, such as one whose
+  /// network denies the <c>AzurePlatformDNS</c> service tag, so a renderer has no DNS to tunnel
+  /// through; empty for none.
+  /// </summary>
+  public string NetworkConnection { get; set; } = "";
+
+  /// <summary><see cref="NetworkConnection"/>, or <see langword="null"/> when it is empty.</summary>
+  public string? NetworkConnectionName =>
+    string.IsNullOrWhiteSpace(NetworkConnection) ? null : NetworkConnection.Trim();
+
   /// <summary><see cref="Size"/>, parsed; <see cref="Load"/> has checked it.</summary>
   public RendererSize RendererSize => RendererSize.Parse(Size);
 

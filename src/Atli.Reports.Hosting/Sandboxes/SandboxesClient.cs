@@ -490,6 +490,7 @@ public sealed class SandboxesClient : ISandboxesClient
       Environment = spec.Environment,
       Labels = spec.Labels,
       Lifecycle = new LifecycleWire { AutoSuspendPolicy = autoSuspend },
+      CustomerVnetConnectionName = spec.NetworkConnectionName,
     };
   }
 

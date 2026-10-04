@@ -102,6 +102,25 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
+  public async Task Create_starts_the_sandbox_in_the_named_network_connection()
+  {
+    using TestSandboxes sandboxes = new(FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running")));
+
+    await sandboxes.Client.CreateAsync(
+      Spec() with
+      {
+        NetworkConnectionName = "renderers",
+      },
+      TestToken
+    );
+
+    var body = JsonNode.Parse(sandboxes.Plane.Requests.Single().Body!)!;
+    await Assert
+      .That(body["customerVnetConnectionName"]!.GetValue<string>())
+      .IsEqualTo("renderers");
+  }
+
+  [Test]
   public async Task Create_rounds_auto_suspend_up_to_whole_seconds()
   {
     using TestSandboxes sandboxes = new(FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running")));

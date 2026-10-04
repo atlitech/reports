@@ -62,6 +62,7 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, one), or `L` (2 vCPU, 4 GiB, two) |
 | `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
 | `Provisioner:AllowedSourceCidrs` | Empty | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
+| `Provisioner:NetworkConnection` | Empty | The renderer group's virtual network connection (`aca sandboxgroup network create --name`) new renderers start in; empty for none. A network whose security group denies the `AzurePlatformDNS` service tag leaves renderers without DNS; see the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) |
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
 | `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
 | `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
@@ -100,7 +101,7 @@ each new renderer whether it is ready through the port, so the address it runs f
 list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. A changed list
 applies to renderers created from then on; `rollout` does not replace renderers on the current disk
 image, so recreate them (`delete`, then `create`) to apply it to existing ones. The same holds for
-`PortActivation`, and a rollout's replacements take the settings it runs with, not their
+`PortActivation` and `NetworkConnection`, and a rollout's replacements take the settings it runs with, not their
 predecessors': a tenant created with a one-off `Manual` override comes back `OnDemand` unless the
 rollout runs with the same override.
 
