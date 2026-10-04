@@ -11,6 +11,14 @@ public sealed partial class SandboxesOptions
   /// <summary>The data-plane API version this client speaks.</summary>
   public const string ApiVersion = "2026-02-01-preview";
 
+  /// <summary>
+  /// The API version this client lists a group's sandboxes with. <see cref="ApiVersion"/> answers
+  /// <c>GET sandboxes</c> with one page, at most 25 sandboxes (100 with <c>pageSize</c>), and no way
+  /// to the rest; this one pages with <c>nextLink</c>. Its sandboxes have the fields the client reads
+  /// in the same shape.
+  /// </summary>
+  public const string ListApiVersion = "2026-09-01-preview";
+
   /// <summary>The scope of the data plane's Microsoft Entra tokens.</summary>
   public const string TokenScope = "https://dynamicsessions.io/.default";
 

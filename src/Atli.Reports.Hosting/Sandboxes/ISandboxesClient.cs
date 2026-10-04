@@ -18,7 +18,11 @@ public interface ISandboxesClient
   /// <summary>Returns the sandbox, or <see langword="null"/> when it does not exist.</summary>
   Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken);
 
-  /// <summary>Returns every sandbox in the group.</summary>
+  /// <summary>
+  /// Returns every sandbox in the group, from every page of the data plane's listing. Callers
+  /// decide from it which sandboxes a tenant has (to delete, disable, retire, or prune them), so a
+  /// listing that cannot be read whole fails rather than returning part.
+  /// </summary>
   Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken);
 
   /// <summary>Deletes the sandbox. Deleting a sandbox that does not exist succeeds.</summary>
