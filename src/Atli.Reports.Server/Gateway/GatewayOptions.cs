@@ -324,7 +324,8 @@ internal sealed class GatewayCallerTenants
   /// <summary>
   /// Tenant prefixes the caller owns (<see cref="TenantPrefix"/>): every valid tenant ID under one is
   /// the caller's, named in the tenant header, so that an application can have a tenant per
-  /// workspace without listing each.
+  /// workspace without listing each. Renderer records do not name their caller, so a prefix must not
+  /// move to another caller while tenants remain under it.
   /// </summary>
   public string[] TenantPrefixes { get; set; } = [];
 }

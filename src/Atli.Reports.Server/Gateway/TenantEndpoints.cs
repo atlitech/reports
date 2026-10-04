@@ -59,9 +59,9 @@ internal static partial class TenantEndpoints
   /// <response code="503">
   /// <c>Busy</c>: the caller already has as many deletions in flight as the gateway admits
   /// (<c>Retry-After: 1</c>).
-  /// <c>BrowserUnavailable</c>: the provisioning service failed, could not be reached, or did not
-  /// answer in time, so the renderer may not have been deleted (<c>Retry-After: 5</c>). Retrying is
-  /// safe.
+  /// <c>BrowserUnavailable</c>: the provisioning service refused or failed, could not be reached, or
+  /// did not answer in time, so the renderer may not have been deleted (<c>Retry-After: 5</c>).
+  /// Retrying is safe.
   /// </response>
   internal static async Task DeleteTenant(
     HttpContext context,
