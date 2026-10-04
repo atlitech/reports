@@ -262,6 +262,55 @@ public class CommandLineTests
   }
 
   [Test]
+  [Arguments(
+    "Provisioner:Service:TenantPrefixes:0:MaxCreatesPerMinute",
+    "0",
+    "Provisioner:Service:TenantPrefixes:0:MaxCreatesPerMinute must be between 1 and 10000."
+  )]
+  [Arguments(
+    "Provisioner:Service:TenantPrefixes:0:MaxCreatesPerMinute",
+    "10001",
+    "Provisioner:Service:TenantPrefixes:0:MaxCreatesPerMinute must be between 1 and 10000."
+  )]
+  [Arguments(
+    "Provisioner:Service:MaxCreatesPerMinute",
+    "0",
+    "Provisioner:Service:MaxCreatesPerMinute must be between 1 and 10000."
+  )]
+  public async Task Wrong_service_configuration_is_a_configuration_error(
+    string key,
+    string value,
+    string message
+  )
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+
+    var (exitCode, output, error) = await RunAsync(
+      provisioning,
+      new(Configured) { ["Provisioner:Service:TenantPrefixes:0:Prefix"] = "app-", [key] = value },
+      "retire"
+    );
+
+    await Assert.That(exitCode).IsEqualTo(2);
+    await Assert.That(error).IsEqualTo($"error: configuration: {message}\n");
+    await Assert.That(output).IsEmpty();
+    await Assert.That(provisioning.Journal.Entries).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_prefixs_creates_per_minute_default_to_20_under_60_in_all()
+  {
+    ProvisioningServiceOptions service = new();
+    service.TenantPrefixes.Add(new ManagedTenantPrefix { Prefix = "app-" });
+
+    service.Validate(requireApiKeys: false);
+
+    await Assert.That(service.TenantPrefixes[0].MaxCreatesPerMinute).IsEqualTo(20);
+    await Assert.That(service.MaxCreatesPerMinute).IsEqualTo(60);
+  }
+
+  [Test]
   [Arguments("rollout --disk-image disk-2 --drain 0")]
   [Arguments("rollout --disk-image disk-2 --drain 0 --stopped replace")]
   public async Task A_rollout_replaces_stopped_renderers_unless_told_to_retire_them(

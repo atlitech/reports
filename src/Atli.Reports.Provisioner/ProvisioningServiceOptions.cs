@@ -24,7 +24,11 @@ internal sealed class ProvisioningServiceOptions
   /// <summary>The prefixes whose tenants the service creates renderers for, each with its quota.</summary>
   public List<ManagedTenantPrefix> TenantPrefixes { get; } = [];
 
-  /// <summary>Renderers the service creates per minute at most, across all prefixes.</summary>
+  /// <summary>
+  /// Renderers the service creates per minute at most, across all prefixes: a ceiling over each
+  /// prefix's own <see cref="ManagedTenantPrefix.MaxCreatesPerMinute"/>, so size it above the
+  /// busiest prefixes' together.
+  /// </summary>
   public int MaxCreatesPerMinute { get; set; } = 60;
 
   /// <summary>
@@ -81,6 +85,13 @@ internal sealed class ProvisioningServiceOptions
       {
         throw new InvalidOperationException(
           $"{SectionName}:TenantPrefixes:{i}:MaxTenants must be between 1 and 100000."
+        );
+      }
+
+      if (prefix.MaxCreatesPerMinute is < 1 or > 10_000)
+      {
+        throw new InvalidOperationException(
+          $"{SectionName}:TenantPrefixes:{i}:MaxCreatesPerMinute must be between 1 and 10000."
         );
       }
 
@@ -182,6 +193,12 @@ internal sealed class ManagedTenantPrefix
 
   /// <summary>Renderers under the prefix at most; a create beyond it is refused.</summary>
   public int MaxTenants { get; set; } = 1000;
+
+  /// <summary>
+  /// Renderers the service creates under the prefix per minute at most, so that one application
+  /// cannot use up the service's <see cref="ProvisioningServiceOptions.MaxCreatesPerMinute"/>.
+  /// </summary>
+  public int MaxCreatesPerMinute { get; set; } = 20;
 
   /// <summary>The size of the prefix's renderers: <c>S</c>, <c>M</c>, <c>L</c>, or empty for <c>Provisioner:Size</c>.</summary>
   public string Size { get; set; } = "";

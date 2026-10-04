@@ -486,6 +486,117 @@ public class ServiceTests
   }
 
   [Test]
+  public async Task One_prefix_cannot_use_up_the_creates_of_another()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 4;
+        service.TenantPrefixes[0].MaxCreatesPerMinute = 3;
+        service.TenantPrefixes[0].MaxTenants = 1;
+      }
+    );
+
+    List<string> churning = [];
+    List<string> other = [];
+    var next = 0;
+    for (var minute = 0; minute < 3; minute++)
+    {
+      // Creating new tenants and deleting them again: the quota never fills.
+      for (var i = 0; i < 4; i++)
+      {
+        var tenant = $"myapp-{next++}";
+        using var created = await service.PutAsync(tenant, TestToken);
+        churning.Add(await AnswerAsync(created));
+        using var deleted = await service.DeleteAsync(tenant, TestToken);
+      }
+
+      using var answer = await service.PutAsync($"big-{minute}", TestToken);
+      other.Add(await AnswerAsync(answer));
+      provisioning.Clock.Advance(CreationRateLimit.Window);
+    }
+
+    await Assert
+      .That(churning)
+      .IsEquivalentTo(
+        [.. Enumerable.Repeat<string[]>(["OK", "OK", "OK", "RateLimited"], 3).SelectMany(x => x)],
+        CollectionOrdering.Matching
+      );
+    await Assert.That(other).IsEquivalentTo(["OK", "OK", "OK"]);
+    var limited = service.Logs.Of<ManagedRenderers>(6);
+    await Assert.That(limited.Count).IsEqualTo(3);
+    await Assert
+      .That(limited[0].Message)
+      .IsEqualTo(
+        "Refused tenant myapp-3 for now: prefix myapp- created its most renderers (3) in the last "
+          + "minute."
+      );
+  }
+
+  [Test]
+  public async Task A_create_its_prefix_refuses_takes_nothing_from_the_service()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 2;
+        service.TenantPrefixes[0].MaxCreatesPerMinute = 1;
+      }
+    );
+
+    using var first = await service.PutAsync("myapp-1", TestToken);
+    using var refused = await service.PutAsync("myapp-2", TestToken);
+    using var other = await service.PutAsync("big-1", TestToken);
+
+    await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert.That(refused.Headers.RetryAfter?.Delta).IsEqualTo(TimeSpan.FromSeconds(60));
+    await Assert.That(other.StatusCode).IsEqualTo(HttpStatusCode.OK);
+  }
+
+  [Test]
+  public async Task A_create_the_service_refuses_takes_nothing_from_its_prefix()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 3;
+        service.TenantPrefixes[1].MaxCreatesPerMinute = 2;
+      }
+    );
+
+    using var big1 = await service.PutAsync("big-1", TestToken);
+    using var app1 = await service.PutAsync("myapp-1", TestToken);
+    using var app2 = await service.PutAsync("myapp-2", TestToken);
+    provisioning.Clock.Advance(TimeSpan.FromSeconds(30));
+    using var refused = await service.PutAsync("big-2", TestToken);
+    provisioning.Clock.Advance(TimeSpan.FromSeconds(30));
+    // big-1's create has left big-'s window, and the refused one was never in it.
+    using var big3 = await service.PutAsync("big-3", TestToken);
+    using var big4 = await service.PutAsync("big-4", TestToken);
+
+    foreach (var response in new[] { big1, app1, app2, big3, big4 })
+    {
+      await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert.That(refused.Headers.RetryAfter?.Delta).IsEqualTo(TimeSpan.FromSeconds(30));
+    await Assert
+      .That(service.Logs.Of<ManagedRenderers>(6).Single().Message)
+      .IsEqualTo(
+        "Refused tenant big-2 for now: the service created its most renderers (3) in the last "
+          + "minute."
+      );
+  }
+
+  [Test]
   [Arguments("an unreadable record", "The record of myapp-1 is damaged.")]
   [Arguments("the data plane", "Too many ports.")]
   [Arguments("the record store", "The vault is unavailable.")]
@@ -1031,6 +1142,12 @@ public class ServiceTests
 
   private static RetireResult Retired(Dictionary<string, string>? failures = null) =>
     new([], failures ?? []);
+
+  /// <summary><c>OK</c> for a success, or the problem's <c>kind</c>.</summary>
+  private static async Task<string> AnswerAsync(HttpResponseMessage response) =>
+    response.IsSuccessStatusCode
+      ? "OK"
+      : (await RunningService.ReadJsonAsync(response)).GetProperty("kind").GetString()!;
 
   /// <summary>The <see cref="ProvisioningApiException"/> that <paramref name="call"/> throws.</summary>
   private static async Task<ProvisioningApiException> RefusalAsync(Func<Task> call)

@@ -33,7 +33,11 @@ internal sealed partial class ManagedRenderers
   private readonly RendererProvisioner _provisioner;
   private readonly TenantCensus _census;
   private readonly TenantGate _gate;
+  private readonly TimeProvider _time;
+
+  // The service's MaxCreatesPerMinute, a ceiling over each prefix's own.
   private readonly CreationRateLimit _rateLimit;
+  private readonly Dictionary<string, CreationRateLimit> _prefixRateLimits;
   private readonly ILogger _logger;
   private readonly CancellationToken _stopping;
 
@@ -55,7 +59,13 @@ internal sealed partial class ManagedRenderers
     _provisioner = provisioner;
     _census = census;
     _gate = gate;
+    _time = time;
     _rateLimit = new CreationRateLimit(options.Service.MaxCreatesPerMinute, time);
+    _prefixRateLimits = options.Service.TenantPrefixes.ToDictionary(
+      prefix => prefix.Prefix,
+      prefix => new CreationRateLimit(prefix.MaxCreatesPerMinute, time),
+      StringComparer.Ordinal
+    );
     _logger = logger;
     _stopping = lifetime.ApplicationStopping;
   }
@@ -126,18 +136,47 @@ internal sealed partial class ManagedRenderers
             return new RendererOutcome(RendererAnswer.QuotaExceeded);
           }
 
-          if (!_rateLimit.TryAcquire(out var retryAfter))
+          // Both the prefix's budget and the service's must have room, and a create refused by
+          // either takes from neither.
+          var now = _time.GetTimestamp();
+          var prefixRateLimit = _prefixRateLimits[prefix.Prefix];
+          var prefixHasRoom = prefixRateLimit.HasRoom(now, out var prefixRetryAfter);
+          var serviceHasRoom = _rateLimit.HasRoom(now, out var serviceRetryAfter);
+          if (!prefixHasRoom || !serviceHasRoom)
           {
-            LogRateLimited(_logger, tenantId, _options.Service.MaxCreatesPerMinute);
-            return new RendererOutcome(RendererAnswer.RateLimited, retryAfter);
+            if (!prefixHasRoom)
+            {
+              LogRateLimited(
+                _logger,
+                tenantId,
+                $"prefix {prefix.Prefix}",
+                prefix.MaxCreatesPerMinute
+              );
+            }
+
+            if (!serviceHasRoom)
+            {
+              LogRateLimited(_logger, tenantId, "the service", _rateLimit.PerMinute);
+            }
+
+            return new RendererOutcome(
+              RendererAnswer.RateLimited,
+              prefixRetryAfter > serviceRetryAfter ? prefixRetryAfter : serviceRetryAfter
+            );
           }
 
-          _gate.TryStartCreation(
-            tenantId,
-            () => Start(tenantId, prefix),
-            out creation,
-            out removal
-          );
+          if (
+            _gate.TryStartCreation(
+              tenantId,
+              () => Start(tenantId, prefix),
+              out creation,
+              out removal
+            )
+          )
+          {
+            prefixRateLimit.Take(now);
+            _rateLimit.Take(now);
+          }
         }
       }
 
@@ -334,11 +373,12 @@ internal sealed partial class ManagedRenderers
   [LoggerMessage(
     EventId = 6,
     Level = LogLevel.Warning,
-    Message = "Refused tenant {TenantId} for now: {MaxCreatesPerMinute} renderers were created in the last minute."
+    Message = "Refused tenant {TenantId} for now: {Limited} created its most renderers ({MaxCreatesPerMinute}) in the last minute."
   )]
   private static partial void LogRateLimited(
     ILogger logger,
     string tenantId,
+    string limited,
     int maxCreatesPerMinute
   );
 

@@ -10,8 +10,8 @@ namespace Atli.Reports.Provisioner.Tests.Support;
 /// <summary>
 /// The provisioning service (<c>serve</c>) on a free loopback port over the provisioner's in-memory
 /// fakes, with what it logs. It manages <c>myapp-</c> (at most 10 renderers, the default size) and
-/// <c>big-</c> (size L), creates at most 60 renderers a minute, and admits two gateway keys,
-/// <see cref="Gateway"/> and <see cref="Rotated"/>.
+/// <c>big-</c> (size L), creates at most 20 renderers a minute under each and 60 in all, and admits
+/// two gateway keys, <see cref="Gateway"/> and <see cref="Rotated"/>.
 /// </summary>
 internal sealed class RunningService : IAsyncDisposable
 {
