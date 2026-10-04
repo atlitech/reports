@@ -264,7 +264,8 @@ def build_context(work):
     context = work / "context"
     context.mkdir()
     paths = ["global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig",
-             "src/Atli.Reports.Engine", "src/Atli.Reports.Server"]
+             "src/Atli.Reports.Engine", "src/Atli.Reports.Client", "src/Atli.Reports.Hosting",
+             "src/Atli.Reports.Server"]
     archive = subprocess.run(["git", "-C", str(REPO), "archive", "HEAD", *paths],
                              capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", str(context)], input=archive, check=True)

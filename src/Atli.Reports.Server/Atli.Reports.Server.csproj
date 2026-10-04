@@ -21,5 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Atli.Reports.Engine\Atli.Reports.Engine.csproj" />
+    <!-- Gateway mode: renderer records, waking suspended renderers, and the client's wire format. -->
+    <ProjectReference Include="..\Atli.Reports.Client\Atli.Reports.Client.csproj" />
+    <ProjectReference Include="..\Atli.Reports.Hosting\Atli.Reports.Hosting.csproj" />
   </ItemGroup>
 </Project>

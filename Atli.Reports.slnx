@@ -18,6 +18,8 @@
     <Project Path="src/Atli.Reports.Blazor.Components/Atli.Reports.Blazor.Components.csproj" />
     <Project Path="src/Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
     <Project Path="src/Atli.Reports.Client/Atli.Reports.Client.csproj" />
+    <Project Path="src/Atli.Reports.Hosting/Atli.Reports.Hosting.csproj" />
+    <Project Path="src/Atli.Reports.Provisioner/Atli.Reports.Provisioner.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Atli.Reports.AppHost.Tests/Atli.Reports.AppHost.Tests.csproj">
@@ -27,5 +29,7 @@
     <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Client.Tests/Atli.Reports.Client.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Engine.Tests/Atli.Reports.Engine.Tests.csproj" />
+    <Project Path="tests/Atli.Reports.Hosting.Tests/Atli.Reports.Hosting.Tests.csproj" />
+    <Project Path="tests/Atli.Reports.Provisioner.Tests/Atli.Reports.Provisioner.Tests.csproj" />
   </Folder>
 </Solution>
