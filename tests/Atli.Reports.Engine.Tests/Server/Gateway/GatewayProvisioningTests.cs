@@ -478,6 +478,56 @@ public class GatewayProvisioningTests
   }
 
   [Test]
+  public async Task A_lookup_that_finishes_after_a_reload_does_not_replace_the_reloaded_record()
+  {
+    TaskCompletionSource ensuring = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var deleted = await FakeRenderer.StartAsync(NotFoundAsync);
+    await using var replacement = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 replacement")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, replacement)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, deleted);
+    service.OnEnsure = async (context, tenant) =>
+    {
+      ensuring.TrySetResult();
+      await release.Task.WaitAsync(context.RequestAborted);
+      service.Store.Records[tenant] = Record(tenant, replacement);
+      await FakeProvisioningService.WriteEnsuredAsync(context, tenant, true);
+    };
+    await using var under = await StartAsync(service);
+
+    // The platform no longer finds the renderer, so the conversion has the service replace it.
+    var conversion = under.ConvertAsync(Tenant);
+    await ensuring.Task.WaitAsync(TestToken);
+    // Meanwhile another request reads the old record, and is held before it answers.
+    HeldLookup held = new(service.Store, Tenant);
+    var stale = under.LookUpAsync(Tenant);
+    await held.Read.WaitAsync(TestToken);
+    // The service records the replacement, which the gateway reloads and converts on.
+    release.SetResult();
+    using var converted = await conversion;
+    // The held lookup finishes last, with the record it read before the reload.
+    held.Release();
+    using var rejected = await stale;
+
+    using var again = await under.ConvertAsync(Tenant);
+
+    await Assert.That(converted.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(rejected.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    await Assert.That(again.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert
+      .That(await again.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("%PDF-1.7 replacement");
+    // The reloaded record stayed cached: no conversion went to the old renderer again.
+    await Assert.That(deleted.Requests).HasSingleItem();
+    await Assert.That(replacement.Requests.Count).IsEqualTo(2);
+    await Assert.That(service.Ensures).IsEqualTo(1);
+  }
+
+  [Test]
   public async Task A_conversion_ensures_at_most_once()
   {
     await using var deleted = await FakeRenderer.StartAsync(NotFoundAsync);
