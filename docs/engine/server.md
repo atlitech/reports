@@ -292,8 +292,9 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
 - **Creating renderers on demand.** With `Provisioning:Mode=OnDemand`, a tenant under one of its
   caller's prefixes gets its renderer from the
   [provisioning service](../hosted-renderers.md#applications-with-many-tenants). When the tenant
-  has no record, or the port proxy's `404 {"error":"Not found"}` says its renderer is gone, the
-  gateway asks the service to ensure one (`PUT /tenants/{tenantId}/renderer`), reads the record
+  has no record, the port proxy's `404 {"error":"Not found"}` says its renderer is gone, or (with
+  `Wake:Mode=Sandboxes`) the data plane no longer knows the record's sandbox, the gateway asks the
+  service to ensure one (`PUT /tenants/{tenantId}/renderer`), reads the record
   again, and sends the conversion to it. That happens at most once per conversion; a conversion
   that still cannot be sent gets the answer described above. The concurrent conversions of a
   tenant in a replica share one call, which carries none of their trace context and which no

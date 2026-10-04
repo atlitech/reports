@@ -38,6 +38,12 @@ internal sealed class RendererDirectory(
   /// </summary>
   private static readonly TimeSpan StoreTimeout = TimeSpan.FromSeconds(30);
 
+  /// <summary>
+  /// How often expired answers are cleared out. A caller with a tenant prefix can name any number of
+  /// tenants, so answers must not outlive their use.
+  /// </summary>
+  private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
+
   private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
   private readonly ConcurrentDictionary<string, Lazy<Task<RendererRecord?>>> _loads = new(
     StringComparer.Ordinal
@@ -45,6 +51,9 @@ internal sealed class RendererDirectory(
 
   /// <summary>Numbers store lookups in the order they start.</summary>
   private long _lookups;
+
+  /// <summary>When expired answers are next cleared out, as a <see cref="TimeProvider"/> timestamp.</summary>
+  private long _nextSweep;
 
   /// <summary>
   /// The tenant's record, or <see langword="null"/> when it has none. Throws what the store throws.
@@ -141,12 +150,34 @@ internal sealed class RendererDirectory(
         );
       }
 
+      SweepExpired();
       return record;
     }
     finally
     {
       // Only this lookup: a reload may have taken its place.
       _loads.TryRemove(KeyValuePair.Create(tenantId, load));
+    }
+  }
+
+  /// <summary>Removes expired answers, at most once per <see cref="SweepInterval"/>.</summary>
+  private void SweepExpired()
+  {
+    var now = timeProvider.GetTimestamp();
+    var due = Interlocked.Read(ref _nextSweep);
+    var next = now + (long)(SweepInterval.TotalSeconds * timeProvider.TimestampFrequency);
+    if (now < due || Interlocked.CompareExchange(ref _nextSweep, next, due) != due)
+    {
+      return;
+    }
+
+    foreach (var entry in _entries)
+    {
+      if (now >= entry.Value.ExpiresAt)
+      {
+        // Only this answer: a newer one may have replaced it meanwhile.
+        _entries.TryRemove(entry);
+      }
     }
   }
 

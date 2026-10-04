@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using Atli.Reports.Engine.Tests.Support;
 using Atli.Reports.Hosting.Provisioning;
+using Atli.Reports.Hosting.Sandboxes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -442,6 +443,41 @@ public class GatewayProvisioningTests
   }
 
   [Test]
+  public async Task A_manual_renderer_whose_sandbox_is_gone_is_replaced_and_the_conversion_resent()
+  {
+    // A Manual port answers for its stopped sandbox, and the data plane no longer knows it.
+    await using var gone = await FakeRenderer.StartAsync(NotRunningAsync);
+    await using var replacement = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 replacement")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, replacement)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, gone) with { SandboxId = "sandbox-gone" };
+    service.OnEnsure = async (context, tenant) =>
+    {
+      service.Store.Records[tenant] = Record(tenant, replacement);
+      await FakeProvisioningService.WriteEnsuredAsync(context, tenant, true);
+    };
+    FakeSandboxesClient sandboxes = new(_ => null, (_, _) => Task.CompletedTask);
+    await using var under = await StartAsync(
+      service,
+      SandboxesWake(),
+      builder => builder.Services.AddSingleton<ISandboxesClient>(sandboxes)
+    );
+
+    using var response = await under.ConvertAsync(Tenant);
+
+    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert
+      .That(await response.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("%PDF-1.7 replacement");
+    await Assert.That(service.Ensures).IsEqualTo(1);
+    await Assert.That(sandboxes.Resumes).IsEqualTo(0);
+    await Assert.That(under.Logs.WithEventId(55)).HasSingleItem();
+  }
+
+  [Test]
   public async Task A_conversion_ensures_at_most_once()
   {
     await using var deleted = await FakeRenderer.StartAsync(NotFoundAsync);
@@ -523,6 +559,16 @@ public class GatewayProvisioningTests
   }
 
   /// <summary>The Sandboxes proxy's answer for a sandbox that no longer exists.</summary>
+  private static async Task NotRunningAsync(HttpContext context)
+  {
+    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(
+      """{"error":"Sandbox is not running"}""",
+      context.RequestAborted
+    );
+  }
+
   private static async Task NotFoundAsync(HttpContext context)
   {
     context.Response.StatusCode = StatusCodes.Status404NotFound;

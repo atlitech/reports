@@ -192,6 +192,43 @@ public class GatewayConfigurationTests
   }
 
   [Test]
+  public async Task Clearing_out_expired_answers_keeps_the_records_still_cached()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    FakeRecordStore store = new();
+    store.Records["acme"] = Record("acme", renderer.BaseUrl);
+    store.Records["globex"] = Record("globex", renderer.BaseUrl);
+    ManualClock clock = new();
+    await using var gateway = await StartWithStoreAsync(
+      store,
+      [
+        "--ReportsServer:Gateway:Tenants:0:Tenants:1=globex",
+        "--ReportsServer:Gateway:Records:CacheDuration=00:05:00",
+      ],
+      builder => builder.Services.AddSingleton<TimeProvider>(clock)
+    );
+
+    async Task ConvertAsync(string tenant)
+    {
+      using var request = ConvertRequest();
+      request.Headers.Add("X-Reports-Tenant", tenant);
+      using var response = await gateway.Client.SendAsync(request, TestToken);
+      await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    await ConvertAsync("acme");
+    // Past the sweep interval but within acme's cache duration: globex's lookup clears out
+    // expired answers, and acme's is not one of them.
+    clock.Advance(TimeSpan.FromMinutes(2));
+    await ConvertAsync("globex");
+    await ConvertAsync("acme");
+
+    await Assert.That(store.Lookups).IsEquivalentTo(["acme", "globex"]);
+  }
+
+  [Test]
   public async Task Without_a_cache_every_conversion_reads_the_store()
   {
     await using var renderer = await FakeRenderer.StartAsync(context =>
@@ -720,6 +757,18 @@ public class GatewayConfigurationTests
         request.Dispose();
       }
     }
+  }
+
+  /// <summary>A clock that moves only when told to; timers still run on real time.</summary>
+  private sealed class ManualClock : TimeProvider
+  {
+    private long _ticks;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => Volatile.Read(ref _ticks);
+
+    public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
   }
 
   private static RendererRecord Record(string tenantId, string url) =>

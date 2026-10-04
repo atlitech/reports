@@ -316,6 +316,8 @@ internal sealed partial class RendererGateway(
             case WakeResult.Missing:
               LogNoSandbox(logger, attempt.TenantId, record.SandboxId);
               directory.Evict(attempt.TenantId, record);
+              // As the port proxy's 404: the provisioning service may create a new renderer.
+              attempt.RendererNotFound = true;
               return Unavailable("The tenant's renderer is not running.");
             case WakeResult.Disabled:
               LogDisabled(logger, attempt.TenantId, record.SandboxId);
