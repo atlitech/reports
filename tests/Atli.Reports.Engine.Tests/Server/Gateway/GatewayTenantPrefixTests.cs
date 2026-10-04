@@ -143,23 +143,22 @@ public class GatewayTenantPrefixTests
     await using var renderer = await StartEchoRendererAsync();
     await using var gateway = await GatewayHost.StartAsync([
       .. Callers(),
-      // myapp-legacy is listed and also under the caller's own prefix.
-      .. Membership(0, "alpha-app", "acme", "myapp-legacy"),
+      .. Membership(0, "alpha-app", "acme", "legacy"),
       .. Prefixes(0, "myapp-", "reports-"),
       .. Membership(1, "beta-app", "acme"),
       .. Renderer(0, "acme", renderer.BaseUrl, "key-acme"),
-      .. Renderer(1, "myapp-legacy", renderer.BaseUrl, "key-legacy"),
+      .. Renderer(1, "legacy", renderer.BaseUrl, "key-legacy"),
       .. Renderer(2, Workspace, renderer.BaseUrl, "key-workspace"),
       .. Renderer(3, "reports-1", renderer.BaseUrl, "key-reports"),
     ]);
 
     await AssertPdfAsync(await SendAsync(gateway, AlphaKey, "acme"), "%PDF-1.7 key-acme");
-    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, "myapp-legacy"), "%PDF-1.7 key-legacy");
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, "legacy"), "%PDF-1.7 key-legacy");
     await AssertPdfAsync(await SendAsync(gateway, AlphaKey, Workspace), "%PDF-1.7 key-workspace");
     await AssertPdfAsync(await SendAsync(gateway, AlphaKey, "reports-1"), "%PDF-1.7 key-reports");
-    // A caller that shares a listed tenant shares none of the prefix's.
+    // A caller that shares a listed tenant shares none of the other's.
     await AssertPdfAsync(await SendAsync(gateway, BetaKey), "%PDF-1.7 key-acme");
-    foreach (var tenant in new[] { "myapp-legacy", Workspace, "reports-1" })
+    foreach (var tenant in new[] { "legacy", Workspace, "reports-1" })
     {
       var problem = await ReadProblemAsync(await SendAsync(gateway, BetaKey, tenant));
       await Assert.That(problem.Status).IsEqualTo(403).Because(tenant);
@@ -171,8 +170,8 @@ public class GatewayTenantPrefixTests
   {
     await using var app = ReportsServerApplication.Create([
       .. Settings(),
-      // Overlapping prefixes of one caller, and a listed tenant under the caller's own prefix.
-      .. Membership(0, "anonymous", "myapp-legacy"),
+      // Overlapping prefixes of one caller.
+      .. Membership(0, "anonymous", "legacy"),
       .. Prefixes(0, "myapp-", "myapp-eu-"),
       // Tenants that only share a prefix's letters, and a listed tenant two callers share.
       .. Membership(1, "billing-app", "myapp", "myappcorp-1", "acme"),
@@ -281,6 +280,30 @@ public class GatewayTenantPrefixTests
     await Assert.That(exception!.Message).Contains($"'{Workspace}', which is under");
     await Assert.That(exception.Message).Contains("'billing-app'");
     await Assert.That(exception.Message).Contains("'anonymous'");
+  }
+
+  [Test]
+  public async Task A_listed_tenant_may_not_fall_under_the_callers_own_prefix()
+  {
+    // The provisioning service retires and deletes the renderers of every tenant under a prefix,
+    // and the gateway never has it create a listed tenant's: such a tenant would lose its renderer
+    // for good.
+    var exception = await Assert
+      .That(() =>
+        ReportsServerApplication.Create([
+          .. Settings(),
+          .. Membership(0, "anonymous", "acme", "myapp-legacy"),
+          .. Prefixes(0, "myapp-"),
+        ])
+      )
+      .Throws<InvalidOperationException>();
+
+    await Assert
+      .That(exception!.Message)
+      .Contains(
+        "'anonymous' lists the tenant ID 'myapp-legacy', which is under its own tenant prefix 'myapp-'"
+      );
+    await Assert.That(exception.Message).Contains("no caller may list one");
   }
 
   [Test]

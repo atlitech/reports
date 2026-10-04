@@ -246,19 +246,35 @@ internal sealed class GatewayOptions
       }
     }
 
-    // A prefix's tenants are its caller's alone: no other caller's prefix may overlap it, and no
-    // other caller may list a tenant under it. Listed tenants may still be shared.
+    // A prefix's tenants are its caller's alone, so no other caller's prefix may overlap it. They
+    // are also managed through the prefix: the provisioning service retires and deletes the
+    // renderer of every tenant under a prefix it serves, and the gateway never has it create a
+    // listed tenant's, so a listed tenant under a prefix, even its own caller's, would lose its
+    // renderer for good. No caller may list one. Listed tenants elsewhere may still be shared.
     foreach (var owner in Tenants)
     {
-      foreach (var other in Tenants)
+      foreach (var prefix in owner.TenantPrefixes)
       {
-        if (ReferenceEquals(other, owner))
+        foreach (var other in Tenants)
         {
-          continue;
-        }
+          var listed = Array.Find(other.Tenants, tenant => TenantPrefix.Owns(prefix, tenant));
+          if (listed is not null)
+          {
+            throw new InvalidOperationException(
+              (
+                ReferenceEquals(other, owner)
+                  ? $"ReportsServer:Gateway:Tenants for caller '{owner.CallerId}' lists the tenant ID '{listed}', which is under its own tenant prefix '{prefix}'."
+                  : $"ReportsServer:Gateway:Tenants for caller '{other.CallerId}' lists the tenant ID '{listed}', which is under the tenant prefix '{prefix}' of caller '{owner.CallerId}'."
+              )
+                + " A prefix's tenants are managed through the prefix, where the provisioning service creates, retires, and deletes their renderers, so no caller may list one."
+            );
+          }
 
-        foreach (var prefix in owner.TenantPrefixes)
-        {
+          if (ReferenceEquals(other, owner))
+          {
+            continue;
+          }
+
           var overlapping = Array.Find(
             other.TenantPrefixes,
             otherPrefix => TenantPrefix.Overlap(prefix, otherPrefix)
@@ -267,14 +283,6 @@ internal sealed class GatewayOptions
           {
             throw new InvalidOperationException(
               $"ReportsServer:Gateway:Tenants for callers '{owner.CallerId}' and '{other.CallerId}' have the tenant prefixes '{prefix}' and '{overlapping}', which overlap: one starts with the other, so both callers would own the same tenants."
-            );
-          }
-
-          var listed = Array.Find(other.Tenants, tenant => TenantPrefix.Owns(prefix, tenant));
-          if (listed is not null)
-          {
-            throw new InvalidOperationException(
-              $"ReportsServer:Gateway:Tenants for caller '{other.CallerId}' lists the tenant ID '{listed}', which is under the tenant prefix '{prefix}' of caller '{owner.CallerId}'. A prefix's tenants are its caller's alone."
             );
           }
         }
@@ -292,8 +300,8 @@ internal sealed class GatewayCallerTenants
   public string CallerId { get; set; } = "";
 
   /// <summary>
-  /// Tenant IDs the caller belongs to, which other callers may list too. A caller with exactly one,
-  /// and no prefixes, may leave the tenant header out.
+  /// Tenant IDs the caller belongs to, which other callers may list too, but none under any
+  /// caller's prefix. A caller with exactly one, and no prefixes, may leave the tenant header out.
   /// </summary>
   public string[] Tenants { get; set; } = [];
 

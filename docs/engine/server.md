@@ -177,7 +177,7 @@ security settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other), and no caller may list a tenant under another's prefix. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
+| `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other). No caller may list a tenant under any prefix, its own included: the provisioning service retires and deletes the renderers of a prefix's tenants, and the gateway never has it create a listed tenant's, so such a tenant would lose its renderer for good. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
 | `TenantHeader` | `X-Reports-Tenant` | The header a caller names its tenant in; only a caller with one listed tenant and no prefix may leave it out |
 | `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
 | `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId`, `MaxConcurrentRequests` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, its sandbox ID if it is a sandbox, and how many requests it admits at once |
@@ -216,9 +216,9 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   twice) is a `400` (`InvalidRequest`), and a tenant it does not belong to is a `403`. The header
   names one of the caller's tenants when the caller lists it, or when one of its prefixes owns it:
   a valid tenant ID that starts with the prefix and continues past it. The prefix alone, a tenant
-  under another caller's prefix, and an invalid tenant ID are all `403`s. A tenant that is both
-  listed and under one of the caller's prefixes counts as listed. An empty header counts as a
-  missing one, so it selects a single-tenant caller's tenant and is a `400` for any other caller.
+  under another caller's prefix, and an invalid tenant ID are all `403`s. An empty header counts
+  as a missing one, so it selects a single-tenant caller's tenant and is a `400` for any other
+  caller.
   The gateway lets a caller use every tenant under its prefixes and knows nothing of the caller's
   own users, so an application that gives each of its workspaces a tenant must check that the
   signed-in user may use a workspace before naming the workspace's tenant. This runs after caller

@@ -38,7 +38,8 @@ internal sealed class TenantMembership(GatewayOptions options)
         : new(null, TenantRejection.HeaderRequired);
     }
 
-    // A listed tenant is the operator's even when it is also under one of the caller's prefixes.
+    // A listed tenant is the operator's. Validation keeps listed tenants out of every prefix, so
+    // no tenant is both.
     var requested = header[0];
     if (Array.IndexOf(membership.Tenants, requested) >= 0)
     {
