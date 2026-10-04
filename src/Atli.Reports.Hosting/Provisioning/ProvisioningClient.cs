@@ -43,6 +43,7 @@ public sealed class ProvisioningClient : IProvisioningClient
     ProvisioningProblemKinds.NotAllowed,
     ProvisioningProblemKinds.QuotaExceeded,
     ProvisioningProblemKinds.RateLimited,
+    ProvisioningProblemKinds.Disabled,
     ProvisioningProblemKinds.Failed,
   ];
 

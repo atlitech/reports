@@ -68,6 +68,12 @@ public static class ProvisioningProblemKinds
   public const string RateLimited = "RateLimited";
 
   /// <summary>
+  /// <c>409</c>: the tenant's renderer is disabled (the operator's kill switch), so the service
+  /// neither deletes nor replaces it; the operator enables or deletes it.
+  /// </summary>
+  public const string Disabled = "Disabled";
+
+  /// <summary>
   /// <c>503</c>: the renderer could not be created now (the data plane, the record store, or the
   /// renderer's readiness failed), or the tenant's record cannot be read. May succeed later.
   /// </summary>
