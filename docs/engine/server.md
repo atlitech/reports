@@ -186,7 +186,8 @@ security settings:
 | `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
 | `RendererTimeout` | `00:01:30` | The deadline of one forwarded conversion, from the record lookup to the PDF's last byte |
 | `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
-| `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when the tenant's record says its renderer admits fewer |
+| `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when this replica's share of what the tenant's renderer admits is fewer |
+| `Replicas` | `1` | How many gateway replicas send conversions to the same renderers, 1 to 1000: each replica admits a tenant its record's `MaxConcurrentRequests` divided by this, rounded down and at least 1. Set it to the most replicas that run at once |
 | `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
 | `AllowAnonymousCallers` | `false` | Allows `Authentication:Mode=None`, under which anyone who reaches the gateway converts as `anonymous` for that caller ID's tenants. For tests and development only |
 
@@ -210,13 +211,16 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   tenant it does not belong to is a `403`. An empty header counts as a missing one, so it selects
   a single-tenant caller's tenant and is a `400` for a caller with several. This runs after caller
   admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
-  or its record's `MaxConcurrentRequests` (the requests its renderer admits) when that is lower; a
-  tenant at its limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway.
-  The limit holds per replica, so several replicas can still send a renderer more than it admits;
-  the renderer's `Busy` is retried as described below. In a
-  [measured run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md)
-  at twice the admitted concurrency, two replicas made renderers refuse 8,031 requests in
-  5 minutes, which the gateway resent, and 388 conversions still ended in `Busy`. Caller admission
+  or this replica's share of its record's `MaxConcurrentRequests` (the requests its renderer
+  admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant at its
+  limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway. The limit
+  holds per replica, which knows nothing of the others' traffic, so `Replicas` must count every
+  replica that may run: in a [measured run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md)
+  at twice the admitted concurrency, two replicas each admitting the whole of it made renderers
+  refuse 8,031 requests in 5 minutes, which the gateway resent, and 388 conversions still ended
+  in `Busy`. Set to the most replicas of an autoscaled gateway, it leaves renderers partly unused
+  while fewer run; with more replicas than a renderer admits, each still admits 1, and the
+  renderer's `Busy` is retried as described below. Caller admission
   (`Limits:MaxConcurrentRequestsPerCaller`, 4 by default) applies before the tenant limits, so a
   caller that serves several tenants needs it raised to their combined limits.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer

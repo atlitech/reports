@@ -75,7 +75,8 @@ internal sealed class TenantAdmission
 
   /// <summary>
   /// Takes one of the tenant's <paramref name="limit"/> slots: the gateway's
-  /// <c>MaxConcurrentRequestsPerTenant</c>, or less when the tenant's renderer admits fewer.
+  /// <c>MaxConcurrentRequestsPerTenant</c>, or less when this replica's share of what the tenant's
+  /// renderer admits is fewer.
   /// </summary>
   public bool TryAcquire(string tenantId, int limit, out IDisposable? lease)
   {
