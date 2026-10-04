@@ -194,10 +194,11 @@ internal static partial class GatewayRegistration
   }
 
   /// <summary>
-  /// Resolves each conversion's tenant from the authenticated caller, before the body is read, and
-  /// holds a per-tenant admission lease for the rest of the request. Runs after caller admission,
-  /// so the caller's limits and deadline already apply. With <c>Provisioning:Mode=OnDemand</c>, also
-  /// maps <c>DELETE /tenants/{tenantId}</c> (see <see cref="TenantEndpoints"/>).
+  /// Resolves each conversion's tenant from the authenticated caller, before the body is read, keeps
+  /// the caller's lookups of tenants new to the gateway within its budget, and holds a per-tenant
+  /// admission lease for the rest of the request. Runs after caller admission, so the caller's
+  /// limits and deadline already apply. With <c>Provisioning:Mode=OnDemand</c>, also maps
+  /// <c>DELETE /tenants/{tenantId}</c> (see <see cref="TenantEndpoints"/>).
   /// </summary>
   public static void UseReportsGateway(this WebApplication app)
   {
@@ -216,6 +217,7 @@ internal static partial class GatewayRegistration
     var membership = app.Services.GetRequiredService<TenantMembership>();
     // Conversions in flight per tenant.
     InFlightAdmission admission = new();
+    NewTenantLookups lookups = new(settings, app.Services.GetRequiredService<TimeProvider>());
     var directory = app.Services.GetRequiredService<RendererDirectory>();
     var logger = app
       .Services.GetRequiredService<ILoggerFactory>()
@@ -274,6 +276,22 @@ internal static partial class GatewayRegistration
         }
 
         var tenantId = resolution.TenantId!;
+        // A caller can name a new tenant under its prefixes on every request, and each costs a read
+        // of the record store before the body is read: only within the caller's budget. Answers
+        // the directory already has cost nothing.
+        if (resolution.ViaPrefix && !directory.HasAnswer(tenantId) && !lookups.TryTake(caller))
+        {
+          LogLookupsSpent(logger, caller, lookups.PerSecond);
+          await ConversionProblems.WriteAsync(
+            context,
+            new ConversionError(
+              ConversionErrorKind.Busy,
+              "The caller named more new tenants than the gateway looks up per second. Retry later."
+            )
+          );
+          return;
+        }
+
         var (limit, feature) = await TenantLimitAsync(
           directory,
           settings,
@@ -348,6 +366,13 @@ internal static partial class GatewayRegistration
     Message = "Tenant {TenantId} reached its limit of {Limit} conversions in flight."
   )]
   private static partial void LogTenantBusy(ILogger logger, string tenantId, int limit);
+
+  [LoggerMessage(
+    EventId = 70,
+    Level = LogLevel.Information,
+    Message = "Caller {CallerId} spent its budget of {PerSecond} lookups of new tenants per second."
+  )]
+  private static partial void LogLookupsSpent(ILogger logger, string callerId, int perSecond);
 }
 
 /// <summary>

@@ -160,6 +160,62 @@ internal sealed class InFlightAdmission
 }
 
 /// <summary>
+/// Each caller's budget, in this instance, of record lookups for tenants under its prefixes that the
+/// gateway has no answer for: a bucket of <see cref="GatewayOptions.MaxNewTenantLookupsPerCallerPerSecond"/>
+/// lookups, refilled at that rate per second. A caller with a prefix can name a new tenant on every
+/// request, and each costs a read of the record store, a remote vault whose throttling would fail
+/// every tenant's reads, before the request body is read; the budget bounds that per caller.
+/// </summary>
+/// <remarks>
+/// The gateway takes from the budget only when the directory has neither an answer cached, a record
+/// or none, nor a lookup in flight to join, so a caller's known tenants cost nothing, and listed
+/// tenants never take part. Only callers with a prefix get here, and they are configured, so the
+/// buckets are as many as those callers.
+/// </remarks>
+internal sealed class NewTenantLookups(GatewayOptions options, TimeProvider timeProvider)
+{
+  private readonly Lock _gate = new();
+  private readonly Dictionary<string, Bucket> _buckets = new(StringComparer.Ordinal);
+
+  /// <summary>The lookups a caller may start per second.</summary>
+  public int PerSecond => options.MaxNewTenantLookupsPerCallerPerSecond;
+
+  /// <summary>Takes one lookup from the caller's budget; <see langword="false"/> when it is spent.</summary>
+  public bool TryTake(string callerId)
+  {
+    lock (_gate)
+    {
+      var now = timeProvider.GetTimestamp();
+      if (!_buckets.TryGetValue(callerId, out var bucket))
+      {
+        bucket = new Bucket { Tokens = PerSecond, Updated = now };
+        _buckets.Add(callerId, bucket);
+      }
+
+      var elapsedSeconds = (double)(now - bucket.Updated) / timeProvider.TimestampFrequency;
+      bucket.Tokens = Math.Min(PerSecond, bucket.Tokens + (elapsedSeconds * PerSecond));
+      bucket.Updated = now;
+      if (bucket.Tokens < 1)
+      {
+        return false;
+      }
+
+      bucket.Tokens--;
+      return true;
+    }
+  }
+
+  private sealed class Bucket
+  {
+    /// <summary>The lookups left, refilled continuously up to a second's worth.</summary>
+    public double Tokens { get; set; }
+
+    /// <summary>When <see cref="Tokens"/> was last refilled, as a <see cref="TimeProvider"/> timestamp.</summary>
+    public long Updated { get; set; }
+  }
+}
+
+/// <summary>
 /// The request's verified tenant, set by the gateway middleware for the converter, with the
 /// renderer record the middleware read for the tenant's limit, so the conversion does not read it
 /// again. <paramref name="RecordLoaded"/> is <see langword="false"/> when that read failed; the

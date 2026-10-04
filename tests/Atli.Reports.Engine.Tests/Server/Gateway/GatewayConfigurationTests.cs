@@ -90,6 +90,14 @@ public class GatewayConfigurationTests
   [Arguments("--ReportsServer:Gateway:Replicas=0", "Replicas")]
   [Arguments("--ReportsServer:Gateway:Replicas=1001", "Replicas")]
   [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=0",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
+    "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=10001",
+    "MaxNewTenantLookupsPerCallerPerSecond"
+  )]
+  [Arguments(
     "--ReportsServer:Gateway:Provisioning:MaxConcurrentDeletesPerCaller=0",
     "MaxConcurrentDeletesPerCaller"
   )]
@@ -765,18 +773,6 @@ public class GatewayConfigurationTests
         request.Dispose();
       }
     }
-  }
-
-  /// <summary>A clock that moves only when told to; timers still run on real time.</summary>
-  private sealed class ManualClock : TimeProvider
-  {
-    private long _ticks;
-
-    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-    public override long GetTimestamp() => Volatile.Read(ref _ticks);
-
-    public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
   }
 
   private static RendererRecord Record(string tenantId, string url) =>

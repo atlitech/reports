@@ -4,6 +4,7 @@ using Atli.Reports.Engine.Tests.Support;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Server;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using static Atli.Reports.Engine.Tests.Server.Gateway.GatewayHost;
 using static Atli.Reports.Engine.Tests.Server.SecurityAuthenticationTests;
 
@@ -103,6 +104,70 @@ public class GatewayTenantPrefixTests
       await SendAsync(gateway, AlphaKey, Workspace),
       $"%PDF-1.7 key-{Workspace}"
     );
+  }
+
+  [Test]
+  public async Task Each_callers_lookups_of_new_tenants_are_limited()
+  {
+    await using var renderer = await StartEchoRendererAsync();
+    ManualClock clock = new();
+    FakeRecordStore store = new();
+    store.Records[Workspace] = new RendererRecord
+    {
+      TenantId = Workspace,
+      Url = new Uri(renderer.BaseUrl),
+      ApiKey = "key-workspace",
+    };
+    LogCollector logs = new();
+    await using var gateway = await GatewayHost.StartAsync(
+      [
+        .. Callers(),
+        .. Membership(0, "alpha-app", "acme"),
+        .. Prefixes(0, "myapp-"),
+        .. Membership(1, "beta-app"),
+        .. Prefixes(1, "otherapp-"),
+        "--ReportsServer:Gateway:Records:Store=File",
+        $"--ReportsServer:Gateway:Records:Path={Path.GetTempPath()}",
+        "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=3",
+      ],
+      builder =>
+      {
+        builder.Services.AddSingleton<IRendererRecordStore>(store);
+        builder.Services.AddSingleton<TimeProvider>(clock);
+        builder.Logging.AddProvider(logs);
+      }
+    );
+
+    // Three new tenants within the second: one with a record, two without.
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, Workspace), "%PDF-1.7 key-workspace");
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "myapp-1"));
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "myapp-2"));
+
+    // A fourth is busy, and reads nothing.
+    var busy = await ReadProblemAsync(await SendAsync(gateway, AlphaKey, "myapp-3"));
+    var lookups = store.Gets;
+
+    // Answers the gateway has, found or missing, cost nothing; listed tenants are not limited;
+    // and the other caller has a budget of its own.
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, Workspace), "%PDF-1.7 key-workspace");
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "myapp-1"));
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "acme"));
+    await AssertNoRendererAsync(await SendAsync(gateway, BetaKey, "otherapp-1"));
+    var known = store.Gets;
+
+    // A second later the budget is back.
+    clock.Advance(TimeSpan.FromSeconds(1));
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "myapp-3"));
+
+    await Assert.That(busy.Status).IsEqualTo(503);
+    await Assert.That(busy.Kind).IsEqualTo("Busy");
+    await Assert.That(busy.RetryAfter).IsEqualTo(TimeSpan.FromSeconds(1));
+    await Assert.That(lookups).IsEqualTo(3);
+    await Assert.That(known).IsEqualTo(5);
+    await Assert.That(store.Lookups.Count(tenant => tenant == "myapp-3")).IsEqualTo(1);
+    var spent = logs.WithEventId(70).Single();
+    await Assert.That(spent["CallerId"]).IsEqualTo("alpha-app");
+    await Assert.That(spent["PerSecond"]).IsEqualTo(3);
   }
 
   [Test]
@@ -377,6 +442,15 @@ public class GatewayTenantPrefixTests
     }
 
     return await gateway.Client.SendAsync(request, TestToken);
+  }
+
+  /// <summary>Checks that the gateway found no renderer record for the tenant.</summary>
+  private static async Task AssertNoRendererAsync(HttpResponseMessage response)
+  {
+    var problem = await ReadProblemAsync(response);
+    await Assert.That(problem.Status).IsEqualTo(503);
+    await Assert.That(problem.Kind).IsEqualTo("BrowserUnavailable");
+    await Assert.That(problem.Detail).IsEqualTo("The tenant has no renderer.");
   }
 
   private static async Task AssertPdfAsync(HttpResponseMessage response, string expected)

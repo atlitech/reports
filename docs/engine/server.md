@@ -194,6 +194,7 @@ security settings:
 | `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
 | `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when this replica's share of what the tenant's renderer admits is fewer |
 | `Replicas` | `1` | How many gateway replicas send conversions to the same renderers, 1 to 1000: each replica admits a tenant its record's `MaxConcurrentRequests` divided by this, rounded down and at least 1. Set it to the most replicas that run at once |
+| `MaxNewTenantLookupsPerCallerPerSecond` | `20` | How many record lookups per second one caller may cause in this replica for tenants under its prefixes that the gateway has no answer for, 1 to 10000; see "New tenants have a budget" below |
 | `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
 | `AllowAnonymousCallers` | `false` | Allows `Authentication:Mode=None`, under which anyone who reaches the gateway converts as `anonymous` for that caller ID's tenants. For tests and development only |
 
@@ -219,11 +220,10 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   a valid tenant ID that starts with the prefix and continues past it. The prefix alone, a tenant
   under another caller's prefix, and an invalid tenant ID are all `403`s. An empty header counts
   as a missing one, so it selects a single-tenant caller's tenant and is a `400` for any other
-  caller.
-  The gateway lets a caller use every tenant under its prefixes and knows nothing of the caller's
-  own users, so an application that gives each of its workspaces a tenant must check that the
-  signed-in user may use a workspace before naming the workspace's tenant. This runs after caller
-  admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
+  caller. The gateway lets a caller use every tenant under its prefixes and knows nothing of the
+  caller's own users, so an application that gives each of its workspaces a tenant must check
+  that the signed-in user may use a workspace before naming the workspace's tenant. This runs
+  after caller admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
   or this replica's share of its record's `MaxConcurrentRequests` (the requests its renderer
   admits) when that is lower: divided by `Replicas`, rounded down, and at least 1. A tenant at its
   limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway. The limit
@@ -236,6 +236,21 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   renderer's `Busy` is retried as described below. Caller admission
   (`Limits:MaxConcurrentRequestsPerCaller`, 4 by default) applies before the tenant limits, so a
   caller that serves several tenants needs it raised to their combined limits.
+- **New tenants have a budget.** A caller with a prefix can name a tenant the gateway has not
+  seen on every request, and each such request reads the record store before its body is read,
+  and with `Provisioning:Mode=OnDemand` has the provisioning service read the store and create a
+  renderer. Key Vault throttles a vault at about 4,000 operations per 10 seconds, 400 a second,
+  and once one caller spends that, every tenant's record reads fail. So each caller may start at
+  most `MaxNewTenantLookupsPerCallerPerSecond` lookups a second in a replica, with a burst of as
+  many, for tenants under its prefixes whose answer the gateway does not have: neither cached (a
+  record or none) nor being read for another request. One more is `503` `Busy` with
+  `Retry-After: 1`, and reads nothing. Cached answers cost nothing, and listed tenants are never
+  limited. The budget holds per replica, so size it against the vault's limit with every replica
+  and every caller with a prefix counted: a new tenant costs at most about four vault operations
+  (the gateway's lookup, the service's lookup and its writing of the record, and the gateway's
+  reading of it), so the budget times the replicas times those callers times four must stay well
+  under 400 a second, with room left for the vault's other traffic. The default, 20, lets one
+  caller on two replicas cause about 160 operations a second.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
   record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
   the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no
@@ -348,8 +363,8 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   the gateway's address, 59 for a disabled sandbox, 60 to 63 for state reads and resumes, 64 to
   67 for the provisioning service (64 when the gateway asks for a renderer, 65 when the service
   created or found it, with the time it took, 66 for a refusal, at `Error` for `NotAllowed` and
-  `Warning` otherwise, and 67, an error, for a failure), and 68 and 69 for a deleted tenant and a
-  refused deletion. The request span carries the tenant as `atli.reports.tenant`. Record lookups,
+  `Warning` otherwise, and 67, an error, for a failure), 68 and 69 for a deleted tenant and a
+  refused deletion, and 70 for a caller over its budget of new tenants. The request span carries the tenant as `atli.reports.tenant`. Record lookups,
   sandbox checks, and renderer creations are shared by the requests waiting for them, so they run
   without any request's trace context, and neither the renderer client, the Sandboxes client, nor
   the provisioning client sends trace headers or baggage.

@@ -256,6 +256,18 @@ internal sealed class FakeRecordStore : IRendererRecordStore
     throw new NotSupportedException("The gateway never deletes records.");
 }
 
+/// <summary>A clock that moves only when told to; timers still run on real time.</summary>
+internal sealed class ManualClock : TimeProvider
+{
+  private long _ticks;
+
+  public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+  public override long GetTimestamp() => Volatile.Read(ref _ticks);
+
+  public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
+}
+
 /// <summary>
 /// Holds the next lookup of one tenant in a <see cref="FakeRecordStore"/> once it has read the
 /// record, until released: a lookup that read the store before a change and finishes after it.

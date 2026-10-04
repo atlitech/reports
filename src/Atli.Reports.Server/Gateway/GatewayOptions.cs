@@ -73,6 +73,15 @@ internal sealed class GatewayOptions
   /// </summary>
   public int Replicas { get; set; } = 1;
 
+  /// <summary>
+  /// How many record lookups per second, in this replica, one caller may cause for tenants under
+  /// its prefixes that the gateway has no answer for, cached or in flight: a bucket of this many,
+  /// refilled at this rate. A caller can name a new tenant on every request, and each costs a read
+  /// of the record store (Key Vault, whose throttling would fail every tenant's reads) before the
+  /// request body is read; beyond the budget the request is <c>Busy</c> and reads nothing.
+  /// </summary>
+  public int MaxNewTenantLookupsPerCallerPerSecond { get; set; } = 20;
+
   /// <summary>Allows <c>http</c> renderer URLs. For tests and development only.</summary>
   public bool AllowHttpRenderers { get; set; }
 
@@ -142,6 +151,13 @@ internal sealed class GatewayOptions
     {
       throw new InvalidOperationException(
         "ReportsServer:Gateway:Replicas must be between 1 and 1000."
+      );
+    }
+
+    if (MaxNewTenantLookupsPerCallerPerSecond is < 1 or > 10_000)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond must be between 1 and 10000."
       );
     }
   }

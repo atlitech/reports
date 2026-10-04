@@ -76,6 +76,14 @@ internal sealed class RendererDirectory(
   }
 
   /// <summary>
+  /// Whether looking the tenant up now would read nothing from the store: an answer, a record or
+  /// none, is cached, or a lookup is in flight for it to join.
+  /// </summary>
+  public bool HasAnswer(string tenantId) =>
+    (_entries.TryGetValue(tenantId, out var cached) && IsFresh(cached))
+    || _loads.ContainsKey(tenantId);
+
+  /// <summary>
   /// Reads the tenant's record from the store again, past its cached answer and any lookup already
   /// in flight, which may have started before the record was written; lookups from now on share
   /// this one. Throws what the store throws.
