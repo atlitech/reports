@@ -181,7 +181,9 @@ built from an OCI image or Dockerfile. They can be suspended with their memory a
 are billed per second while running. The
 [recorded run](../benchmarks/results/2026-10-03-5b667b4-azure-sandboxes-amd64.md) put the
 unmodified server image in them as a renderer; [`run.py`](../benchmarks/azure-sandboxes/run.py)
-reproduces it. What it established:
+reproduces it. A [follow-up](../benchmarks/results/2026-10-04-5d557b4-azure-sandboxes-followup-amd64.md)
+tested port authentication, a resume-only role, DNS, concurrent load, and on-demand activation.
+What they established:
 
 - **Chromium's sandbox runs.** The microVM has no seccomp filter of the platform's and allows
   unprivileged user namespaces, so the browser starts sandboxed with no profile: no
@@ -196,17 +198,38 @@ reproduces it. What it established:
 - **Smaller sizes are enough for most documents.** At 1 vCPU and 2 GiB the 49-page report took
   about 2.1 s with a VM memory peak of about 750 MiB, and at 0.5 vCPU and 1 GiB about 2.8 s with a
   peak of about 660 MiB.
-- **Suspend and resume work, but nothing resumes on request.** A request to a suspended renderer
-  gets `403 {"error":"Sandbox is not running"}` from the proxy. Auto-suspend after an idle period
-  works with the browser running. Suspending took 7 to 15 s. Resuming took a REST call of 1.2 to
-  1.5 s, and the first PDF arrived about 1.8 s after the call started, measured from a laptop,
-  with the browser still warm.
-- **Egress is denied at an HTTP proxy, but DNS still resolves.** With `--egress-default Deny`,
-  the platform's egress proxy refuses HTTP and HTTPS to any host and records it in the sandbox's
-  egress decisions (with a delay), and other ports are blocked. Name lookups still reach Azure
-  DNS, so a compromised renderer keeps a DNS channel out.
+- **Throughput tops out at about one conversion per vCPU, and memory is the real limit.** Each
+  concurrent 49-page report added about 400 to 500 MiB; at 1 vCPU and 2 GiB, four to eight at once
+  got the browser killed for memory. One conversion per vCPU, with one more request queued per
+  slot, matched or beat higher concurrency at a fraction of the memory, so renderers run 1
+  conversion at 0.5 and 1 vCPU and 2 at 2 vCPU, and admit twice that.
+- **A port with on-demand activation wakes its renderer.** With the port's `activationMode` set to
+  `OnDemand`, a request to a suspended renderer resumes it and gets its PDF: the invoice in 0.6 to
+  1.5 s, the 49-page report in 2.8 to 4.0 s, and every request of a burst during the wake. With the
+  default, `Manual`, the request gets `403 {"error":"Sandbox is not running"}`, and an explicit
+  resume (1.2 to 1.5 s) comes first. Auto-suspend after an idle period works either way, with the
+  browser running. Suspending took 7 to 15 s. Requests the port itself refuses (by source address)
+  wake nothing, but on an anonymous port anyone with the URL can wake a renderer before the API key
+  is checked.
+- **`disable` is a kill switch.** It stops a sandbox and refuses both on-demand wakes and resumes
+  until `enable`.
+- **Egress is denied at an HTTP proxy, but DNS resolves unless a virtual network blocks it.** With
+  `--egress-default Deny`, the platform's egress proxy refuses HTTP and HTTPS to any host and
+  records it in the sandbox's egress decisions (with a delay), and other ports are blocked. Name
+  lookups, TXT records included, still reach Azure DNS, a channel out in both directions; egress
+  rules do not apply to DNS. A sandbox group connected to a virtual network whose network security
+  group denies the `AzurePlatformDNS` service tag resolved nothing, and its ports and HTTP egress
+  control kept working. The server image did not run in such a group.
 - **Every sandbox has a managed-identity endpoint.** It refuses tokens while the sandbox group has
   no identity.
+- **Ports take a source-address allow-list, not service tokens.** A port can deny by default and
+  allow up to ten rules of source CIDRs. A port limited to Microsoft Entra identities admits only
+  browsers through the platform's sign-in; every bearer token tried was refused, a managed
+  identity's included, so services cannot authenticate to a port with Entra ID.
+- **A resume-only role holds.** A managed identity with only `sandboxes/read` and
+  `sandboxes/resume/action` read and resumed a renderer; the 21 other data-plane calls tried,
+  stop, exec, files, egress, ports, snapshots, create, and delete among them, were refused. Reading
+  a sandbox does not return its environment.
 - **Clones of one memory snapshot share the browser's memory layout and environment.** Two
   sandboxes started from a snapshot of a warm renderer had the same browser executable, libc,
   and stack addresses as the original, and the original's environment, credentials included. The
@@ -220,19 +243,24 @@ On Sandboxes the design becomes:
 - **A separate provisioning service, off the request path, creates and deletes renderers.** It
   holds the *Container Apps SandboxGroup Data Owner* role, which also allows running commands and
   reading files in every sandbox of the group, so nothing on the request path holds it.
-- **Whoever wakes renderers holds only `sandboxes/read` and `sandboxes/resume/action`.** On a
-  `403` from a suspended renderer, the API or an activator resumes it and retries. A custom role
-  with just those two data actions cannot run commands, read files, change egress, or create and
-  delete renderers. That role has not been tested.
+- **Renderer ports activate on demand and admit only the gateway's addresses.** The provisioner
+  exposes port 8080 with `OnDemand` activation, so the gateway needs no rights over sandboxes at
+  all, and limits it to the gateway's outbound addresses, so nobody else can wake a renderer.
+  The gateway's `Wake:Mode=Sandboxes` remains for `Manual` ports; its identity then needs only the
+  tested resume-only role.
+- **`disable` answers a compromised renderer.** The provisioning service disables it at once, then
+  replaces it and its credential.
 - **Every image release replaces every renderer.** A suspended renderer keeps the browser it was
   suspended with, so the patch target is met only when the provisioning service has recreated
   each renderer from the new disk image, suspended ones included.
 - **Renderer sandbox groups have no managed identity.**
-- **Each renderer verifies the API with its own credential.** The port URL is public. The CLI
-  (`1.0.0-preview.4`) offers anonymous ports or ports limited to one user's email, nothing for a
-  service principal, so the per-renderer API key remains the gate, as the
-  [separation requirements](#separation-requirements) already require. Private ingress through a
-  virtual network was not tested.
+- **Each renderer verifies the API with its own credential.** The port URL is public, and ports
+  cannot verify a service's Entra token, so the per-renderer API key remains the gate, as the
+  [separation requirements](#separation-requirements) already require; the source-address
+  allow-list narrows who reaches it. Private ingress through a virtual network was not tested.
+- **Renderer sandbox groups that must not leak through DNS connect to a virtual network** whose
+  network security group denies `AzurePlatformDNS`. Documents are self-contained, so renderers need
+  no name resolution.
 
 Cost, at the consumption rates Sandboxes are billed at (eastus2, 2026-10-03): about $0.216 per
 running hour at 2 vCPU and 4 GiB, $0.108 at 1 vCPU and 2 GiB, and $0.054 at 0.5 vCPU and 1 GiB. A
@@ -316,11 +344,10 @@ renderer template.
 - Verify whether Azure Container Apps apps permit Chromium's sandbox without a custom seccomp
   profile, which they cannot apply; until then their template opts out. (Sandboxes do; see
   [Azure Container Apps Sandboxes](#azure-container-apps-sandboxes).)
-- On Sandboxes: test a custom role with only `sandboxes/read` and `sandboxes/resume/action`, and
-  private ingress through a virtual network or a service principal's Entra token in place of the
-  public port URL. Decide whether the DNS channel out of a renderer is acceptable or needs a
-  virtual-network DNS policy. Measure concurrent load, and the time from an image release to every
-  renderer recreated.
+- On Sandboxes: test private ingress through a virtual network, the server image in a sandbox
+  group whose virtual network blocks DNS, and the source address the gateway presents when it runs
+  in Azure Container Apps (for the ports' allow-list). Measure the time from an image release to
+  every renderer recreated.
 - Test Chromium's sandbox on Ubuntu 23.10 and later renderer nodes, with the containerd versions
   the platform runs.
 - Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a

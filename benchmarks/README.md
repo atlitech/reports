@@ -37,7 +37,9 @@ warm and cold conversion times, suspend and resume, snapshots, egress, and small
 [`azure-sandboxes/run.py`](azure-sandboxes/run.py) reproduces it in a resource group of its own,
 which it deletes afterwards; it needs an Azure subscription and the `aca` CLI. The
 [hosted renderer design](../docs/hosted-renderers.md#azure-container-apps-sandboxes) records what it
-changes.
+changes. The [follow-up](results/2026-10-04-5d557b4-azure-sandboxes-followup-amd64.md) tests port
+authentication, a resume-only role, DNS, concurrent load, and on-demand activation, with
+[`followup.py`](azure-sandboxes/followup.py) and the probes beside it.
 
 ## What runs
 
