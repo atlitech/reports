@@ -90,6 +90,45 @@ public class CreateTests
     await Assert.That(record.DiskImageId).IsEqualTo("disk-1");
     await Assert.That(record.CreatedAt).IsEqualTo(provisioning.Clock.GetUtcNow());
     await Assert.That(record.ApiKey).StartsWith("reports-");
+    // One conversion and one queued: what the renderer's environment admits.
+    await Assert.That(record.MaxConcurrentRequests).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task Records_what_a_large_renderer_admits()
+  {
+    using Provisioning provisioning = new();
+
+    var record = await provisioning.Provisioner.CreateAsync(
+      "contoso",
+      RendererSize.Large,
+      "disk-1",
+      TestToken
+    );
+
+    await Assert.That(record.MaxConcurrentRequests).IsEqualTo(4);
+    await Assert
+      .That(
+        provisioning.Sandboxes.Created[0].Environment[
+          "ReportsServer__Limits__MaxConcurrentRequestsPerCaller"
+        ]
+      )
+      .IsEqualTo("4");
+  }
+
+  [Test]
+  public async Task Exposes_the_port_to_the_configured_source_ranges_only()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Options.AllowedSourceCidrs.AddRange(["203.0.113.7/32", "198.51.100.0/24"]);
+
+    await provisioning.Provisioner.CreateAsync("contoso", RendererSize.Medium, "disk-1", TestToken);
+
+    await Assert
+      .That(provisioning.Journal.Matching("port"))
+      .IsEquivalentTo([
+        "port sandbox-1 8080 anonymous OnDemand from 203.0.113.7/32,198.51.100.0/24",
+      ]);
   }
 
   [Test]

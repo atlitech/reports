@@ -15,6 +15,7 @@ internal static class Records
       SandboxId = "98c01b65-b81b-4dca-b000-fdae0eb0939c",
       DiskImageId = "c3d87d13-9ce3-4fb5-b0db-db168ea50aa6",
       CreatedAt = new DateTimeOffset(2026, 10, 4, 1, 50, 55, TimeSpan.Zero),
+      MaxConcurrentRequests = 2,
     };
 
   /// <summary>The record as a store writes it, for seeding a store directly.</summary>
@@ -27,5 +28,6 @@ internal static class Records
       ["sandboxId"] = record.SandboxId,
       ["diskImageId"] = record.DiskImageId,
       ["createdAt"] = record.CreatedAt,
+      ["maxConcurrentRequests"] = record.MaxConcurrentRequests,
     }.ToJsonString();
 }

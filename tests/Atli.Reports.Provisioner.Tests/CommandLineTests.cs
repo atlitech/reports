@@ -48,6 +48,8 @@ public class CommandLineTests
   [Arguments("prune --drain 150", "--drain is '150'; use hh:mm:ss")]
   [Arguments("prune --tenant A", "--tenant 'A' is not a tenant ID")]
   [Arguments("prune --size S", "Unknown option '--size'.")]
+  [Arguments("disable", "--tenant is required.")]
+  [Arguments("enable --tenant a --drain 0", "Unknown option '--drain'.")]
   public async Task A_wrong_command_line_is_a_usage_error_that_changes_nothing(
     string commandLine,
     string message
@@ -73,6 +75,8 @@ public class CommandLineTests
   [Arguments("delete --tenant a --help", "Usage: atli-reports-provisioner delete --tenant <id>")]
   [Arguments("list --help", "Usage: atli-reports-provisioner list")]
   [Arguments("prune --help", "Usage: atli-reports-provisioner prune [--tenant <id>]")]
+  [Arguments("disable --help", "Usage: atli-reports-provisioner disable --tenant <id>")]
+  [Arguments("enable -h", "Usage: atli-reports-provisioner enable --tenant <id>")]
   public async Task Help_needs_no_configuration(string commandLine, string expected)
   {
     using Provisioning provisioning = new();
@@ -119,6 +123,11 @@ public class CommandLineTests
     "Always",
     "Provisioner:PortActivation is 'Always'; use OnDemand or Manual."
   )]
+  [Arguments(
+    "Provisioner:AllowedSourceCidrs:0",
+    "203.0.113.7",
+    "Provisioner:AllowedSourceCidrs: '203.0.113.7' is not a source range in CIDR notation"
+  )]
   [Arguments("Provisioner:Sandboxes:Region", "x.attacker.example#", "Sandboxes Region")]
   [Arguments("Provisioner:Sandboxes:SubscriptionId", "sub-1", "Sandboxes SubscriptionId")]
   [Arguments("Provisioner:Sandboxes:ResourceGroup", "rg/../x", "Sandboxes ResourceGroup")]
@@ -161,6 +170,8 @@ public class CommandLineTests
             ["Provisioner:ReadyTimeout"] = "00:15:00",
             ["Provisioner:AutoSuspendAfter"] = "1.00:00:00",
             ["Provisioner:PortActivation"] = "manual",
+            ["Provisioner:AllowedSourceCidrs:0"] = "203.0.113.7/32",
+            ["Provisioner:AllowedSourceCidrs:1"] = "2001:db8::/48",
           }
         )
         .Build(),
@@ -180,6 +191,24 @@ public class CommandLineTests
     await Assert.That(options.ReadyTimeout).IsEqualTo(TimeSpan.FromMinutes(15));
     await Assert.That(options.AutoSuspendAfter).IsEqualTo(TimeSpan.FromDays(1));
     await Assert.That(options.Activation).IsEqualTo(SandboxPortActivation.Manual);
+    await Assert
+      .That(options.PortOptions.AllowedSourceCidrs)
+      .IsEquivalentTo(["203.0.113.7/32", "2001:db8::/48"]);
+  }
+
+  [Test]
+  public async Task Disable_stops_the_tenants_renderer_and_enable_undoes_it()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+
+    var (disabled, _, _) = await RunAsync(provisioning, Configured, "disable --tenant a");
+    await Assert.That(disabled).IsEqualTo(0);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEquivalentTo(["old-a"]);
+
+    var (enabled, _, _) = await RunAsync(provisioning, Configured, "enable --tenant a");
+    await Assert.That(enabled).IsEqualTo(0);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEmpty();
   }
 
   [Test]

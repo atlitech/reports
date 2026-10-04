@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atli.Reports.Hosting.Sandboxes;
@@ -76,11 +77,36 @@ internal sealed class AddPortRequest
   /// none.
   /// </summary>
   public string? ActivationMode { get; init; }
+
+  /// <summary>Which source addresses the port admits; omitted to admit any.</summary>
+  public IpAccessControlWire? IpAccessControl { get; init; }
 }
 
 internal sealed class PortAuthWire
 {
   public bool Anonymous { get; init; }
+}
+
+/// <summary>
+/// <c>{"defaultAction":"Deny","rules":[{"name","action":"Allow","priority","sourceCidrs"}]}</c>: at
+/// most 10 rules of 1 to 10 ranges each.
+/// </summary>
+internal sealed class IpAccessControlWire
+{
+  public required string DefaultAction { get; init; }
+
+  public required IReadOnlyList<IpAccessRuleWire> Rules { get; init; }
+}
+
+internal sealed class IpAccessRuleWire
+{
+  public required string Name { get; init; }
+
+  public required string Action { get; init; }
+
+  public int Priority { get; init; }
+
+  public required IReadOnlyList<string> SourceCidrs { get; init; }
 }
 
 /// <summary>
@@ -117,6 +143,12 @@ internal sealed class PortResponse
 
   /// <summary><c>Manual</c> or <c>OnDemand</c>.</summary>
   public string? ActivationMode { get; init; }
+
+  /// <summary>
+  /// The port's IP access control, read by hand: its shape in answers has not been observed, and
+  /// one this client does not expect must not make the whole sandbox unreadable.
+  /// </summary>
+  public JsonElement? IpAccessControl { get; init; }
 }
 
 [JsonSourceGenerationOptions(

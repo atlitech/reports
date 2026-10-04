@@ -8,16 +8,20 @@ operator's shell or a release pipeline, with rights the gateway never holds.
 Each renderer is one sandbox that serves one tenant for its whole lifetime. The sandbox runs the
 unmodified server image with Chromium's sandbox on, denies egress, admits only a credential that
 belongs to that renderer alone, and suspends itself when idle. Its record holds the URL of its
-port, its sandbox ID, and that credential. The gateway reads the record to route conversions.
+port, its sandbox ID, that credential, and how many requests the renderer admits at once. The
+gateway reads the record to route conversions.
 
 A suspended renderer is woken by the request itself: its port is exposed with on-demand
 activation (`Provisioner:PortActivation`, `OnDemand` by default), so the platform's proxy resumes
-the sandbox and then serves the request. The gateway then needs no permission on the sandbox group.
-With `Manual` activation the proxy answers `403 {"error":"Sandbox is not running"}` instead, and the
-gateway's `Wake:Mode=Sandboxes` resumes the sandbox and retries; that remains the fallback.
-On-demand activation was observed with a plain listener on 2026-10-04 (the first answer from a
-stopped sandbox came in about 1.1 seconds); its behavior with the server image is still being
-measured.
+the sandbox and then serves the request. Measured with the server image, an invoice came back in
+about 0.6 to 1.5 seconds from a stopped renderer, and every request of a burst during the wake
+succeeded. The gateway then needs no permission on the sandbox group. With `Manual` activation the
+proxy answers `403 {"error":"Sandbox is not running"}` instead, and the gateway's
+`Wake:Mode=Sandboxes` resumes the sandbox and retries; that remains the fallback.
+
+An anonymous on-demand port lets anyone who learns its URL wake the renderer, and run up its
+compute, before the renderer checks a credential. Set `Provisioner:AllowedSourceCidrs` to the
+gateway's outbound addresses, so the platform's proxy refuses everyone else.
 
 ## Azure roles
 
@@ -55,8 +59,9 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
 | `Provisioner:Records:ManagedIdentityClientId` | Empty | For `KeyVault`: a user-assigned identity for the vault |
 | `Provisioner:Records:Path` | | For `File`: the directory of record files, which only its owner may write to |
 | `Provisioner:DiskImageId` | | The disk image new renderers start from; `--disk-image` overrides it |
-| `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, two), or `L` (2 vCPU, 4 GiB, four) |
+| `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, one), or `L` (2 vCPU, 4 GiB, two) |
 | `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
+| `Provisioner:AllowedSourceCidrs` | Empty | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
 | `Provisioner:ReadyTimeout` | `00:03:00` | How long a new renderer may take to answer `/health/ready` with `200`; at most 15 minutes |
 | `Provisioner:DrainDelay` | `00:02:30` | How long a rollout keeps a replaced renderer after its record moves, and prune waits before deleting; at most an hour; `--drain` overrides it |
@@ -74,15 +79,27 @@ named `Provisioner__…`, then command-line flags; each source overrides the one
       "Store": "KeyVault",
       "VaultUri": "https://reports-renderers.vault.azure.net/"
     },
-    "DiskImageId": "<disk image ID>"
+    "DiskImageId": "<disk image ID>",
+    "AllowedSourceCidrs": ["203.0.113.7/32", "203.0.113.8/32"]
   }
 }
 ```
 
 The same settings as environment variables: `Provisioner__Sandboxes__Region=eastus2`,
-`Provisioner__Records__Store=KeyVault`, and so on. Durations are `hh:mm:ss` everywhere: a bare
-number such as `DrainDelay=150` is refused, since .NET would read it as 150 days. Every setting is
-checked before anything changes.
+`Provisioner__Records__Store=KeyVault`, `Provisioner__AllowedSourceCidrs__0=203.0.113.7/32`, and so
+on. Durations are `hh:mm:ss` everywhere: a bare number such as `DrainDelay=150` is refused, since
+.NET would read it as 150 days. Every setting is checked before anything changes.
+
+The sizes run about one conversion per vCPU: that is where throughput tops out in the sandboxes,
+and each 49-page report in flight takes about 400 to 500 MiB, so a 2 GiB renderer running four to
+eight at once was killed out of memory. Each renderer admits twice its conversions from the
+gateway, the rest waiting in its queue, and its record says so, so the gateway sends no more.
+
+`AllowedSourceCidrs` applies to every request to the port, the provisioner's own included: it asks
+each new renderer whether it is ready through the port, so the address it runs from must be in the
+list, or every `create` and `rollout` ends in the ready timeout with `HTTP 403`. A changed list
+applies to renderers created from then on; `rollout` does not replace renderers on the current disk
+image, so recreate them (`delete`, then `create`) to apply it to existing ones.
 
 ## Commands
 
@@ -113,16 +130,17 @@ Creates a renderer for a tenant that has none:
 2. Creates the sandbox from the disk image at the size's CPU and memory, with the server image's
    entrypoint, egress denied, auto-suspend, and the labels `app=atli-reports`, `role=renderer`,
    `tenant=<id>`, `size=<S|M|L>`, and `launch=<a new GUID>`. The renderer runs the size's
-   conversions at once and queues up to three times as many more from the gateway, and accepts
-   request bodies up to 30 MiB: the gateway's JSON encoding of a body it admitted can grow it up to
-   three times.
-3. Exposes port 8080 anonymously, with `Provisioner:PortActivation`. The port URL is public; the
-   renderer's credential check is the gate, as the
+   conversions at once and queues as many more from the gateway, and accepts request bodies up to
+   30 MiB: the gateway's JSON encoding of a body it admitted can grow it up to three times.
+3. Exposes port 8080 anonymously, with `Provisioner:PortActivation`, and admitting only
+   `Provisioner:AllowedSourceCidrs` when it is set. The port URL is public; the renderer's
+   credential check is the gate, as the
    [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) explains.
 4. Polls `GET <url>/health/ready` every 500 ms until it answers `200`, for up to `ReadyTimeout`.
    A new renderer answered in 1.4 to 5.2 seconds in the measured runs.
 5. Reads the tenant's record again, and stops if another command wrote one meanwhile.
-6. Writes the record, which makes the renderer routable.
+6. Writes the record, which makes the renderer routable. It records how many requests the renderer
+   admits at once (twice its conversions), which the gateway holds the tenant to.
 
 If any step after the sandbox exists fails, or the command is canceled, the sandbox is deleted
 again and no record is written. A create call that failed without an answer may still have made a
@@ -213,6 +231,37 @@ whose delete was interrupted, or one a killed create left behind. It keeps:
 The others are deleted after the drain, in case the gateway still sends them work (a record may
 have moved away from one moments ago), and only if no record points to them by then. A sandbox
 that cannot be deleted is reported, and the command exits with `1`.
+
+### disable and enable
+
+```bash
+atli-reports-provisioner disable --tenant contoso
+atli-reports-provisioner enable --tenant contoso
+```
+
+`disable` disables every sandbox labeled for the tenant: the platform stops it and refuses to start
+it again, whether a request reaches its on-demand port (`403`) or something resumes it
+(`409 SandboxAdminDisabled`), until `enable`. The record and the sandbox's disk stay, for
+investigation; the tenant's conversions fail meanwhile. Every sandbox is tried even when one
+fails, and the command then exits with `1`. A sandbox the record names that is labeled for another
+tenant is left alone. `enable` lets the tenant's sandboxes start again; they stay stopped until a
+request or a resume starts them.
+
+## Incident response
+
+When a renderer may be compromised:
+
+1. `disable --tenant <id>`: the kill switch. It takes effect at once, needs nothing from the
+   gateway, and keeps the evidence.
+2. Investigate with the disk and the platform's logs. Nothing on the request path can start the
+   renderer meanwhile.
+3. `delete --tenant <id>`: removes the record, which holds the renderer's credential, and the
+   sandbox. Then `create --tenant <id>` makes a new renderer with a new credential. The old
+   credential was the renderer's alone, so no other renderer admits it.
+4. If it was a false alarm, `enable --tenant <id>` instead.
+
+A record that cannot be read does not stop either command: `disable` and `delete` find the
+tenant's sandboxes by their labels.
 
 ## Rolling out a server release
 

@@ -349,6 +349,92 @@ internal sealed class RendererProvisioner
   }
 
   /// <summary>
+  /// Disables every sandbox labeled for the tenant: the kill switch for a compromised renderer. The
+  /// platform stops it and refuses to start it again, on a request to its on-demand port as on a
+  /// resume, until <see cref="EnableAsync"/>. The record and the disk stay, for investigation; the
+  /// gateway's conversions for the tenant fail meanwhile.
+  /// </summary>
+  /// <remarks>
+  /// Every sandbox is tried even when one fails; the command fails after. A record that cannot be
+  /// read does not stop it, and a sandbox the record names that is labeled for another tenant is not
+  /// touched, as in <see cref="DeleteAsync"/>.
+  /// </remarks>
+  public Task DisableAsync(string tenantId, CancellationToken cancellationToken) =>
+    SwitchAsync(tenantId, disable: true, cancellationToken);
+
+  /// <summary>Lets the tenant's disabled sandboxes start again, as <see cref="DisableAsync"/> undoes.</summary>
+  public Task EnableAsync(string tenantId, CancellationToken cancellationToken) =>
+    SwitchAsync(tenantId, disable: false, cancellationToken);
+
+  private async Task SwitchAsync(string tenantId, bool disable, CancellationToken cancellationToken)
+  {
+    var verb = disable ? "disable" : "enable";
+    RendererRecord? record = null;
+    try
+    {
+      record = await _records.GetAsync(tenantId, cancellationToken);
+    }
+    catch (InvalidDataException exception)
+    {
+      Log(tenantId, $"The record cannot be read ({exception.Message}); going by labels alone.");
+    }
+
+    var sandboxes = await _sandboxes.ListAsync(cancellationToken);
+    var sandboxIds = sandboxes
+      .Where(sandbox => RendererLabels.TenantOf(sandbox) == tenantId)
+      .Select(sandbox => sandbox.Id)
+      .Order(StringComparer.Ordinal)
+      .ToArray();
+    List<string> problems = [];
+    if (
+      record?.SandboxId is { } recorded
+      && !sandboxIds.Contains(recorded, StringComparer.Ordinal)
+      && sandboxes.FirstOrDefault(sandbox => sandbox.Id == recorded) is { } named
+    )
+    {
+      var refused =
+        $"The record of tenant {tenantId} names sandbox {recorded}, which is labeled for "
+        + $"{(RendererLabels.TenantOf(named) is { } other ? "tenant " + other : "no tenant")}; "
+        + $"it was not {verb}d.";
+      Log(tenantId, refused);
+      problems.Add(refused);
+    }
+
+    foreach (var sandboxId in sandboxIds)
+    {
+      try
+      {
+        var sandbox = disable
+          ? await _sandboxes.DisableAsync(sandboxId, cancellationToken)
+          : await _sandboxes.EnableAsync(sandboxId, cancellationToken);
+        Log(
+          tenantId,
+          $"{(disable ? "Disabled" : "Enabled")} sandbox {sandboxId} ({sandbox.State})."
+        );
+      }
+      catch (Exception exception)
+        when (exception is not OperationCanceledException
+          || !cancellationToken.IsCancellationRequested
+        )
+      {
+        var failure = $"Could not {verb} sandbox {sandboxId}: {exception.Message}";
+        Log(tenantId, failure);
+        problems.Add(failure);
+      }
+    }
+
+    if (sandboxIds.Length == 0)
+    {
+      Log(tenantId, $"No sandbox to {verb}.");
+    }
+
+    if (problems.Count > 0)
+    {
+      throw new ProvisioningException(string.Join(" ", problems));
+    }
+  }
+
+  /// <summary>
   /// Writes every record with the current state of its sandbox, then the records that cannot be
   /// read, then any renderer sandbox no record points to: one being created, or one a failed or
   /// canceled command left behind.
@@ -682,9 +768,7 @@ internal sealed class RendererProvisioner
       sandbox = await _sandboxes.AddPortAsync(
         created.Id,
         RendererPort,
-        // The port URL is public; the renderer admits only the gateway's credential.
-        anonymous: true,
-        _options.Activation,
+        _options.PortOptions,
         cancellationToken
       );
       var url =
@@ -703,6 +787,8 @@ internal sealed class RendererProvisioner
         SandboxId = created.Id,
         DiskImageId = diskImageId,
         CreatedAt = createdAt,
+        // What the renderer's environment admits, so the gateway sends no more.
+        MaxConcurrentRequests = RendererServerEnvironment.MaxConcurrentRequests(size),
       };
       await EnsureRecordUnchangedAsync(tenantId, replacing, cancellationToken);
     }

@@ -12,6 +12,7 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
   private readonly Lock _lock = new();
   private readonly Dictionary<string, SandboxView> _sandboxes = new(StringComparer.Ordinal);
   private readonly List<SandboxSpec> _created = [];
+  private readonly HashSet<string> _disabled = new(StringComparer.Ordinal);
   private int _count;
 
   /// <summary>Returns the exception to fail adding a port to a sandbox with, or <see langword="null"/>.</summary>
@@ -25,6 +26,21 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
 
   /// <summary>Sandboxes whose deletion fails.</summary>
   public HashSet<string> FailDelete { get; } = new(StringComparer.Ordinal);
+
+  /// <summary>Sandboxes that cannot be disabled.</summary>
+  public HashSet<string> FailDisable { get; } = new(StringComparer.Ordinal);
+
+  /// <summary>The IDs of the disabled sandboxes.</summary>
+  public IReadOnlyList<string> Disabled
+  {
+    get
+    {
+      lock (_lock)
+      {
+        return [.. _disabled.Order(StringComparer.Ordinal)];
+      }
+    }
+  }
 
   /// <summary>What each create asked for, in order.</summary>
   public IReadOnlyList<SandboxSpec> Created
@@ -159,17 +175,31 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
     int port,
     bool anonymous,
     CancellationToken cancellationToken
-  ) => AddPortAsync(sandboxId, port, anonymous, SandboxPortActivation.Manual, cancellationToken);
+  ) =>
+    AddPortAsync(
+      sandboxId,
+      port,
+      new SandboxPortOptions { Anonymous = anonymous },
+      cancellationToken
+    );
 
   public Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
-    bool anonymous,
-    SandboxPortActivation activation,
+    SandboxPortOptions options,
     CancellationToken cancellationToken
   )
   {
-    journal.Add($"port {sandboxId} {port}{(anonymous ? " anonymous" : "")} {activation}");
+    var anonymous = options.Anonymous;
+    var activation = options.Activation;
+    journal.Add(
+      $"port {sandboxId} {port}{(anonymous ? " anonymous" : "")} {activation}"
+        + (
+          options.AllowedSourceCidrs.Count == 0
+            ? ""
+            : " from " + string.Join(",", options.AllowedSourceCidrs)
+        )
+    );
     lock (_lock)
     {
       if (FailAddPort?.Invoke(_sandboxes[sandboxId]) is { } failure)
@@ -190,11 +220,40 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
               new SandboxPort(port, new Uri($"https://{sandboxId}-{port}.example.test/"), anonymous)
               {
                 Activation = activation,
+                AllowedSourceCidrs = options.AllowedSourceCidrs,
               },
             ],
           }
       )
     );
+  }
+
+  public Task<SandboxView> DisableAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    journal.Add($"disable {sandboxId}");
+    if (FailDisable.Contains(sandboxId))
+    {
+      throw new SandboxesException($"Disabling {sandboxId} failed.");
+    }
+
+    lock (_lock)
+    {
+      _disabled.Add(sandboxId);
+    }
+
+    return Task.FromResult(
+      Update(sandboxId, sandbox => sandbox with { State = SandboxStates.Stopped })
+    );
+  }
+
+  public Task<SandboxView> EnableAsync(string sandboxId, CancellationToken cancellationToken)
+  {
+    journal.Add($"enable {sandboxId}");
+    lock (_lock)
+    {
+      _disabled.Remove(sandboxId);
+      return Task.FromResult(_sandboxes[sandboxId]);
+    }
   }
 
   private SandboxView Update(string sandboxId, Func<SandboxView, SandboxView> update)

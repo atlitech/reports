@@ -41,28 +41,49 @@ public interface ISandboxesClient
   );
 
   /// <summary>
-  /// Exposes a port through the platform's proxy with the given <paramref name="activation"/>, and
-  /// returns the sandbox with the port's URL. With <see cref="SandboxPortActivation.OnDemand"/> a
-  /// request to the port resumes a stopped sandbox, so its callers need no resume permission.
+  /// Exposes a port through the platform's proxy as <paramref name="options"/> say, and returns
+  /// the sandbox with the port's URL. With <see cref="SandboxPortActivation.OnDemand"/> a request to
+  /// the port resumes a stopped sandbox, so its callers need no resume permission;
+  /// <see cref="SandboxPortOptions.AllowedSourceCidrs"/> limits who can make one.
   /// </summary>
   /// <remarks>
-  /// Clients written before activation modes existed implement only the other overload, which
-  /// exposes a <see cref="SandboxPortActivation.Manual"/> port: this one delegates to it for
-  /// <see cref="SandboxPortActivation.Manual"/> and fails with
-  /// <see cref="NotSupportedException"/> otherwise.
+  /// Clients written before port options existed implement only the other overload: this one
+  /// delegates to it for a <see cref="SandboxPortActivation.Manual"/> port without source ranges,
+  /// and fails with <see cref="NotSupportedException"/> otherwise.
   /// </remarks>
   Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
-    bool anonymous,
-    SandboxPortActivation activation,
+    SandboxPortOptions options,
     CancellationToken cancellationToken
-  ) =>
-    activation == SandboxPortActivation.Manual
-      ? AddPortAsync(sandboxId, port, anonymous, cancellationToken)
+  )
+  {
+    ArgumentNullException.ThrowIfNull(options);
+    return options is { Activation: SandboxPortActivation.Manual, AllowedSourceCidrs.Count: 0 }
+      ? AddPortAsync(sandboxId, port, options.Anonymous, cancellationToken)
       : Task.FromException<SandboxView>(
         new NotSupportedException(
-          $"This Sandboxes client cannot expose a port with {activation} activation."
+          "This Sandboxes client cannot expose a port with on-demand activation or source ranges."
         )
       );
+  }
+
+  /// <summary>
+  /// Disables the sandbox: stops it, and refuses to start it again, whether by a request to an
+  /// on-demand port (<c>403</c>) or by a resume (<c>409 SandboxAdminDisabled</c>), until
+  /// <see cref="EnableAsync"/>. The kill switch for a compromised renderer; its disk and record stay
+  /// for investigation.
+  /// </summary>
+  /// <remarks>Clients written before this member existed throw <see cref="NotSupportedException"/>.</remarks>
+  Task<SandboxView> DisableAsync(string sandboxId, CancellationToken cancellationToken) =>
+    Task.FromException<SandboxView>(
+      new NotSupportedException("This Sandboxes client cannot disable sandboxes.")
+    );
+
+  /// <summary>Lets a disabled sandbox be started again; it stays stopped until it is.</summary>
+  /// <remarks>Clients written before this member existed throw <see cref="NotSupportedException"/>.</remarks>
+  Task<SandboxView> EnableAsync(string sandboxId, CancellationToken cancellationToken) =>
+    Task.FromException<SandboxView>(
+      new NotSupportedException("This Sandboxes client cannot enable sandboxes.")
+    );
 }

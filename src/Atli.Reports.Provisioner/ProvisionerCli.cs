@@ -119,6 +119,14 @@ internal static class ProvisionerCli
           await provisioner.DeleteAsync(delete.TenantId, delete.Drain, cancellationToken);
           return 0;
 
+        case DisableCommand disable:
+          await provisioner.DisableAsync(disable.TenantId, cancellationToken);
+          return 0;
+
+        case EnableCommand enable:
+          await provisioner.EnableAsync(enable.TenantId, cancellationToken);
+          return 0;
+
         case PruneCommand prune:
           var pruned = await provisioner.PruneAsync(
             prune.TenantId,

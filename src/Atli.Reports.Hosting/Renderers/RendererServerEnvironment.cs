@@ -18,10 +18,21 @@ public static class RendererServerEnvironment
 
   /// <summary>
   /// How many of the gateway's requests a renderer admits at once per conversion it runs: one
-  /// converting and three waiting in the engine's queue. A tenant's short burst then waits its turn
-  /// in the renderer, for at most the engine's queue timeout, instead of being refused as busy.
+  /// converting and one waiting in the engine's queue. A tenant's short burst then waits its turn
+  /// in the renderer, for at most the engine's queue timeout, instead of being refused as busy;
+  /// more would only wait longer, since a renderer converts about one document per vCPU at a time.
   /// </summary>
-  public const int AdmittedRequestsPerConversion = 4;
+  public const int AdmittedRequestsPerConversion = 2;
+
+  /// <summary>
+  /// How many requests a renderer of <paramref name="size"/> admits from the gateway at once: its
+  /// conversions and their queue. The provisioner records it, so the gateway can hold a tenant to it.
+  /// </summary>
+  public static int MaxConcurrentRequests(RendererSize size)
+  {
+    ArgumentNullException.ThrowIfNull(size);
+    return size.MaxConcurrentConversions * AdmittedRequestsPerConversion;
+  }
 
   /// <summary>
   /// The largest request body a renderer accepts: three times the server's default 10 MiB. The
@@ -42,7 +53,7 @@ public static class RendererServerEnvironment
     ArgumentNullException.ThrowIfNull(credential);
     ArgumentNullException.ThrowIfNull(size);
     var conversions = size.MaxConcurrentConversions;
-    var admitted = conversions * AdmittedRequestsPerConversion;
+    var admitted = MaxConcurrentRequests(size);
     return new Dictionary<string, string>
     {
       ["ReportsServer__Authentication__Mode"] = "ApiKey",

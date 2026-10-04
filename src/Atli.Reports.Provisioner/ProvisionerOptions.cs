@@ -54,6 +54,15 @@ internal sealed class ProvisionerOptions
   /// </summary>
   public string PortActivation { get; set; } = nameof(SandboxPortActivation.OnDemand);
 
+  /// <summary>
+  /// The source ranges a renderer's port admits, in CIDR notation, such as the gateway's outbound
+  /// addresses; empty admits any address. With an anonymous on-demand port, anyone who learns the
+  /// URL can otherwise wake the renderer, and run up its compute, before its credential is checked.
+  /// The provisioner's own address must be among them: it asks the renderer whether it is ready
+  /// through the same port.
+  /// </summary>
+  public List<string> AllowedSourceCidrs { get; } = [];
+
   /// <summary><see cref="Size"/>, parsed; <see cref="Load"/> has checked it.</summary>
   public RendererSize RendererSize => RendererSize.Parse(Size);
 
@@ -66,6 +75,16 @@ internal sealed class ProvisionerOptions
     )
       ? SandboxPortActivation.Manual
       : SandboxPortActivation.OnDemand;
+
+  /// <summary>How the renderer's port is exposed; <see cref="Load"/> has checked it.</summary>
+  public SandboxPortOptions PortOptions =>
+    new()
+    {
+      // The port URL is public; the renderer admits only the gateway's credential.
+      Anonymous = true,
+      Activation = Activation,
+      AllowedSourceCidrs = [.. AllowedSourceCidrs],
+    };
 
   /// <summary>
   /// Binds the <c>Provisioner</c> section and checks it. Throws <see cref="InvalidOperationException"/>
@@ -105,6 +124,18 @@ internal sealed class ProvisionerOptions
     {
       throw new InvalidOperationException(
         $"{SectionName}:PortActivation is '{options.PortActivation}'; use OnDemand or Manual."
+      );
+    }
+
+    try
+    {
+      options.PortOptions.Validate();
+    }
+    catch (ArgumentException exception)
+    {
+      throw new InvalidOperationException(
+        $"{SectionName}:AllowedSourceCidrs: {exception.Message}",
+        exception
       );
     }
 

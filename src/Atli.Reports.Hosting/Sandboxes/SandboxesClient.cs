@@ -242,55 +242,65 @@ public sealed class SandboxesClient : ISandboxesClient
     int port,
     bool anonymous,
     CancellationToken cancellationToken
-  ) => AddPortCoreAsync(sandboxId, port, anonymous, activation: null, cancellationToken);
+  ) =>
+    AddPortCoreAsync(
+      sandboxId,
+      port,
+      new SandboxPortOptions { Anonymous = anonymous },
+      nameActivation: false,
+      cancellationToken
+    );
 
   /// <inheritdoc />
   /// <remarks>
-  /// Adding a port the sandbox already exposes with the same access and activation succeeds; with
-  /// other access or activation, the data plane's <c>409</c> stands.
+  /// <para>
+  /// The source ranges become IP access rules that allow them, in order, at most
+  /// <see cref="SandboxPortOptions.MaxCidrsPerRule"/> to a rule, with every other address denied.
+  /// </para>
+  /// <para>
+  /// Adding a port the sandbox already exposes with the same access and activation succeeds (and
+  /// the same source ranges, when the data plane reports them); otherwise the data plane's
+  /// <c>409</c> stands.
+  /// </para>
   /// </remarks>
   public Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
-    bool anonymous,
-    SandboxPortActivation activation,
+    SandboxPortOptions options,
     CancellationToken cancellationToken
-  ) => AddPortCoreAsync(sandboxId, port, anonymous, activation, cancellationToken);
+  ) => AddPortCoreAsync(sandboxId, port, options, nameActivation: true, cancellationToken);
 
   /// <summary>
-  /// Adds the port with <paramref name="activation"/>, or with none named when it is
-  /// <see langword="null"/>, which the data plane takes as <c>Manual</c>.
+  /// Adds the port as <paramref name="options"/> say. Without <paramref name="nameActivation"/>
+  /// the request names no activation, which the data plane takes as <c>Manual</c>, as requests did
+  /// before activation modes.
   /// </summary>
   private async Task<SandboxView> AddPortCoreAsync(
     string sandboxId,
     int port,
-    bool anonymous,
-    SandboxPortActivation? activation,
+    SandboxPortOptions options,
+    bool nameActivation,
     CancellationToken cancellationToken
   )
   {
     ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
     ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
-    if (activation is { } named && !Enum.IsDefined(named))
-    {
-      throw new ArgumentOutOfRangeException(nameof(activation), named, "Unknown activation.");
-    }
-
+    ArgumentNullException.ThrowIfNull(options);
+    options.Validate();
     var body = JsonSerializer.SerializeToUtf8Bytes(
       new AddPortRequest
       {
         Port = port,
-        Auth = new PortAuthWire { Anonymous = anonymous },
-        ActivationMode = activation switch
-        {
-          null => null,
-          SandboxPortActivation.OnDemand => "OnDemand",
-          _ => "Manual",
-        },
+        Auth = new PortAuthWire { Anonymous = options.Anonymous },
+        ActivationMode = nameActivation
+          ? options.Activation == SandboxPortActivation.OnDemand
+            ? "OnDemand"
+            : "Manual"
+          : null,
+        IpAccessControl = ToIpAccessControl(options.AllowedSourceCidrs),
       },
       SandboxesJsonContext.Default.AddPortRequest
     );
-    var expected = activation ?? SandboxPortActivation.Manual;
     Call call = new(HttpMethod.Post, SandboxPath(sandboxId) + "/ports/add", body);
     for (var attempt = 0; ; attempt++)
     {
@@ -300,12 +310,7 @@ public sealed class SandboxesClient : ISandboxesClient
         var conflict = await SettleConflictAsync(
           response,
           sandboxId,
-          sandbox =>
-            sandbox.Ports.Any(exposed =>
-              exposed.Port == port
-              && exposed.Anonymous == anonymous
-              && exposed.Activation == expected
-            ),
+          sandbox => sandbox.Ports.Any(exposed => IsExposedAs(exposed, port, options)),
           // The port exists but has no address yet: the proxy is still setting it up.
           sandbox =>
             IsSettled(sandbox)
@@ -337,6 +342,125 @@ public sealed class SandboxesClient : ISandboxesClient
         ? ToView(call, added)
         : await GetRequiredAsync(call, sandboxId, cancellationToken);
     }
+  }
+
+  /// <inheritdoc />
+  /// <remarks>Takes the sandbox afresh once the data plane has disabled it.</remarks>
+  public Task<SandboxView> DisableAsync(string sandboxId, CancellationToken cancellationToken) =>
+    PostAndReadAsync(SandboxPath(sandboxId) + "/disable", sandboxId, cancellationToken);
+
+  /// <inheritdoc />
+  /// <remarks>Takes the sandbox afresh once the data plane has enabled it.</remarks>
+  public Task<SandboxView> EnableAsync(string sandboxId, CancellationToken cancellationToken) =>
+    PostAndReadAsync(SandboxPath(sandboxId) + "/enable", sandboxId, cancellationToken);
+
+  /// <summary>Posts an empty body to <paramref name="path"/>, then reads the sandbox.</summary>
+  private async Task<SandboxView> PostAndReadAsync(
+    string path,
+    string sandboxId,
+    CancellationToken cancellationToken
+  )
+  {
+    Call call = new(HttpMethod.Post, path, EmptyObject);
+    using (var response = await SendAsync(call, cancellationToken))
+    {
+      await EnsureSuccessAsync(call, response, cancellationToken);
+    }
+
+    return await GetRequiredAsync(call, sandboxId, cancellationToken);
+  }
+
+  /// <summary>
+  /// The IP access control that admits <paramref name="cidrs"/> alone: allow rules of at most
+  /// <see cref="SandboxPortOptions.MaxCidrsPerRule"/> ranges, at priorities 10, 20, and so on, and
+  /// deny by default. <see langword="null"/>, which leaves the port open to any address, for none.
+  /// </summary>
+  internal static IpAccessControlWire? ToIpAccessControl(IReadOnlyList<string> cidrs)
+  {
+    if (cidrs.Count == 0)
+    {
+      return null;
+    }
+
+    var chunks = cidrs.Chunk(SandboxPortOptions.MaxCidrsPerRule).ToArray();
+    return new IpAccessControlWire
+    {
+      DefaultAction = "Deny",
+      Rules =
+      [
+        .. chunks.Select(
+          (chunk, index) =>
+            new IpAccessRuleWire
+            {
+              Name =
+                chunks.Length == 1
+                  ? "gateway"
+                  : "gateway-" + (index + 1).ToString(CultureInfo.InvariantCulture),
+              Action = "Allow",
+              Priority = (index + 1) * 10,
+              SourceCidrs = chunk,
+            }
+        ),
+      ],
+    };
+  }
+
+  /// <summary>
+  /// Whether <paramref name="exposed"/> is port <paramref name="port"/> as
+  /// <paramref name="options"/> ask. Source ranges are compared only when the data plane reports
+  /// some, since whether its answers carry them has not been observed.
+  /// </summary>
+  private static bool IsExposedAs(SandboxPort exposed, int port, SandboxPortOptions options) =>
+    exposed.Port == port
+    && exposed.Anonymous == options.Anonymous
+    && exposed.Activation == options.Activation
+    && (
+      exposed.AllowedSourceCidrs.Count == 0
+      || exposed
+        .AllowedSourceCidrs.Order(StringComparer.Ordinal)
+        .SequenceEqual(options.AllowedSourceCidrs.Order(StringComparer.Ordinal))
+    );
+
+  /// <summary>
+  /// The ranges an IP access control that denies by default allows, as a request writes it
+  /// (<see cref="IpAccessControlWire"/>); <see langword="null"/> for none, or any other shape.
+  /// </summary>
+  private static List<string>? AllowedSourceCidrs(JsonElement? accessControl)
+  {
+    if (
+      accessControl is not { ValueKind: JsonValueKind.Object } control
+      || !control.TryGetProperty("defaultAction", out var defaultAction)
+      || defaultAction.ValueKind != JsonValueKind.String
+      || !string.Equals(defaultAction.GetString(), "Deny", StringComparison.OrdinalIgnoreCase)
+      || !control.TryGetProperty("rules", out var rules)
+      || rules.ValueKind != JsonValueKind.Array
+    )
+    {
+      return null;
+    }
+
+    List<string> cidrs = [];
+    foreach (var rule in rules.EnumerateArray())
+    {
+      if (
+        rule.ValueKind == JsonValueKind.Object
+        && rule.TryGetProperty("action", out var action)
+        && action.ValueKind == JsonValueKind.String
+        && string.Equals(action.GetString(), "Allow", StringComparison.OrdinalIgnoreCase)
+        && rule.TryGetProperty("sourceCidrs", out var sources)
+        && sources.ValueKind == JsonValueKind.Array
+      )
+      {
+        cidrs.AddRange(
+          sources
+            .EnumerateArray()
+            .Where(source => source.ValueKind == JsonValueKind.String)
+            .Select(source => source.GetString()!)
+        );
+      }
+    }
+
+    return cidrs.Count == 0 ? null : cidrs;
   }
 
   private static CreateSandboxRequest ToRequest(SandboxSpec spec)
@@ -787,6 +911,9 @@ public sealed class SandboxesClient : ISandboxesClient
             )
               ? SandboxPortActivation.OnDemand
               : SandboxPortActivation.Manual,
+            // The same empty list as the default, so equal ports compare equal.
+            AllowedSourceCidrs =
+              AllowedSourceCidrs(port.IpAccessControl) ?? (IReadOnlyList<string>)[],
           }
         );
       }

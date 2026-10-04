@@ -24,8 +24,43 @@ public class RendererModelTests
         "RendererRecord { TenantId = acme, Url = https://acme--8080.eastus2.adcproxy.io/, "
           + "SandboxId = 98c01b65-b81b-4dca-b000-fdae0eb0939c, "
           + "DiskImageId = c3d87d13-9ce3-4fb5-b0db-db168ea50aa6, "
-          + "CreatedAt = 2026-10-04T01:50:55.0000000+00:00 }"
+          + "CreatedAt = 2026-10-04T01:50:55.0000000+00:00, MaxConcurrentRequests = 2 }"
       );
+  }
+
+  [Test]
+  public async Task A_records_concurrency_is_optional_and_at_least_one()
+  {
+    var withIt = RendererRecordJson.Serialize(Records.Acme());
+    var without = RendererRecordJson.Serialize(
+      Records.Acme() with
+      {
+        MaxConcurrentRequests = null,
+      }
+    );
+
+    await Assert.That(withIt).Contains("\"maxConcurrentRequests\":2");
+    await Assert.That(without).DoesNotContain("maxConcurrentRequests");
+    // A record written before the field existed reads as unknown.
+    await Assert
+      .That(RendererRecordJson.Deserialize(without, "acme", "test").MaxConcurrentRequests)
+      .IsNull();
+    await Assert
+      .That(() => RendererRecordJson.Serialize(Records.Acme() with { MaxConcurrentRequests = 0 }))
+      .Throws<ArgumentException>();
+    await Assert
+      .That(() =>
+        RendererRecordJson.Deserialize(
+          withIt.Replace(
+            "\"maxConcurrentRequests\":2",
+            "\"maxConcurrentRequests\":0",
+            StringComparison.Ordinal
+          ),
+          "acme",
+          "test"
+        )
+      )
+      .Throws<InvalidDataException>();
   }
 
   [Test]
@@ -36,9 +71,10 @@ public class RendererModelTests
   }
 
   [Test]
+  // About one conversion per vCPU, and at least one: more ran out of memory in the sandboxes.
   [Arguments("S", "S", "500m", "1024Mi", 1)]
-  [Arguments("m", "M", "1000m", "2048Mi", 2)]
-  [Arguments("L", "L", "2000m", "4096Mi", 4)]
+  [Arguments("m", "M", "1000m", "2048Mi", 1)]
+  [Arguments("L", "L", "2000m", "4096Mi", 2)]
   public async Task Sizes_parse_by_name_in_any_case(
     string name,
     string expected,
@@ -122,20 +158,20 @@ public class RendererModelTests
           ["ReportsServer__Authentication__ApiKeys__0__Hash"] = credential.Verifier,
           ["ReportsServer__Authentication__ApiKeys__0__CallerId"] = "gateway",
           ["ReportsServer__Authentication__ApiKeys__0__Permissions__0"] = "reports.convert",
-          ["ReportsServer__Limits__MaxConcurrentRequestsPerCaller"] = "16",
+          ["ReportsServer__Limits__MaxConcurrentRequestsPerCaller"] = "4",
           ["ReportsServer__Limits__MaxRequestBodyBytes"] = "31457280",
           ["Kestrel__Limits__MaxRequestBodySize"] = "31457280",
-          ["ReportsEngine__Concurrency__MaxConcurrentConversions"] = "4",
-          ["ReportsEngine__Concurrency__MaxQueueLength"] = "12",
+          ["ReportsEngine__Concurrency__MaxConcurrentConversions"] = "2",
+          ["ReportsEngine__Concurrency__MaxQueueLength"] = "2",
           ["ReportsEngine__Network__Mode"] = "Disabled",
         }
       );
   }
 
   [Test]
-  [Arguments("S", "1", "4", "3")]
-  [Arguments("M", "2", "8", "6")]
-  [Arguments("L", "4", "16", "12")]
+  [Arguments("S", "1", "2", "1")]
+  [Arguments("M", "1", "2", "1")]
+  [Arguments("L", "2", "4", "2")]
   public async Task A_renderer_queues_what_it_admits_beyond_its_conversions(
     string size,
     string conversions,
@@ -147,6 +183,14 @@ public class RendererModelTests
       RendererCredential.Generate(),
       RendererSize.Parse(size)
     );
+
+    await Assert
+      .That(
+        RendererServerEnvironment
+          .MaxConcurrentRequests(RendererSize.Parse(size))
+          .ToString(CultureInfo.InvariantCulture)
+      )
+      .IsEqualTo(admitted);
 
     // The gateway's requests beyond the running conversions wait in the engine's queue instead of
     // being refused as busy.

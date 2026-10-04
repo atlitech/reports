@@ -26,6 +26,12 @@ internal sealed record ListCommand : ProvisionerCommand;
 /// <param name="TenantId">The only tenant whose leftovers to delete, or <see langword="null"/> for all.</param>
 internal sealed record PruneCommand(string? TenantId) : ProvisionerCommand;
 
+/// <param name="TenantId">The tenant whose renderer to stop and keep stopped.</param>
+internal sealed record DisableCommand(string TenantId) : ProvisionerCommand;
+
+/// <param name="TenantId">The tenant whose disabled renderer may start again.</param>
+internal sealed record EnableCommand(string TenantId) : ProvisionerCommand;
+
 /// <summary><c>--help</c>: write <paramref name="Text"/> and succeed.</summary>
 internal sealed record HelpCommand(string Text) : ProvisionerCommand;
 
@@ -68,6 +74,8 @@ internal static class CommandLine
       delete    Delete a tenant's renderer and its record.
       list      List renderers with the state of their sandboxes.
       prune     Delete renderer sandboxes that no record points to.
+      disable   Stop a tenant's renderer and keep it from starting: the kill switch.
+      enable    Let a disabled renderer start again.
 
     Run 'atli-reports-provisioner <command> --help' for a command's options. Settings come from
     appsettings.json next to the binary, then Provisioner__* environment variables, then flags.
@@ -142,6 +150,29 @@ internal static class CommandLine
                              else 00:02:30.
     """;
 
+  public const string DisableUsage = """
+    Usage: atli-reports-provisioner disable --tenant <id>
+
+    Disables every sandbox labeled for the tenant: the platform stops it and refuses to start it
+    again, whether a request reaches its on-demand port or something resumes it, until enable. The
+    kill switch for a compromised renderer: its record and disk stay for investigation, and the
+    tenant's conversions fail meanwhile. Follow with delete, then create, to replace the renderer
+    and its credential.
+
+    Options:
+      --tenant <id>   The tenant.
+    """;
+
+  public const string EnableUsage = """
+    Usage: atli-reports-provisioner enable --tenant <id>
+
+    Lets the tenant's disabled sandboxes start again. They stay stopped until a request or a resume
+    starts them.
+
+    Options:
+      --tenant <id>   The tenant.
+    """;
+
   public static ProvisionerCommand Parse(IReadOnlyList<string> arguments)
   {
     ArgumentNullException.ThrowIfNull(arguments);
@@ -163,6 +194,8 @@ internal static class CommandLine
       "delete" => DeleteUsage,
       "list" => ListUsage,
       "prune" => PruneUsage,
+      "disable" => DisableUsage,
+      "enable" => EnableUsage,
       _ => throw new UsageException($"Unknown command '{name}'.", Overview),
     };
     var options = ParseOptions(arguments.Skip(1), usage);
@@ -177,6 +210,8 @@ internal static class CommandLine
       "rollout" => ParseRollout(options, usage),
       "delete" => ParseDelete(options, usage),
       "prune" => ParsePrune(options, usage),
+      "disable" => ParseTenantOnly(options, usage, tenant => new DisableCommand(tenant)),
+      "enable" => ParseTenantOnly(options, usage, tenant => new EnableCommand(tenant)),
       _ => ParseList(options, usage),
     };
   }
@@ -238,6 +273,17 @@ internal static class CommandLine
     AddDrain(options, settings, usage);
     var tenant = options.Get("--tenant") is { } value ? ValidateTenant(value, usage) : null;
     return new PruneCommand(tenant) { Settings = settings };
+  }
+
+  /// <summary>A command that takes <c>--tenant</c> alone, and requires it.</summary>
+  private static ProvisionerCommand ParseTenantOnly(
+    Options options,
+    string usage,
+    Func<string, ProvisionerCommand> create
+  )
+  {
+    options.Allow(usage, "--tenant");
+    return create(RequireTenant(options, usage));
   }
 
   /// <summary><c>--drain</c>, over <c>Provisioner:DrainDelay</c>.</summary>
