@@ -1,3 +1,4 @@
+using Atli.Reports.Hosting.Renderers;
 using Microsoft.Extensions.Primitives;
 
 namespace Atli.Reports.Server.Gateway;
@@ -67,17 +68,21 @@ internal enum TenantRejection
 /// burst cannot hold every connection to the renderers. Full means <c>Busy</c>; nothing queues.
 /// Entries disappear with their last request, and only configured tenants ever get one.
 /// </summary>
-internal sealed class TenantAdmission(GatewayOptions options)
+internal sealed class TenantAdmission
 {
   private readonly Lock _gate = new();
   private readonly Dictionary<string, int> _active = new(StringComparer.Ordinal);
 
-  public bool TryAcquire(string tenantId, out IDisposable? lease)
+  /// <summary>
+  /// Takes one of the tenant's <paramref name="limit"/> slots: the gateway's
+  /// <c>MaxConcurrentRequestsPerTenant</c>, or less when the tenant's renderer admits fewer.
+  /// </summary>
+  public bool TryAcquire(string tenantId, int limit, out IDisposable? lease)
   {
     lock (_gate)
     {
       var count = _active.GetValueOrDefault(tenantId);
-      if (count >= options.MaxConcurrentRequestsPerTenant)
+      if (count >= limit)
       {
         lease = null;
         return false;
@@ -119,5 +124,14 @@ internal sealed class TenantAdmission(GatewayOptions options)
   }
 }
 
-/// <summary>The request's verified tenant, set by the gateway middleware for the converter.</summary>
-internal sealed record GatewayTenantFeature(string TenantId);
+/// <summary>
+/// The request's verified tenant, set by the gateway middleware for the converter, with the
+/// renderer record the middleware read for the tenant's limit, so the conversion does not read it
+/// again. <paramref name="RecordLoaded"/> is <see langword="false"/> when that read failed; the
+/// converter then reads the record itself and reports the failure.
+/// </summary>
+internal sealed record GatewayTenantFeature(
+  string TenantId,
+  RendererRecord? Record = null,
+  bool RecordLoaded = false
+);

@@ -127,7 +127,8 @@ internal static class GatewayHost
     string tenantId,
     string url,
     string apiKey,
-    string? sandboxId = null
+    string? sandboxId = null,
+    int? maxConcurrentRequests = null
   ) =>
     [
       "--ReportsServer:Gateway:Records:Store=Configuration",
@@ -137,6 +138,12 @@ internal static class GatewayHost
       .. sandboxId is null
         ? Array.Empty<string>()
         : [$"--ReportsServer:Gateway:Records:Renderers:{index}:SandboxId={sandboxId}"],
+      .. maxConcurrentRequests is null
+        ? Array.Empty<string>()
+        :
+        [
+          $"--ReportsServer:Gateway:Records:Renderers:{index}:MaxConcurrentRequests={maxConcurrentRequests}",
+        ],
     ];
 
   /// <summary>The anonymous caller in one tenant, served by one renderer.</summary>

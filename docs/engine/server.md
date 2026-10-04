@@ -179,14 +179,14 @@ security settings:
 | `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: 1 to 63 lowercase letters, digits, and hyphens. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers` |
 | `TenantHeader` | `X-Reports-Tenant` | The header a caller with several tenants names one in |
 | `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
-| `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, and its sandbox ID if it is a sandbox |
+| `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId`, `MaxConcurrentRequests` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, its sandbox ID if it is a sandbox, and how many requests it admits at once |
 | `Records:CacheDuration` | `00:00:30` | How long a record lookup is reused; a missing record is reused for 5 seconds at most, and a record is dropped sooner when its renderer rejects the gateway's credential, cannot be reached, or names a sandbox that no longer exists |
-| `Wake:Mode` | `None` | `Sandboxes` resumes suspended Azure Container Apps sandboxes |
+| `Wake:Mode` | `None` | `Sandboxes` resumes suspended Azure Container Apps sandboxes whose port does not wake them on request; the provisioner's ports do (`OnDemand`), so they need `None` |
 | `Wake:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region`, `ManagedIdentityClientId` | | The renderers' sandbox group, for `Sandboxes` |
 | `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
 | `RendererTimeout` | `00:01:30` | The deadline of one forwarded conversion, from the record lookup to the PDF's last byte |
 | `MaxPdfBytes` | `268435456` (256 MiB) | The largest PDF the gateway relays |
-| `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers |
+| `MaxConcurrentRequestsPerTenant` | `8` | Conversions in flight per tenant in this replica, across its callers; lower when the tenant's record says its renderer admits fewer |
 | `AllowHttpRenderers` | `false` | Allows `http` renderer URLs, for tests and development only |
 | `AllowAnonymousCallers` | `false` | Allows `Authentication:Mode=None`, under which anyone who reaches the gateway converts as `anonymous` for that caller ID's tenants. For tests and development only |
 
@@ -209,8 +209,11 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `TenantHeader`: a missing header (or the header sent twice) is a `400` (`InvalidRequest`), and a
   tenant it does not belong to is a `403`. An empty header counts as a missing one, so it selects
   a single-tenant caller's tenant and is a `400` for a caller with several. This runs after caller
-  admission and before the body is read. A tenant at `MaxConcurrentRequestsPerTenant` gets `503`
-  `Busy` with `Retry-After: 1`; nothing queues.
+  admission and before the body is read. A tenant's in-flight limit is `MaxConcurrentRequestsPerTenant`,
+  or its record's `MaxConcurrentRequests` (the requests its renderer admits) when that is lower; a
+  tenant at its limit gets `503` `Busy` with `Retry-After: 1`, and nothing queues in the gateway.
+  The limit holds per replica, so several replicas can still send a renderer more than it admits;
+  the renderer's `Busy` is retried as described below.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
   record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
   the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no
@@ -241,7 +244,11 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   wire format escapes characters outside the Basic Multilingual Plane, so an emoji's 4 UTF-8 bytes
   take 12, and a body under the gateway's own limit can exceed the renderer's. Other answers are
   `Busy` for `429`, `BrowserUnavailable` for `5xx`, and `RenderFailed` otherwise.
-- **Waking renderers.** With `Wake:Mode=Sandboxes` and a record with a `SandboxId`, the platform's
+- **Waking renderers.** A renderer port with on-demand activation, which the
+  [provisioner](../../src/Atli.Reports.Provisioner/README.md) creates by default, wakes its
+  suspended sandbox on the conversion request itself, so the gateway needs no wake settings and no
+  rights over sandboxes. For ports without it: with `Wake:Mode=Sandboxes` and a record with a
+  `SandboxId`, the platform's
   `403 {"error":"Sandbox is not running"}` (not the renderer's own problem details) makes the
   gateway wake the sandbox and send the conversion again. That answer reaches the gateway through
   the renderer's port, so a compromised renderer can send it too: before resuming, the gateway

@@ -329,6 +329,13 @@ internal sealed class GatewayRecordsOptions
           $"The renderer SandboxId for tenant '{renderer.TenantId}' must be letters, digits, hyphens, and underscores."
         );
       }
+
+      if (renderer.MaxConcurrentRequests is < 1)
+      {
+        throw new InvalidOperationException(
+          $"The renderer MaxConcurrentRequests for tenant '{renderer.TenantId}' must be at least 1."
+        );
+      }
     }
   }
 }
@@ -344,6 +351,9 @@ internal sealed class GatewayRendererEntry
 
   public string? SandboxId { get; set; }
 
+  /// <summary>The requests the renderer admits at once, which caps the tenant's in-flight limit.</summary>
+  public int? MaxConcurrentRequests { get; set; }
+
   public RendererRecord ToRecord() =>
     new()
     {
@@ -351,6 +361,7 @@ internal sealed class GatewayRendererEntry
       Url = new Uri(Url, UriKind.Absolute),
       ApiKey = ApiKey,
       SandboxId = SandboxId,
+      MaxConcurrentRequests = MaxConcurrentRequests,
     };
 }
 

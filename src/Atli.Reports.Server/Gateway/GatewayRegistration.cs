@@ -187,6 +187,7 @@ internal static partial class GatewayRegistration
     var settings = app.Services.GetRequiredService<GatewayOptions>();
     var membership = app.Services.GetRequiredService<TenantMembership>();
     var admission = app.Services.GetRequiredService<TenantAdmission>();
+    var directory = app.Services.GetRequiredService<RendererDirectory>();
     var logger = app
       .Services.GetRequiredService<ILoggerFactory>()
       .CreateLogger("Atli.Reports.Server.Gateway");
@@ -244,9 +245,15 @@ internal static partial class GatewayRegistration
         }
 
         var tenantId = resolution.TenantId!;
-        if (!admission.TryAcquire(tenantId, out var lease))
+        var (limit, feature) = await TenantLimitAsync(
+          directory,
+          settings,
+          tenantId,
+          context.RequestAborted
+        );
+        if (!admission.TryAcquire(tenantId, limit, out var lease))
         {
-          LogTenantBusy(logger, tenantId, settings.MaxConcurrentRequestsPerTenant);
+          LogTenantBusy(logger, tenantId, limit);
           await ConversionProblems.WriteAsync(
             context,
             new ConversionError(
@@ -259,12 +266,43 @@ internal static partial class GatewayRegistration
 
         using (lease)
         {
-          context.Features.Set(new GatewayTenantFeature(tenantId));
+          context.Features.Set(feature);
           Activity.Current?.SetTag(TenantTag, tenantId);
           await next(context);
         }
       }
     );
+  }
+
+  /// <summary>
+  /// The tenant's in-flight limit: the gateway's, or the number of requests the tenant's renderer
+  /// admits (its record's <see cref="RendererRecord.MaxConcurrentRequests"/>) when that is lower,
+  /// so a burst waits here as <c>Busy</c> rather than piling onto a renderer that would refuse it.
+  /// The record comes from the directory's cache; when it cannot be read, the gateway's limit
+  /// applies and the conversion reports the failure.
+  /// </summary>
+  private static async Task<(int Limit, GatewayTenantFeature Feature)> TenantLimitAsync(
+    RendererDirectory directory,
+    GatewayOptions settings,
+    string tenantId,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      var record = await directory.GetAsync(tenantId, cancellationToken);
+      return (
+        Math.Min(
+          settings.MaxConcurrentRequestsPerTenant,
+          record?.MaxConcurrentRequests ?? int.MaxValue
+        ),
+        new GatewayTenantFeature(tenantId, record, RecordLoaded: true)
+      );
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+      return (settings.MaxConcurrentRequestsPerTenant, new GatewayTenantFeature(tenantId));
+    }
   }
 
   [LoggerMessage(
@@ -281,13 +319,9 @@ internal static partial class GatewayRegistration
   [LoggerMessage(
     EventId = 53,
     Level = LogLevel.Information,
-    Message = "Tenant {TenantId} reached its limit of {MaxConcurrentRequestsPerTenant} conversions in flight."
+    Message = "Tenant {TenantId} reached its limit of {Limit} conversions in flight."
   )]
-  private static partial void LogTenantBusy(
-    ILogger logger,
-    string tenantId,
-    int maxConcurrentRequestsPerTenant
-  );
+  private static partial void LogTenantBusy(ILogger logger, string tenantId, int limit);
 }
 
 /// <summary>

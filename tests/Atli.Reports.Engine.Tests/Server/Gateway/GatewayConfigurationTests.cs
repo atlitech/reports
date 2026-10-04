@@ -74,6 +74,10 @@ public class GatewayConfigurationTests
   [Arguments("--ReportsServer:Gateway:Records:Renderers:0:ApiKey=", "ApiKey")]
   [Arguments("--ReportsServer:Gateway:Records:Renderers:0:ApiKey=two words", "ApiKey")]
   [Arguments("--ReportsServer:Gateway:Records:Renderers:0:SandboxId=../x", "SandboxId")]
+  [Arguments(
+    "--ReportsServer:Gateway:Records:Renderers:0:MaxConcurrentRequests=0",
+    "MaxConcurrentRequests"
+  )]
   [Arguments("--ReportsServer:Gateway:Wake:Mode=Always", "Wake:Mode")]
   [Arguments("--ReportsServer:Gateway:Wake:Mode=Sandboxes", "Wake:Sandboxes")]
   [Arguments("--ReportsServer:Gateway:Wake:Timeout=00:00:00", "Wake:Timeout")]
@@ -519,6 +523,43 @@ public class GatewayConfigurationTests
       .That(next.StatusCode)
       .IsEqualTo(HttpStatusCode.OK)
       .Because("the lease was released");
+  }
+
+  [Test]
+  public async Task The_renderers_admitted_requests_cap_its_tenants_limit()
+  {
+    TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var renderer = await FakeRenderer.StartAsync(async context =>
+    {
+      entered.TrySetResult();
+      await release.Task.WaitAsync(context.RequestAborted);
+      await FakeRenderer.WritePdfAsync(context, "%PDF-1.7");
+    });
+    // The gateway allows 8; the record says the renderer admits 1.
+    await using var gateway = await GatewayHost.StartAsync([
+      .. Membership(0, "anonymous", "acme"),
+      .. Renderer(0, "acme", renderer.BaseUrl, TestKey, maxConcurrentRequests: 1),
+    ]);
+
+    using var firstRequest = ConvertRequest();
+    var first = gateway.Client.SendAsync(firstRequest, TestToken);
+    await entered.Task.WaitAsync(TestToken);
+    Problem busy;
+    try
+    {
+      using var secondRequest = ConvertRequest();
+      busy = await ReadProblemAsync(await gateway.Client.SendAsync(secondRequest, TestToken));
+    }
+    finally
+    {
+      release.TrySetResult();
+    }
+
+    using var completed = await first;
+    await Assert.That(busy.Status).IsEqualTo(503);
+    await Assert.That(busy.Kind).IsEqualTo("Busy");
+    await Assert.That(completed.StatusCode).IsEqualTo(HttpStatusCode.OK);
   }
 
   private static RendererRecord Record(string tenantId, string url) =>

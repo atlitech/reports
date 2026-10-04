@@ -92,11 +92,12 @@ internal sealed partial class RendererGateway(
   {
     ArgumentNullException.ThrowIfNull(html);
     ArgumentNullException.ThrowIfNull(destination);
-    var tenantId =
-      httpContextAccessor.HttpContext?.Features.Get<GatewayTenantFeature>()?.TenantId
+    var tenant =
+      httpContextAccessor.HttpContext?.Features.Get<GatewayTenantFeature>()
       ?? throw new InvalidOperationException(
         "Gateway conversions need the tenant that the gateway middleware resolves."
       );
+    var tenantId = tenant.TenantId;
 
     using var deadline = new CancellationTokenSource(settings.RendererTimeout, timeProvider);
     using var linked = CancellationTokenSource.CreateLinkedTokenSource(
@@ -109,7 +110,10 @@ internal sealed partial class RendererGateway(
       RendererRecord? record;
       try
       {
-        record = await directory.GetAsync(tenantId, linked.Token);
+        // The middleware already read it for the tenant's limit, unless that read failed.
+        record = tenant.RecordLoaded
+          ? tenant.Record
+          : await directory.GetAsync(tenantId, linked.Token);
       }
       catch (Exception exception) when (!linked.IsCancellationRequested)
       {
