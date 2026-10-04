@@ -4,14 +4,18 @@ using Microsoft.Extensions.Logging;
 namespace Atli.Reports.Provisioner.Service;
 
 /// <summary>
-/// Retires the managed tenants' idle renderers while the service runs, as <c>retire</c> does once:
-/// the first time <c>RetireCheckInterval</c> after the service starts, then that long after each
-/// run ends. A run that fails is logged, and the next one runs as planned. Nothing runs when
-/// <c>RetireAfterIdle</c> is zero.
+/// Retires the managed tenants' idle renderers while the service runs, as <c>retire</c> does once,
+/// and deletes their leftover sandboxes: the first time <see cref="FirstRunAfter"/> after the
+/// service starts, then <c>RetireCheckInterval</c> after each run ends. A run that fails is logged,
+/// and the next one runs as planned. With <c>RetireAfterIdle</c> at zero, runs only delete
+/// leftovers.
 /// </summary>
 /// <param name="service">The prefixes and the retirement settings.</param>
-/// <param name="retire">One run, <see cref="RendererProvisioner.RetireIdleAsync"/> in the service.</param>
-/// <param name="census">Lists the store again after each run, since renderers may be gone.</param>
+/// <param name="retire">
+/// One run, <see cref="RendererProvisioner.RetireIdleAsync(ProvisioningServiceOptions, bool, CancellationToken)"/>
+/// with leftovers, in the service.
+/// </param>
+/// <param name="census">Told of each retired tenant, whose record is gone, so its place is free at once.</param>
 /// <param name="time">The clock the interval is measured on.</param>
 /// <param name="logger">Where runs are reported.</param>
 internal sealed partial class RetirementLoop(
@@ -22,18 +26,24 @@ internal sealed partial class RetirementLoop(
   ILogger<RetirementLoop> logger
 ) : BackgroundService
 {
+  /// <summary>
+  /// How long after the service starts the first run begins: soon, so that a service restarted
+  /// more often than <c>RetireCheckInterval</c> still runs, but not while it is starting.
+  /// </summary>
+  public static readonly TimeSpan FirstRunAfter = TimeSpan.FromMinutes(1);
+
   protected override async Task ExecuteAsync(CancellationToken stoppingToken)
   {
     if (service.RetireAfterIdle <= TimeSpan.Zero)
     {
       LogOff(logger);
-      return;
     }
 
+    await Task.Delay(FirstRunAfter, time, stoppingToken);
     while (true)
     {
-      await Task.Delay(service.RetireCheckInterval, time, stoppingToken);
       await RunAsync(stoppingToken);
+      await Task.Delay(service.RetireCheckInterval, time, stoppingToken);
     }
   }
 
@@ -43,7 +53,12 @@ internal sealed partial class RetirementLoop(
     try
     {
       var result = await retire(stoppingToken);
-      LogRun(logger, result.Retired.Count, result.Failures.Count);
+      foreach (var tenantId in result.Retired)
+      {
+        census.Deleted(tenantId);
+      }
+
+      LogRun(logger, result.Retired.Count, result.Pruned.Count, result.Failures.Count);
       foreach (var (tenantId, reason) in result.Failures)
       {
         LogNotRetired(logger, tenantId, reason);
@@ -54,23 +69,19 @@ internal sealed partial class RetirementLoop(
     {
       LogRunFailed(logger, exception, service.RetireCheckInterval);
     }
-    finally
-    {
-      census.Invalidate();
-    }
   }
 
   [LoggerMessage(
     EventId = 20,
     Level = LogLevel.Information,
-    Message = "Retired {Retired} idle renderers; {Failed} could not be retired."
+    Message = "Retired {Retired} idle renderers and deleted {Pruned} leftover sandboxes; {Failed} tenants failed."
   )]
-  private static partial void LogRun(ILogger logger, int retired, int failed);
+  private static partial void LogRun(ILogger logger, int retired, int pruned, int failed);
 
   [LoggerMessage(
     EventId = 21,
     Level = LogLevel.Warning,
-    Message = "Could not retire the renderer of tenant {TenantId}: {Reason}"
+    Message = "Could not retire tenant {TenantId}, or delete its leftovers: {Reason}"
   )]
   private static partial void LogNotRetired(ILogger logger, string tenantId, string reason);
 
@@ -84,7 +95,7 @@ internal sealed partial class RetirementLoop(
   [LoggerMessage(
     EventId = 23,
     Level = LogLevel.Information,
-    Message = "Retirement is off: Provisioner:Service:RetireAfterIdle is 00:00:00."
+    Message = "Retirement is off: Provisioner:Service:RetireAfterIdle is 00:00:00. Leftover sandboxes are still deleted."
   )]
   private static partial void LogOff(ILogger logger);
 }

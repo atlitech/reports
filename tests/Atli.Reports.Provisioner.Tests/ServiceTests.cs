@@ -6,6 +6,7 @@ using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Service;
 using Atli.Reports.Provisioner.Tests.Support;
 using Microsoft.Extensions.Logging;
+using TUnit.Assertions.Enums;
 
 namespace Atli.Reports.Provisioner.Tests;
 
@@ -124,7 +125,7 @@ public class ServiceTests
   }
 
   [Test]
-  public async Task It_is_ready_only_while_the_record_store_answers()
+  public async Task It_is_ready_while_the_record_store_answered_lately()
   {
     using Provisioning provisioning = new();
     ListingRecordStore records = new(provisioning.Records)
@@ -133,14 +134,61 @@ public class ServiceTests
     };
     await using var service = await RunningService.StartAsync(provisioning, records: records);
 
-    using var unready = await service.SendAsync(HttpMethod.Get, "/health/ready", null, TestToken);
+    using var unready = await ReadyAsync(service);
     using var live = await service.SendAsync(HttpMethod.Get, "/health/live", null, TestToken);
     records.FailListing = null;
-    using var ready = await service.SendAsync(HttpMethod.Get, "/health/ready", null, TestToken);
+    // The census lists the store in the background, with no request to prompt it.
+    await service.ListAgainAsync(provisioning.Clock, 40);
+    using var ready = await ReadyAsync(service);
+    records.FailListing = new InvalidOperationException("The vault is unavailable.");
+    List<HttpStatusCode> whileFailing = [];
+    for (var listing = 1; listing <= 4; listing++)
+    {
+      await service.ListAgainAsync(provisioning.Clock, 41);
+      using var probed = await ReadyAsync(service);
+      whileFailing.Add(probed.StatusCode);
+    }
 
     await Assert.That(unready.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
     await Assert.That(live.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(ready.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    // Ready until the last listing that succeeded is TenantCensus.MaxAge old.
+    await Assert
+      .That(whileFailing)
+      .IsEquivalentTo(
+        [
+          HttpStatusCode.OK,
+          HttpStatusCode.OK,
+          HttpStatusCode.OK,
+          HttpStatusCode.ServiceUnavailable,
+        ],
+        CollectionOrdering.Matching
+      );
+  }
+
+  [Test]
+  public async Task Readiness_never_waits_for_a_listing_in_progress()
+  {
+    using Provisioning provisioning = new();
+    ListingRecordStore records = new(provisioning.Records);
+    await using var service = await RunningService.StartAsync(provisioning, records: records);
+    // A listing that takes long, as Key Vault's does at thousands of records.
+    TaskCompletionSource listed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    records.HoldListing = listed.Task;
+
+    await provisioning.Clock.WaitForTimerAsync(TenantCensus.RefreshInterval);
+    provisioning.Clock.Advance(TenantCensus.RefreshInterval);
+    await records.Held.WaitAsync(TestToken);
+    using var whileListing = await ReadyAsync(service);
+    provisioning.Clock.Advance(TenantCensus.MaxAge);
+    using var tooLong = await ReadyAsync(service);
+    listed.SetResult();
+    await service.Logs.WaitForAsync<TenantCensus>(40, count: 2);
+    using var listedNow = await ReadyAsync(service);
+
+    await Assert.That(whileListing.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(tooLong.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);
+    await Assert.That(listedNow.StatusCode).IsEqualTo(HttpStatusCode.OK);
   }
 
   [Test]
@@ -212,6 +260,10 @@ public class ServiceTests
       .That(await response.Content.ReadAsStringAsync(TestToken))
       .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
     await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    // Its port admits only Provisioner:AllowedSourceCidrs, which serve requires.
+    await Assert
+      .That(provisioning.Journal.Matching("port"))
+      .IsEquivalentTo(["port sandbox-1 8080 anonymous OnDemand from 203.0.113.7/32"]);
     var spec = provisioning.Sandboxes.Created.Single();
     await Assert.That(spec.DiskImageId).IsEqualTo("disk-1");
     // The prefix names no size, so Provisioner:Size.
@@ -259,8 +311,8 @@ public class ServiceTests
     }
 
     await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
-    // Neither the quota nor the rate limit was asked.
-    await Assert.That(records.Listings).IsEqualTo(0);
+    // No request listed the store: only the census, as the service started.
+    await Assert.That(records.Listings).IsEqualTo(1);
     using var created = await service.PutAsync("myapp-2", TestToken);
     await Assert.That(created.StatusCode).IsEqualTo(HttpStatusCode.OK);
   }
@@ -340,6 +392,25 @@ public class ServiceTests
       .IsEqualTo("""{"tenantId":"myapp-1","created":false}""");
     await Assert.That(provisioning.Records["myapp-1"]).IsSameReferenceAs(other);
     await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-myapp-1"]);
+  }
+
+  [Test]
+  public async Task A_record_that_names_another_tenants_sandbox_is_a_failure_not_found()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-b", "disk-1");
+    var tampered = provisioning.AddRenderer("myapp-a", "disk-1") with { SandboxId = "old-myapp-b" };
+    provisioning.Records.Add(tampered);
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    using var response = await service.PutAsync("myapp-a", TestToken);
+
+    await AssertProblemAsync(response, HttpStatusCode.ServiceUnavailable, "Failed");
+    var failures = service.Logs.Of<ManagedRenderers>(2);
+    await Assert.That(failures).HasSingleItem();
+    await Assert.That(failures[0].Exception!.Message).Contains("labeled for tenant myapp-b");
+    await Assert.That(provisioning.Records["myapp-a"]).IsSameReferenceAs(tampered);
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
   }
 
   [Test]
@@ -426,13 +497,158 @@ public class ServiceTests
     // From the command line, say: the service learns of it from the next listing.
     provisioning.AddRenderer("myapp-x", "disk-1");
     using var second = await service.PutAsync("myapp-b", TestToken);
-    provisioning.Clock.Advance(TenantCensus.MaxAge);
+    await service.ListAgainAsync(provisioning.Clock, 40);
     using var third = await service.PutAsync("myapp-c", TestToken);
 
     await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(second.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await AssertProblemAsync(third, HttpStatusCode.TooManyRequests, "QuotaExceeded");
     await Assert.That(records.Listings).IsEqualTo(2);
+  }
+
+  [Test]
+  public async Task A_prefix_over_its_quota_refuses_new_tenants_and_still_repairs_its_own()
+  {
+    using Provisioning provisioning = new();
+    // Three renderers under myapp- with MaxTenants 2: made from the command line, say, or under a
+    // quota that has been lowered since.
+    provisioning.AddRenderer("myapp-a", "disk-1");
+    provisioning.AddRenderer("myapp-b", "disk-1");
+    provisioning.AddRenderer("myapp-c", "disk-1");
+    provisioning.Sandboxes.Remove("old-myapp-c");
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.TenantPrefixes[0].MaxTenants = 2
+    );
+
+    using var refused = await service.PutAsync("myapp-d", TestToken);
+    using var repaired = await service.PutAsync("myapp-c", TestToken);
+
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "QuotaExceeded");
+    await Assert
+      .That(await repaired.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-c","created":true}""");
+    await Assert.That(provisioning.Records["myapp-c"]!.SandboxId).IsEqualTo("sandbox-1");
+  }
+
+  [Test]
+  public async Task Replacing_a_missing_sandbox_is_never_rate_limited()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-a", "disk-1");
+    provisioning.Sandboxes.Remove("old-myapp-a");
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.MaxCreatesPerMinute = 1
+    );
+
+    using var created = await service.PutAsync("myapp-new", TestToken);
+    using var limited = await service.PutAsync("myapp-other", TestToken);
+    using var repaired = await service.PutAsync("myapp-a", TestToken);
+
+    await Assert.That(created.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await AssertProblemAsync(limited, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert
+      .That(await repaired.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-a","created":true}""");
+  }
+
+  [Test]
+  public async Task A_new_tenant_is_refused_before_its_record_is_read()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-a", "disk-1");
+    ListingRecordStore records = new(provisioning.Records);
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.TenantPrefixes[0].MaxTenants = 1;
+        service.TenantPrefixes[1].MaxCreatesPerMinute = 1;
+      },
+      records
+    );
+
+    using var overQuota = await service.PutAsync("myapp-b", TestToken);
+    using var created = await service.PutAsync("big-1", TestToken);
+    using var rateLimited = await service.PutAsync("big-2", TestToken);
+    using var found = await service.PutAsync("myapp-a", TestToken);
+
+    await AssertProblemAsync(overQuota, HttpStatusCode.TooManyRequests, "QuotaExceeded");
+    await Assert.That(created.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await AssertProblemAsync(rateLimited, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert.That(found.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    // The census lists neither refused tenant, so neither record was read; the one it lists was.
+    await Assert.That(records.Gets).DoesNotContain("myapp-b");
+    await Assert.That(records.Gets).DoesNotContain("big-2");
+    await Assert.That(records.Gets).Contains("myapp-a");
+  }
+
+  [Test]
+  public async Task Once_the_census_is_out_of_date_each_tenants_record_is_read_first()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-a", "disk-1");
+    ListingRecordStore records = new(provisioning.Records);
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.TenantPrefixes[0].MaxTenants = 1,
+      records
+    );
+    records.FailListing = new InvalidOperationException("The vault is unavailable.");
+    for (var listing = 1; listing <= 4; listing++)
+    {
+      await service.ListAgainAsync(provisioning.Clock, 41);
+    }
+
+    using var refused = await service.PutAsync("myapp-b", TestToken);
+
+    // Counted from the last listing that succeeded, but read first.
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "QuotaExceeded");
+    await Assert.That(records.Gets).Contains("myapp-b");
+  }
+
+  [Test]
+  public async Task A_record_written_since_the_listing_is_found_by_the_creation()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(provisioning);
+    // By another replica, say, after the census listed the store.
+    var other = provisioning.AddRenderer("myapp-x", "disk-1");
+
+    using var response = await service.PutAsync("myapp-x", TestToken);
+
+    await Assert
+      .That(await response.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-x","created":false}""");
+    await Assert.That(provisioning.Records["myapp-x"]).IsSameReferenceAs(other);
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_retired_renderer_frees_its_place_in_the_quota_at_once()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-a", "disk-1");
+    provisioning.Sandboxes.Suspend("old-myapp-a", TimeSpan.FromDays(8));
+    ListingRecordStore records = new(provisioning.Records);
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.TenantPrefixes[0].MaxTenants = 1,
+      records
+    );
+    // From now on, only what the service does itself changes its count.
+    records.FailListing = new InvalidOperationException("The vault is unavailable.");
+
+    using var full = await service.PutAsync("myapp-b", TestToken);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await service.Logs.WaitForAsync<RetirementLoop>(20);
+    using var freed = await service.PutAsync("myapp-b", TestToken);
+
+    await AssertProblemAsync(full, HttpStatusCode.TooManyRequests, "QuotaExceeded");
+    await Assert.That(provisioning.Records["myapp-a"]).IsNull();
+    await Assert.That(freed.StatusCode).IsEqualTo(HttpStatusCode.OK);
   }
 
   [Test]
@@ -463,6 +679,117 @@ public class ServiceTests
     await Assert.That(found.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(allowed.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(provisioning.Sandboxes.Created.Count).IsEqualTo(3);
+  }
+
+  [Test]
+  public async Task One_prefix_cannot_use_up_the_creates_of_another()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 4;
+        service.TenantPrefixes[0].MaxCreatesPerMinute = 3;
+        service.TenantPrefixes[0].MaxTenants = 1;
+      }
+    );
+
+    List<string> churning = [];
+    List<string> other = [];
+    var next = 0;
+    for (var minute = 0; minute < 3; minute++)
+    {
+      // Creating new tenants and deleting them again: the quota never fills.
+      for (var i = 0; i < 4; i++)
+      {
+        var tenant = $"myapp-{next++}";
+        using var created = await service.PutAsync(tenant, TestToken);
+        churning.Add(await AnswerAsync(created));
+        using var deleted = await service.DeleteAsync(tenant, TestToken);
+      }
+
+      using var answer = await service.PutAsync($"big-{minute}", TestToken);
+      other.Add(await AnswerAsync(answer));
+      provisioning.Clock.Advance(CreationRateLimit.Window);
+    }
+
+    await Assert
+      .That(churning)
+      .IsEquivalentTo(
+        [.. Enumerable.Repeat<string[]>(["OK", "OK", "OK", "RateLimited"], 3).SelectMany(x => x)],
+        CollectionOrdering.Matching
+      );
+    await Assert.That(other).IsEquivalentTo(["OK", "OK", "OK"]);
+    var limited = service.Logs.Of<ManagedRenderers>(6);
+    await Assert.That(limited.Count).IsEqualTo(3);
+    await Assert
+      .That(limited[0].Message)
+      .IsEqualTo(
+        "Refused tenant myapp-3 for now: prefix myapp- created its most renderers (3) in the last "
+          + "minute."
+      );
+  }
+
+  [Test]
+  public async Task A_create_its_prefix_refuses_takes_nothing_from_the_service()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 2;
+        service.TenantPrefixes[0].MaxCreatesPerMinute = 1;
+      }
+    );
+
+    using var first = await service.PutAsync("myapp-1", TestToken);
+    using var refused = await service.PutAsync("myapp-2", TestToken);
+    using var other = await service.PutAsync("big-1", TestToken);
+
+    await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert.That(refused.Headers.RetryAfter?.Delta).IsEqualTo(TimeSpan.FromSeconds(60));
+    await Assert.That(other.StatusCode).IsEqualTo(HttpStatusCode.OK);
+  }
+
+  [Test]
+  public async Task A_create_the_service_refuses_takes_nothing_from_its_prefix()
+  {
+    using Provisioning provisioning = new();
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service =>
+      {
+        service.MaxCreatesPerMinute = 3;
+        service.TenantPrefixes[1].MaxCreatesPerMinute = 2;
+      }
+    );
+
+    using var big1 = await service.PutAsync("big-1", TestToken);
+    using var app1 = await service.PutAsync("myapp-1", TestToken);
+    using var app2 = await service.PutAsync("myapp-2", TestToken);
+    provisioning.Clock.Advance(TimeSpan.FromSeconds(30));
+    using var refused = await service.PutAsync("big-2", TestToken);
+    provisioning.Clock.Advance(TimeSpan.FromSeconds(30));
+    // big-1's create has left big-'s window, and the refused one was never in it.
+    using var big3 = await service.PutAsync("big-3", TestToken);
+    using var big4 = await service.PutAsync("big-4", TestToken);
+
+    foreach (var response in new[] { big1, app1, app2, big3, big4 })
+    {
+      await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    await AssertProblemAsync(refused, HttpStatusCode.TooManyRequests, "RateLimited");
+    await Assert.That(refused.Headers.RetryAfter?.Delta).IsEqualTo(TimeSpan.FromSeconds(30));
+    await Assert
+      .That(service.Logs.Of<ManagedRenderers>(6).Single().Message)
+      .IsEqualTo(
+        "Refused tenant big-2 for now: the service created its most renderers (3) in the last "
+          + "minute."
+      );
   }
 
   [Test]
@@ -578,7 +905,8 @@ public class ServiceTests
     var creating = service.PutAsync("myapp-1", TestToken);
     await probing.Task.WaitAsync(TestToken);
     var deleting = service.DeleteAsync("myapp-1", TestToken);
-    await Task.Delay(TimeSpan.FromMilliseconds(200), TestToken);
+    await service.Logs.WaitForAsync<ManagedRenderers>(12);
+    // Nothing but the creation's end lets it go on.
     await Assert.That(deleting.IsCompleted).IsFalse();
     ready.SetResult();
     using var created = await creating;
@@ -587,8 +915,139 @@ public class ServiceTests
     await Assert.That(created.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
     // Had the delete gone first, the record would now point to a deleted sandbox.
+    await Assert
+      .That(provisioning.Journal.Matching("put", "delete"))
+      .IsEquivalentTo(
+        ["put myapp-1 -> sandbox-1", "delete record myapp-1", "delete sandbox-1"],
+        CollectionOrdering.Matching
+      );
     await Assert.That(provisioning.Records["myapp-1"]).IsNull();
     await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_request_during_a_delete_waits_for_it_then_creates_a_renderer_afresh()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-1", "disk-1");
+    await using var service = await RunningService.StartAsync(provisioning);
+    Task<HttpResponseMessage>? during = null;
+    // Once the delete has listed the tenant's sandboxes, and before it deletes anything.
+    provisioning.Sandboxes.AfterList = async () =>
+    {
+      provisioning.Sandboxes.AfterList = null;
+      during = service.PutAsync("myapp-1", TestToken);
+      await service.Logs.WaitForAsync<ManagedRenderers>(11);
+    };
+
+    using var deleted = await service.DeleteAsync("myapp-1", TestToken);
+    using var created = await during!;
+
+    await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert
+      .That(await created.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
+    await Assert
+      .That(provisioning.Journal.Matching("delete", "create", "put"))
+      .IsEquivalentTo(
+        [
+          "delete record myapp-1",
+          "delete old-myapp-1",
+          "create sandbox-1 (myapp-1)",
+          "put myapp-1 -> sandbox-1",
+        ],
+        CollectionOrdering.Matching
+      );
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+  }
+
+  [Test]
+  public async Task A_request_that_gives_up_leaves_the_creation_running_for_the_next()
+  {
+    using Provisioning provisioning = new();
+    TaskCompletionSource probing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    provisioning.Readiness.Answer = async (_, cancellationToken) =>
+    {
+      probing.TrySetResult();
+      await ready.Task.WaitAsync(cancellationToken);
+      return ReadinessAnswer.Ready;
+    };
+    await using var service = await RunningService.StartAsync(provisioning);
+    using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestToken);
+
+    var first = service.PutAsync("myapp-1", giveUp.Token);
+    await probing.Task.WaitAsync(TestToken);
+    await giveUp.CancelAsync();
+    await Assert.That(async () => await first).Throws<OperationCanceledException>();
+    ready.SetResult();
+    await service.Logs.WaitForAsync<ManagedRenderers>(1);
+    using var next = await service.PutAsync("myapp-1", TestToken);
+
+    await Assert
+      .That(await next.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":false}""");
+    await Assert.That(provisioning.Sandboxes.Created).HasSingleItem();
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+  }
+
+  [Test]
+  public async Task A_disabled_tenant_is_not_deleted_and_stays_found()
+  {
+    using Provisioning provisioning = new();
+    var record = provisioning.AddRenderer("myapp-1", "disk-1");
+    await provisioning.Sandboxes.DisableAsync("old-myapp-1", TestToken);
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    using var deleted = await service.DeleteAsync("myapp-1", TestToken);
+    using var ensured = await service.PutAsync("myapp-1", TestToken);
+
+    var problem = await AssertProblemAsync(deleted, HttpStatusCode.Conflict, "Disabled");
+    await Assert.That(problem.ToString()).DoesNotContain("old-myapp-1");
+    // The kill switch wins: the gateway's conversions keep failing until an operator acts.
+    await Assert
+      .That(await ensured.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":false}""");
+    await Assert.That(provisioning.Records["myapp-1"]).IsSameReferenceAs(record);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEquivalentTo(["old-myapp-1"]);
+    await Assert.That(provisioning.Journal.Matching("delete", "create")).IsEmpty();
+    var refused = service.Logs.Of<ManagedRenderers>(13);
+    await Assert.That(refused).HasSingleItem();
+    await Assert.That(refused[0].Level).IsEqualTo(LogLevel.Warning);
+    await Assert.That(refused[0].Message).Contains("Sandbox old-myapp-1 of tenant myapp-1");
+  }
+
+  [Test]
+  public async Task A_retirement_run_leaves_a_renderer_being_created()
+  {
+    using Provisioning provisioning = new();
+    // A record whose sandbox is gone: the service replaces it.
+    provisioning.AddRenderer("myapp-1", "disk-1");
+    provisioning.Sandboxes.Remove("old-myapp-1");
+    TaskCompletionSource probing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    provisioning.Readiness.Answer = async (_, cancellationToken) =>
+    {
+      probing.TrySetResult();
+      await ready.Task.WaitAsync(cancellationToken);
+      return ReadinessAnswer.Ready;
+    };
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    var creating = service.PutAsync("myapp-1", TestToken);
+    await probing.Task.WaitAsync(TestToken);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await service.Logs.WaitForAsync<RetirementLoop>(20);
+    ready.SetResult();
+    using var created = await creating;
+
+    await Assert
+      .That(await created.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
   }
 
   [Test]
@@ -617,7 +1076,7 @@ public class ServiceTests
   }
 
   [Test]
-  public async Task Retires_idle_renderers_one_interval_after_starting_and_every_interval_after()
+  public async Task Retires_idle_renderers_a_minute_after_starting_and_every_interval_after()
   {
     using Provisioning provisioning = new();
     provisioning.AddRenderer("myapp-1", "disk-1");
@@ -625,8 +1084,8 @@ public class ServiceTests
     provisioning.Sandboxes.Suspend("old-myapp-1", TimeSpan.FromDays(8));
     await using var service = await RunningService.StartAsync(provisioning);
 
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour - TestClock.Tick);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter - TestClock.Tick);
     await Assert.That(provisioning.Records["myapp-1"]).IsNotNull();
     provisioning.Clock.Advance(TestClock.Tick);
     await service.Logs.WaitForAsync<RetirementLoop>(20);
@@ -710,11 +1169,14 @@ public class ServiceTests
     using Provisioning provisioning = new();
     provisioning.AddRenderer("myapp-found", "disk-1");
     provisioning.AddRenderer("myapp-other", "disk-1");
+    provisioning.AddRenderer("myapp-disabled", "disk-1");
+    await provisioning.Sandboxes.DisableAsync("old-myapp-disabled", TestToken);
+    provisioning.Records.AddUnreadable("myapp-broken");
     await using var service = await RunningService.StartAsync(
       provisioning,
       service =>
       {
-        service.TenantPrefixes[0].MaxTenants = 3;
+        service.TenantPrefixes[0].MaxTenants = 5;
         service.TenantPrefixes[1].MaxTenants = 2;
         service.MaxCreatesPerMinute = 2;
       }
@@ -743,7 +1205,9 @@ public class ServiceTests
     );
     await client.DeleteRendererAsync("myapp-other", TestToken);
     await client.DeleteRendererAsync("myapp-other", TestToken);
-    provisioning.Records.AddUnreadable("myapp-broken");
+    var disabled = await RefusalAsync(() =>
+      client.DeleteRendererAsync("myapp-disabled", TestToken)
+    );
     var failed = await RefusalAsync(() => client.EnsureRendererAsync("myapp-broken", TestToken));
 
     await Assert.That(found).IsFalse();
@@ -755,6 +1219,7 @@ public class ServiceTests
     await Assert.That(rate.RetryAfter).IsEqualTo(TimeSpan.FromSeconds(60));
     await Assert.That((notAllowed.StatusCode, notAllowed.Kind)).IsEqualTo((403, "NotAllowed"));
     await Assert.That(unauthorized.StatusCode).IsEqualTo(401);
+    await Assert.That((disabled.StatusCode, disabled.Kind)).IsEqualTo((409, "Disabled"));
     await Assert.That((failed.StatusCode, failed.Kind)).IsEqualTo((503, "Failed"));
     // The reason, that the record is damaged, stays in the service's log.
     await Assert.That(failed.Message).DoesNotContain("damaged");
@@ -762,14 +1227,19 @@ public class ServiceTests
   }
 
   [Test]
-  public async Task The_retirement_loop_runs_one_interval_after_starting_then_one_after_each_run()
+  public async Task The_retirement_loop_runs_a_minute_after_starting_then_an_interval_after_each_run()
   {
     using Provisioning provisioning = new();
     using LogCapture logs = new();
     using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs));
     var runs = 0;
     var run = new SemaphoreSlim(0);
-    using var census = new TenantCensus(provisioning.Records, provisioning.Clock);
+    using TenantCensus census = new(
+      provisioning.Records,
+      new ProvisioningServiceOptions(),
+      provisioning.Clock,
+      loggers.CreateLogger<TenantCensus>()
+    );
     using RetirementLoop loop = new(
       new ProvisioningServiceOptions(),
       _ =>
@@ -784,8 +1254,8 @@ public class ServiceTests
     );
 
     await loop.StartAsync(TestToken);
-    await provisioning.Clock.WaitForTimerAsync(Hour);
-    provisioning.Clock.Advance(Hour - TestClock.Tick);
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter - TestClock.Tick);
     await Assert.That(Volatile.Read(ref runs)).IsEqualTo(0);
     provisioning.Clock.Advance(TestClock.Tick);
     await run.WaitAsync(TestToken);
@@ -806,7 +1276,12 @@ public class ServiceTests
     using LogCapture logs = new();
     using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs));
     var runs = 0;
-    using var census = new TenantCensus(provisioning.Records, provisioning.Clock);
+    using TenantCensus census = new(
+      provisioning.Records,
+      new ProvisioningServiceOptions(),
+      provisioning.Clock,
+      loggers.CreateLogger<TenantCensus>()
+    );
     using RetirementLoop loop = new(
       new ProvisioningServiceOptions(),
       _ =>
@@ -824,8 +1299,9 @@ public class ServiceTests
     await loop.StartAsync(TestToken);
     for (var expected = 1; expected <= 3; expected++)
     {
-      await provisioning.Clock.WaitForTimerAsync(Hour);
-      provisioning.Clock.Advance(Hour);
+      var interval = expected == 1 ? RetirementLoop.FirstRunAfter : Hour;
+      await provisioning.Clock.WaitForTimerAsync(interval);
+      provisioning.Clock.Advance(interval);
     }
 
     await logs.WaitForAsync<RetirementLoop>(21);
@@ -838,23 +1314,30 @@ public class ServiceTests
     await Assert.That(failures[0].Level).IsEqualTo(LogLevel.Error);
     await Assert
       .That(logs.Of<RetirementLoop>(21).Single().Message)
-      .IsEqualTo("Could not retire the renderer of tenant myapp-1: it was busy.");
+      .IsEqualTo("Could not retire tenant myapp-1, or delete its leftovers: it was busy.");
     await Assert.That(loop.ExecuteTask!.IsFaulted).IsFalse();
   }
 
   [Test]
-  public async Task Nothing_is_retired_when_RetireAfterIdle_is_zero()
+  public async Task With_RetireAfterIdle_zero_the_loop_still_runs_to_delete_leftovers()
   {
     using Provisioning provisioning = new();
     using LogCapture logs = new();
     using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs));
     var runs = 0;
-    using var census = new TenantCensus(provisioning.Records, provisioning.Clock);
+    var run = new SemaphoreSlim(0);
+    using TenantCensus census = new(
+      provisioning.Records,
+      new ProvisioningServiceOptions(),
+      provisioning.Clock,
+      loggers.CreateLogger<TenantCensus>()
+    );
     using RetirementLoop loop = new(
       new ProvisioningServiceOptions { RetireAfterIdle = TimeSpan.Zero },
       _ =>
       {
         Interlocked.Increment(ref runs);
+        run.Release();
         return Task.FromResult(Retired());
       },
       census,
@@ -863,16 +1346,56 @@ public class ServiceTests
     );
 
     await loop.StartAsync(TestToken);
-    await loop.ExecuteTask!.WaitAsync(TestToken);
-    provisioning.Clock.Advance(TimeSpan.FromDays(1));
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await run.WaitAsync(TestToken);
     await loop.StopAsync(TestToken);
 
-    await Assert.That(runs).IsEqualTo(0);
+    await Assert.That(runs).IsEqualTo(1);
     await Assert.That(logs.Of<RetirementLoop>(23)).HasSingleItem();
+    run.Dispose();
+  }
+
+  [Test]
+  public async Task Deletes_the_managed_tenants_leftovers_a_minute_after_starting()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Sandboxes.Add("left-myapp-1", RendererLabels.For("myapp-1", RendererSize.Medium));
+    provisioning.Sandboxes.Add("left-other-1", RendererLabels.For("other-1", RendererSize.Medium));
+    // Stopped long enough, but with retirement off, kept.
+    provisioning.AddRenderer("myapp-2", "disk-1");
+    provisioning.Sandboxes.Suspend("old-myapp-2", TimeSpan.FromDays(30));
+    await using var service = await RunningService.StartAsync(
+      provisioning,
+      service => service.RetireAfterIdle = TimeSpan.Zero
+    );
+    var drain = provisioning.Options.DrainDelay;
+
+    await provisioning.Clock.WaitForTimerAsync(RetirementLoop.FirstRunAfter);
+    provisioning.Clock.Advance(RetirementLoop.FirstRunAfter);
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    await Assert.That(provisioning.Sandboxes.Ids).Contains("left-myapp-1");
+    provisioning.Clock.Advance(drain);
+    await service.Logs.WaitForAsync<RetirementLoop>(20);
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-other-1", "old-myapp-2"]);
+    await Assert.That(provisioning.Records["myapp-2"]).IsNotNull();
+    await Assert
+      .That(service.Logs.Of<RetirementLoop>(20).Single().Message)
+      .IsEqualTo("Retired 0 idle renderers and deleted 1 leftover sandboxes; 0 tenants failed.");
   }
 
   private static RetireResult Retired(Dictionary<string, string>? failures = null) =>
     new([], failures ?? []);
+
+  private static Task<HttpResponseMessage> ReadyAsync(RunningService service) =>
+    service.SendAsync(HttpMethod.Get, "/health/ready", null, TestToken);
+
+  /// <summary><c>OK</c> for a success, or the problem's <c>kind</c>.</summary>
+  private static async Task<string> AnswerAsync(HttpResponseMessage response) =>
+    response.IsSuccessStatusCode
+      ? "OK"
+      : (await RunningService.ReadJsonAsync(response)).GetProperty("kind").GetString()!;
 
   /// <summary>The <see cref="ProvisioningApiException"/> that <paramref name="call"/> throws.</summary>
   private static async Task<ProvisioningApiException> RefusalAsync(Func<Task> call)

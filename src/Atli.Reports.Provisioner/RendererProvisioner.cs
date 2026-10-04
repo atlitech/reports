@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using Atli.Reports.Hosting.Renderers;
 using Atli.Reports.Hosting.Sandboxes;
 
@@ -43,14 +44,26 @@ internal sealed class RendererProvisioner
   private readonly TimeProvider _time;
   private readonly TextWriter _output;
   private readonly ProvisionerOptions _options;
+  private readonly TenantGate _gate;
 
+  /// <param name="sandboxes">The renderer sandbox group's data plane.</param>
+  /// <param name="records">The records the gateway routes by.</param>
+  /// <param name="readiness">Asks new renderers whether they are ready.</param>
+  /// <param name="time">The clock of the drains, the readiness polls, and idle times.</param>
+  /// <param name="output">Where progress goes.</param>
+  /// <param name="options">The provisioner's settings.</param>
+  /// <param name="gate">
+  /// The process's gate, which retirements and prunes take each tenant through; the provisioning
+  /// service shares its own, and a command makes one of its own when <see langword="null"/>.
+  /// </param>
   public RendererProvisioner(
     ISandboxesClient sandboxes,
     IRendererRecordStore records,
     IReadinessProbe readiness,
     TimeProvider time,
     TextWriter output,
-    ProvisionerOptions options
+    ProvisionerOptions options,
+    TenantGate? gate = null
   )
   {
     _sandboxes = sandboxes;
@@ -60,6 +73,7 @@ internal sealed class RendererProvisioner
     // A rollout replaces several tenants' renderers at once.
     _output = TextWriter.Synchronized(output);
     _options = options;
+    _gate = gate ?? new TenantGate();
   }
 
   /// <summary>
@@ -100,6 +114,7 @@ internal sealed class RendererProvisioner
       size,
       diskImageId,
       replacing: null,
+      NewLaunchId(),
       cancellationToken
     );
     _output.WriteLine($"Tenant:      {tenantId}");
@@ -116,7 +131,8 @@ internal sealed class RendererProvisioner
   /// service: returns the existing record when it names a sandbox that exists (disabled or not), and
   /// otherwise creates a renderer as <see cref="CreateAsync"/> does, or replaces the record's missing
   /// sandbox as a rollout does. A create that another command or replica finished first counts as
-  /// found, not failed.
+  /// found, not failed. A record that cannot be read, or that names a sandbox labeled for another
+  /// tenant, is a <see cref="ProvisioningException"/>.
   /// </summary>
   public async Task<EnsureResult> EnsureAsync(
     string tenantId,
@@ -136,6 +152,7 @@ internal sealed class RendererProvisioner
       Log(tenantId, $"Sandbox {record.SandboxId} of the record no longer exists; replacing it.");
     }
 
+    var launchId = NewLaunchId();
     try
     {
       // A missing sandbox is replaced as a rollout replaces one, but there is nothing to retire.
@@ -144,6 +161,7 @@ internal sealed class RendererProvisioner
         size,
         diskImageId,
         replacing: record,
+        launchId,
         cancellationToken
       );
       Log(tenantId, $"The record now points to sandbox {created.SandboxId}.");
@@ -154,11 +172,18 @@ internal sealed class RendererProvisioner
         || !cancellationToken.IsCancellationRequested
       )
     {
-      // The launch deleted its own sandbox. If another command or replica gave the tenant a
-      // renderer meanwhile (the record's compare-and-swap is what discarded this launch), that
-      // renderer is the answer.
-      if (await LookUpWinnerAsync(tenantId, record, cancellationToken) is { } winner)
+      // The launch deleted its own sandbox, unless it could not tell whether its record write took
+      // effect. If the record points to a renderer now, that renderer is the answer: another
+      // command's or replica's (the record's compare-and-swap is what discarded this launch), or
+      // this launch's own after all.
+      if (await LookUpWinnerAsync(tenantId, record, cancellationToken) is var (winner, sandbox))
       {
+        if (sandbox is not null && RendererLabels.IsFromLaunch(sandbox, launchId))
+        {
+          Log(tenantId, $"The record points to this launch's sandbox {sandbox.Id} after all.");
+          return new EnsureResult(winner, Created: true);
+        }
+
         Log(
           tenantId,
           $"Another command or replica gave the tenant sandbox {winner.SandboxId} meanwhile; "
@@ -172,22 +197,30 @@ internal sealed class RendererProvisioner
   }
 
   /// <summary>
-  /// The tenant's record when <see cref="EnsureAsync"/> would return it as found: it names a
-  /// sandbox that exists (disabled or not), or no sandbox at all, as a renderer that is not a
-  /// sandbox. <see langword="null"/> when there is no record or its sandbox is gone. Throws
-  /// <see cref="ProvisioningException"/> for a record that cannot be read.
+  /// Reads the tenant's record and, when it names a sandbox, whether that sandbox exists: a
+  /// data-plane read that does not answer <c>404</c>. <c>Record</c> is the record, or
+  /// <see langword="null"/> when the tenant has none. <c>Found</c> is whether
+  /// <see cref="EnsureAsync"/> would return it as found: it names a sandbox that exists (disabled or
+  /// not), or no sandbox at all, as a renderer that is not a sandbox; not when there is no record,
+  /// or its sandbox is gone. Throws <see cref="ProvisioningException"/> for a record that cannot be
+  /// read, or that names a sandbox labeled for another tenant.
   /// </summary>
-  public async Task<RendererRecord?> FindAsync(
+  public async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
     string tenantId,
     CancellationToken cancellationToken
-  ) => await LookUpAsync(tenantId, cancellationToken) is (var record, true) ? record : null;
+  )
+  {
+    var (record, sandbox) = await ReadRendererAsync(tenantId, cancellationToken);
+    return (record, record is not null && (record.SandboxId is null || sandbox is not null));
+  }
 
   /// <summary>
-  /// Reads the tenant's record and, when it names a sandbox, whether that sandbox exists: a
-  /// data-plane read that does not answer <c>404</c>. <c>Found</c> is <see langword="false"/> when
-  /// there is no record, or when <c>Record</c> names a sandbox that is gone.
+  /// Reads the tenant's record and the sandbox it names, <see langword="null"/> when there is no
+  /// record, or it names no sandbox or one that is gone. Throws <see cref="ProvisioningException"/>
+  /// for a record that cannot be read, and for one that names a sandbox labeled for another tenant
+  /// or for none: a record is never trusted to route to a sandbox that is not the tenant's own.
   /// </summary>
-  private async Task<(RendererRecord? Record, bool Found)> LookUpAsync(
+  private async Task<(RendererRecord? Record, SandboxView? Sandbox)> ReadRendererAsync(
     string tenantId,
     CancellationToken cancellationToken
   )
@@ -208,18 +241,28 @@ internal sealed class RendererProvisioner
 
     if (record?.SandboxId is not { } sandboxId)
     {
-      return (record, record is not null);
+      return (record, null);
     }
 
-    return (record, await _sandboxes.GetAsync(sandboxId, cancellationToken) is not null);
+    var sandbox = await _sandboxes.GetAsync(sandboxId, cancellationToken);
+    if (sandbox is not null && RendererLabels.TenantOf(sandbox) is var owner && owner != tenantId)
+    {
+      throw new ProvisioningException(
+        $"The record of tenant {tenantId} names sandbox {sandboxId}, which is labeled for "
+          + $"{(owner is null ? "no tenant" : "tenant " + owner)}; fix the record, or delete the "
+          + "tenant."
+      );
+    }
+
+    return (record, sandbox);
   }
 
   /// <summary>
-  /// After a launch for <see cref="EnsureAsync"/> failed: the renderer another command or replica
-  /// recorded for the tenant meanwhile, or <see langword="null"/> when there is none, or it cannot
-  /// be read. <paramref name="read"/> is the record the launch meant to replace.
+  /// After a launch for <see cref="EnsureAsync"/> failed: the renderer recorded for the tenant now,
+  /// with its sandbox, or <see langword="null"/> when there is none, its sandbox is gone, it is still
+  /// <paramref name="read"/>, the record the launch meant to replace, or it cannot be read.
   /// </summary>
-  private async Task<RendererRecord?> LookUpWinnerAsync(
+  private async Task<(RendererRecord Record, SandboxView? Sandbox)?> LookUpWinnerAsync(
     string tenantId,
     RendererRecord? read,
     CancellationToken cancellationToken
@@ -227,13 +270,15 @@ internal sealed class RendererProvisioner
   {
     try
     {
+      var (current, sandbox) = await ReadRendererAsync(tenantId, cancellationToken);
       return
-        await LookUpAsync(tenantId, cancellationToken) is (var current, true)
+        current is not null
+        && (current.SandboxId is null || sandbox is not null)
         && (
           read is null
-          || !string.Equals(current!.SandboxId, read.SandboxId, StringComparison.Ordinal)
+          || !string.Equals(current.SandboxId, read.SandboxId, StringComparison.Ordinal)
         )
-        ? current
+        ? (current, sandbox)
         : null;
     }
     catch (Exception exception)
@@ -355,7 +400,7 @@ internal sealed class RendererProvisioner
           {
             if (stopped.Contains(old.TenantId))
             {
-              switch (await RetireRendererAsync(old, idle: null, token))
+              switch (await RetireHeldAsync(old, idle: null, existing.Values, token))
               {
                 case Retirement.Retired:
                   retiredStopped.Enqueue(old.TenantId);
@@ -363,6 +408,10 @@ internal sealed class RendererProvisioner
                 case Retirement.RecordChanged:
                   failures[old.TenantId] =
                     "the record changed since the rollout read it; run rollout again.";
+                  return;
+                case Retirement.Busy:
+                  failures[old.TenantId] =
+                    "a creation or delete of the tenant's renderer is in flight; run rollout again.";
                   return;
                 default:
                   // Started, or disabled, since it was read: replaced as any other.
@@ -381,6 +430,7 @@ internal sealed class RendererProvisioner
               size,
               diskImageId,
               replacing: old,
+              NewLaunchId(),
               token
             );
             Log(old.TenantId, $"The record now points to sandbox {record.SandboxId}.");
@@ -458,17 +508,39 @@ internal sealed class RendererProvisioner
 
   /// <summary>
   /// Deletes the tenant's record first, so the gateway stops routing to its renderer, then, after
-  /// <paramref name="drain"/>, its sandboxes: every one labeled for the tenant, such as one an
-  /// earlier delete or a failed rollout left behind. Deleting a tenant that has neither succeeds.
+  /// <paramref name="drain"/>, its sandboxes: every one labeled for the tenant when the delete began,
+  /// such as one an earlier delete or a failed rollout left behind. Deleting a tenant that has
+  /// neither succeeds.
   /// </summary>
   /// <remarks>
   /// A record that cannot be read, or that the store disabled, is deleted all the same: destroying a
-  /// compromised renderer must not depend on its record. A sandbox the record names that is labeled
-  /// for another tenant is never deleted; the command fails after the rest is done.
+  /// compromised renderer must not depend on its record, nor on the data plane answering. A sandbox
+  /// the record names that is labeled for another tenant is never deleted; the command fails after
+  /// the rest is done.
   /// </remarks>
-  public async Task DeleteAsync(
+  public Task DeleteAsync(string tenantId, TimeSpan drain, CancellationToken cancellationToken) =>
+    DeleteAsync(tenantId, drain, refuseDisabled: false, listed: null, cancellationToken);
+
+  /// <summary>
+  /// Deletes the tenant's record, then the sandboxes it decided on before that: those labeled for
+  /// the tenant in <paramref name="listed"/>, or in a listing taken now, which include the record's
+  /// own if it still exists. A sandbox created after the decision, such as by a creation that
+  /// starts once the record is gone, is never deleted.
+  /// </summary>
+  /// <param name="tenantId">The tenant.</param>
+  /// <param name="drain">How long to wait between the record and the sandboxes.</param>
+  /// <param name="refuseDisabled">
+  /// Whether to delete nothing, and throw <see cref="RendererDisabledException"/>, when a sandbox
+  /// labeled for the tenant is disabled: an operator keeps it for investigation, which a delete
+  /// from the provisioning service must not destroy.
+  /// </param>
+  /// <param name="listed">The group's sandboxes as listed before, or <see langword="null"/> to list them.</param>
+  /// <param name="cancellationToken">Cancels the delete.</param>
+  internal async Task DeleteAsync(
     string tenantId,
     TimeSpan drain,
+    bool refuseDisabled,
+    IReadOnlyCollection<SandboxView>? listed,
     CancellationToken cancellationToken
   )
   {
@@ -484,29 +556,42 @@ internal sealed class RendererProvisioner
       Log(tenantId, $"The record cannot be read ({exception.Message}); deleting it all the same.");
     }
 
-    // Even with no record read: a disabled one reads as none, and is still there.
-    await _records.DeleteAsync(tenantId, cancellationToken);
-    if (record is not null || unreadable)
+    // Listed after the record was read: the sandbox a record names exists before the record does.
+    IReadOnlyCollection<SandboxView> sandboxes;
+    try
     {
+      sandboxes = listed ?? await _sandboxes.ListAsync(cancellationToken);
+    }
+    catch (Exception exception)
+      when (!refuseDisabled
+        && (
+          exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested
+        )
+      )
+    {
+      // The record still goes, so the gateway stops routing to the renderer; deleting again
+      // deletes the sandboxes once the data plane answers.
       Log(
         tenantId,
-        "Deleted the record; the gateway stops routing to the renderer once its cached copy expires."
+        $"Could not list the sandboxes ({exception.Message}); deleting the record all the same."
       );
+      await _records.DeleteAsync(tenantId, cancellationToken);
+      throw;
     }
 
-    // An unreadable record routes nothing, so only a readable one needs the drain.
-    if (record is not null && drain > TimeSpan.Zero)
-    {
-      Log(tenantId, $"Waiting {Format(drain)} before deleting the sandbox.");
-      await Task.Delay(drain, _time, cancellationToken);
-    }
-
-    var sandboxes = await _sandboxes.ListAsync(cancellationToken);
     SortedSet<string> sandboxIds = new(StringComparer.Ordinal);
-    foreach (var sandbox in sandboxes)
+    foreach (var sandbox in sandboxes.OrderBy(sandbox => sandbox.Id, StringComparer.Ordinal))
     {
       if (RendererLabels.TenantOf(sandbox) == tenantId)
       {
+        if (refuseDisabled && sandbox.IsDisabled)
+        {
+          throw new RendererDisabledException(
+            $"Sandbox {sandbox.Id} of tenant {tenantId} is disabled, so nothing was deleted. Enable "
+              + "it, or delete the tenant from the command line."
+          );
+        }
+
         sandboxIds.Add(sandbox.Id);
       }
     }
@@ -525,6 +610,23 @@ internal sealed class RendererProvisioner
         + $"{(RendererLabels.TenantOf(named) is { } other ? "tenant " + other : "no tenant")}; "
         + "it was not deleted.";
       Log(tenantId, refused);
+    }
+
+    // Even with no record read: a disabled one reads as none, and is still there.
+    await _records.DeleteAsync(tenantId, cancellationToken);
+    if (record is not null || unreadable)
+    {
+      Log(
+        tenantId,
+        "Deleted the record; the gateway stops routing to the renderer once its cached copy expires."
+      );
+    }
+
+    // An unreadable record routes nothing, so only a readable one needs the drain.
+    if (record is not null && drain > TimeSpan.Zero)
+    {
+      Log(tenantId, $"Waiting {Format(drain)} before deleting the sandbox.");
+      await Task.Delay(drain, _time, cancellationToken);
     }
 
     foreach (var sandboxId in sandboxIds)
@@ -712,24 +814,48 @@ internal sealed class RendererProvisioner
 
   /// <summary>
   /// Retires the renderers of tenants under <paramref name="service"/>'s prefixes whose sandboxes
+  /// have been stopped (not disabled) for longer than its <c>RetireAfterIdle</c>, as the overload
+  /// with <c>pruneLeftovers</c> does without it. Does nothing when <c>RetireAfterIdle</c> is zero.
+  /// </summary>
+  public Task<RetireResult> RetireIdleAsync(
+    ProvisioningServiceOptions service,
+    CancellationToken cancellationToken
+  ) => RetireIdleAsync(service, pruneLeftovers: false, cancellationToken);
+
+  /// <summary>
+  /// Retires the renderers of tenants under <paramref name="service"/>'s prefixes whose sandboxes
   /// have been stopped (not disabled) for longer than its <c>RetireAfterIdle</c>: deletes each record,
-  /// then its sandboxes, as <see cref="DeleteAsync"/> does. Does nothing when <c>RetireAfterIdle</c>
-  /// is zero.
+  /// then its sandboxes, as <see cref="DeleteAsync"/> does. With <paramref name="pruneLeftovers"/>,
+  /// as the provisioning service runs it, then deletes those tenants' leftover sandboxes.
   /// </summary>
   /// <remarks>
   /// <para>
-  /// A record whose sandbox no longer exists is retired too: the record alone is deleted. Kept are
-  /// running and disabled renderers, those whose stop time the data plane does not report, records
-  /// that cannot be read, and every tenant outside the prefixes. A record that names a sandbox
-  /// labeled for another tenant is kept and reported as a failure.
+  /// One listing of the sandbox group drives the run. Its candidates are the sandboxes labeled for a
+  /// tenant under the prefixes that are stopped, not disabled, and have been for longer than
+  /// <c>RetireAfterIdle</c>. Only their tenants' records are read, and a tenant is retired only when
+  /// its record names the candidate itself. Kept are running and disabled renderers, every renderer
+  /// of a tenant with a disabled sandbox, those whose stop time the data plane does not report,
+  /// tenants whose record cannot be read, tenants being created or deleted in this process (see
+  /// <see cref="TenantGate"/>), and every tenant outside the prefixes. A record whose sandbox is gone
+  /// is left alone: the provisioning service replaces the sandbox when the tenant is next used.
   /// </para>
   /// <para>
-  /// Just before deleting, the record and the sandbox are read again: a record another command
-  /// changed meanwhile, or a sandbox a request is waking, is kept until the next run.
+  /// Just before deleting, the sandbox is read again: one a request is waking, or that has been
+  /// disabled, is kept until the next run. Only sandboxes in the run's listing are deleted.
+  /// </para>
+  /// <para>
+  /// A leftover is a sandbox of a tenant under the prefixes that the tenant's record does not name,
+  /// created longer than the drain and <c>ReadyTimeout</c> ago, and of a tenant without a disabled
+  /// sandbox. Leftovers are deleted after the drain, as <see cref="PruneAsync"/> deletes them,
+  /// unless the record names them by then.
   /// </para>
   /// </remarks>
+  /// <param name="service">The prefixes and <c>RetireAfterIdle</c>.</param>
+  /// <param name="pruneLeftovers">Whether to delete the managed tenants' leftover sandboxes too.</param>
+  /// <param name="cancellationToken">Cancels the run.</param>
   public async Task<RetireResult> RetireIdleAsync(
     ProvisioningServiceOptions service,
+    bool pruneLeftovers,
     CancellationToken cancellationToken
   )
   {
@@ -742,68 +868,56 @@ internal sealed class RendererProvisioner
       _output.WriteLine(
         $"Retiring is off: {ProvisioningServiceOptions.SectionName}:RetireAfterIdle is 00:00:00."
       );
-      return new RetireResult(retired, failures);
-    }
-
-    // Records first: a renderer's sandbox exists before its record, so the sandboxes listed after
-    // include every one a listed record names, unless it is gone.
-    var listing = await _records.ListWithUnreadableAsync(cancellationToken);
-    var sandboxes = await ListSandboxesAsync(cancellationToken);
-    foreach (var unreadable in listing.Unreadable)
-    {
-      if (service.PrefixOf(unreadable.TenantId) is not null)
+      if (!pruneLeftovers)
       {
-        Log(unreadable.TenantId, $"Not retired: the record cannot be read ({unreadable.Reason}).");
+        return new RetireResult(retired, failures);
       }
     }
 
+    // One listing for the run: the candidates come from it, and only sandboxes in it are deleted.
+    var listed = await _sandboxes.ListAsync(cancellationToken);
+    var managed = listed
+      .Where(sandbox =>
+        RendererLabels.TenantOf(sandbox) is { } tenant && service.PrefixOf(tenant) is not null
+      )
+      .GroupBy(sandbox => RendererLabels.TenantOf(sandbox)!, StringComparer.Ordinal)
+      .OrderBy(tenant => tenant.Key, StringComparer.Ordinal)
+      .ToArray();
+    HashSet<string> deleted = new(StringComparer.Ordinal);
     var now = _time.GetUtcNow();
-    foreach (
-      var record in listing
-        .Records.Where(record => service.PrefixOf(record.TenantId) is not null)
-        .OrderBy(record => record.TenantId, StringComparer.Ordinal)
-    )
+    foreach (var sandboxes in idle > TimeSpan.Zero ? managed : [])
     {
-      var tenant = record.TenantId;
-      if (record.SandboxId is not { } sandboxId)
-      {
-        Log(tenant, "Not retired: the record names no sandbox.");
-        continue;
-      }
-
-      if (sandboxes.GetValueOrDefault(sandboxId) is { } sandbox)
+      var tenant = sandboxes.Key;
+      List<SandboxView> candidates = [];
+      foreach (var sandbox in sandboxes.OrderBy(sandbox => sandbox.Id, StringComparer.Ordinal))
       {
         if (sandbox.State != SandboxStates.Stopped || sandbox.IsDisabled)
         {
           continue;
         }
 
-        if (RendererLabels.TenantOf(sandbox) is var owner && owner != tenant)
-        {
-          failures[tenant] =
-            $"the record names sandbox {sandboxId}, which is labeled for "
-            + $"{(owner is null ? "no tenant" : "tenant " + owner)}; it was not retired.";
-          Log(tenant, $"Not retired: {failures[tenant]}");
-          continue;
-        }
-
         if (sandbox.StoppedAt is not { } stoppedAt)
         {
-          Log(tenant, $"Not retired: when sandbox {sandboxId} stopped is unknown.");
-          continue;
+          Log(tenant, $"Not retired: when sandbox {sandbox.Id} stopped is unknown.");
         }
-
-        if (now - stoppedAt <= idle)
+        else if (now - stoppedAt > idle)
         {
-          continue;
+          candidates.Add(sandbox);
         }
+      }
+
+      // A disabled sandbox is kept for investigation, and the tenant's renderer with it.
+      if (candidates.Count == 0 || sandboxes.Any(sandbox => sandbox.IsDisabled))
+      {
+        continue;
       }
 
       try
       {
-        if (await RetireRendererAsync(record, idle, cancellationToken) == Retirement.Retired)
+        if (await RetireIdleTenantAsync(tenant, candidates, idle, listed, cancellationToken))
         {
           retired.Add(tenant);
+          deleted.UnionWith(sandboxes.Select(sandbox => sandbox.Id));
         }
       }
       catch (Exception exception)
@@ -816,28 +930,105 @@ internal sealed class RendererProvisioner
       }
     }
 
-    _output.WriteLine($"Retired {retired.Count}, failed {failures.Count}.");
+    IReadOnlyList<string> pruned = pruneLeftovers
+      ? await PruneManagedLeftoversAsync(managed, deleted, failures, cancellationToken)
+      : [];
+    _output.WriteLine(
+      $"Retired {retired.Count}, "
+        + (pruneLeftovers ? $"deleted {pruned.Count} leftover sandbox(es), " : "")
+        + $"failed {failures.Count}."
+    );
     foreach (var (tenant, reason) in failures)
     {
       _output.WriteLine($"  {tenant}: {reason}");
     }
 
-    return new RetireResult(retired, failures);
+    return new RetireResult(retired, failures) { Pruned = pruned };
   }
 
   /// <summary>
-  /// Retires the tenant's renderer, which a scan found stopped or gone: deletes its record, then its
-  /// sandboxes, as <see cref="DeleteAsync"/> does, unless the record or the sandbox changed since.
+  /// Retires the tenant's renderer if its record names one of <paramref name="candidates"/>, the
+  /// tenant's idle sandboxes in the run's listing: holds the tenant in the process's gate, reads its
+  /// record, and retires it as <see cref="RetireReadAsync"/> does. Whether it was retired.
+  /// </summary>
+  private async Task<bool> RetireIdleTenantAsync(
+    string tenant,
+    IReadOnlyList<SandboxView> candidates,
+    TimeSpan idle,
+    IReadOnlyCollection<SandboxView> listed,
+    CancellationToken cancellationToken
+  )
+  {
+    using var hold = _gate.TryHold(tenant);
+    if (hold is null)
+    {
+      Log(tenant, "Not retired: its renderer is being created or deleted.");
+      return false;
+    }
+
+    RendererRecord? record;
+    try
+    {
+      record = await _records.GetAsync(tenant, cancellationToken);
+    }
+    catch (InvalidDataException exception)
+    {
+      Log(tenant, $"Not retired: the record cannot be read ({exception.Message}).");
+      return false;
+    }
+
+    if (
+      record?.SandboxId is not { } sandboxId
+      || !candidates.Any(sandbox => sandbox.Id == sandboxId)
+    )
+    {
+      foreach (var sandbox in candidates)
+      {
+        Log(tenant, $"Not retired: its record does not name sandbox {sandbox.Id}, a leftover.");
+      }
+
+      return false;
+    }
+
+    return await RetireReadAsync(record, idle, listed, cancellationToken) == Retirement.Retired;
+  }
+
+  /// <summary>
+  /// Retires the tenant's renderer as <see cref="RetireRendererAsync"/> does, holding the tenant in
+  /// the process's gate meanwhile; a tenant whose renderer is being created or deleted is left alone.
+  /// </summary>
+  private async Task<Retirement> RetireHeldAsync(
+    RendererRecord scanned,
+    TimeSpan? idle,
+    IReadOnlyCollection<SandboxView> listed,
+    CancellationToken cancellationToken
+  )
+  {
+    using var hold = _gate.TryHold(scanned.TenantId);
+    if (hold is null)
+    {
+      Log(scanned.TenantId, "Not retired: its renderer is being created or deleted.");
+      return Retirement.Busy;
+    }
+
+    return await RetireRendererAsync(scanned, idle, listed, cancellationToken);
+  }
+
+  /// <summary>
+  /// Retires the tenant's renderer, which a scan found stopped, as <see cref="RetireReadAsync"/> does,
+  /// unless the record changed since the scan read it.
   /// </summary>
   /// <param name="scanned">The record as the scan read it.</param>
   /// <param name="idle">
   /// How long the sandbox must have been stopped, or <see langword="null"/> for a rollout, which
   /// retires stopped renderers however long they have been stopped.
   /// </param>
+  /// <param name="listed">The group's sandboxes as the scan listed them; only these are deleted.</param>
   /// <param name="cancellationToken">Cancels the retirement.</param>
   private async Task<Retirement> RetireRendererAsync(
     RendererRecord scanned,
     TimeSpan? idle,
+    IReadOnlyCollection<SandboxView> listed,
     CancellationToken cancellationToken
   )
   {
@@ -858,26 +1049,33 @@ internal sealed class RendererProvisioner
       return Retirement.RecordChanged;
     }
 
+    return await RetireReadAsync(scanned, idle, listed, cancellationToken);
+  }
+
+  /// <summary>
+  /// Retires the renderer that <paramref name="record"/>, just read, names: reads its sandbox again,
+  /// and deletes the record, then the tenant's sandboxes in <paramref name="listed"/>, as
+  /// <see cref="DeleteAsync"/> does, unless the sandbox is gone, no longer stopped, or disabled, or
+  /// a sandbox of the tenant is disabled.
+  /// </summary>
+  private async Task<Retirement> RetireReadAsync(
+    RendererRecord record,
+    TimeSpan? idle,
+    IReadOnlyCollection<SandboxView> listed,
+    CancellationToken cancellationToken
+  )
+  {
+    var tenant = record.TenantId;
     // Read last, just before the delete: a request to its on-demand port may be waking it.
-    var sandboxId = scanned.SandboxId!;
+    var sandboxId = record.SandboxId!;
     var sandbox = await _sandboxes.GetAsync(sandboxId, cancellationToken);
     if (sandbox is null)
     {
-      Log(tenant, $"Retiring: sandbox {sandboxId} of the record no longer exists.");
+      Log(tenant, $"Not retired: sandbox {sandboxId} no longer exists.");
+      return Retirement.SandboxChanged;
     }
-    else if (IsRetirable(sandbox, tenant, idle))
-    {
-      Log(
-        tenant,
-        idle is { } after
-          ? $"Retiring: sandbox {sandboxId} has been stopped since "
-            + sandbox.StoppedAt!.Value.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
-            + $", longer than {Format(after)}."
-          : $"Retiring the stopped sandbox {sandboxId}; the tenant's next conversion creates a "
-            + "new renderer."
-      );
-    }
-    else
+
+    if (!IsRetirable(sandbox, tenant, idle))
     {
       Log(
         tenant,
@@ -890,8 +1088,170 @@ internal sealed class RendererProvisioner
       return Retirement.SandboxChanged;
     }
 
-    await DeleteAsync(tenant, TimeSpan.Zero, cancellationToken);
+    Log(
+      tenant,
+      idle is { } after
+        ? $"Retiring: sandbox {sandboxId} has been stopped since "
+          + sandbox.StoppedAt!.Value.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+          + $", longer than {Format(after)}."
+        : $"Retiring the stopped sandbox {sandboxId}; the tenant's next conversion creates a "
+          + "new renderer."
+    );
+    try
+    {
+      await DeleteAsync(tenant, TimeSpan.Zero, refuseDisabled: true, listed, cancellationToken);
+    }
+    catch (RendererDisabledException exception)
+    {
+      Log(tenant, $"Not retired: {exception.Message}");
+      return Retirement.SandboxChanged;
+    }
+
     return Retirement.Retired;
+  }
+
+  /// <summary>
+  /// Deletes the leftover sandboxes of the tenants in <paramref name="managed"/>, the run's listing
+  /// of the managed tenants' sandboxes, other than <paramref name="deleted"/>: those the tenant's
+  /// record does not name, created longer than the drain and the ready timeout ago, of a tenant
+  /// without a disabled sandbox. Only the leftovers' tenants' records are read. Waits the drain
+  /// first, and deletes a leftover only if, read again then, the record still does not name it and
+  /// the tenant is not being created or deleted. Failures go to <paramref name="failures"/> by
+  /// tenant.
+  /// </summary>
+  private async Task<IReadOnlyList<string>> PruneManagedLeftoversAsync(
+    IReadOnlyList<IGrouping<string, SandboxView>> managed,
+    HashSet<string> deleted,
+    SortedDictionary<string, string> failures,
+    CancellationToken cancellationToken
+  )
+  {
+    var drain = _options.DrainDelay;
+    // Younger ones may belong to a create or rollout that has not written its record yet.
+    var youngest = _time.GetUtcNow() - drain - _options.ReadyTimeout;
+    List<(string Tenant, IReadOnlyList<SandboxView> Sandboxes)> found = [];
+    foreach (var sandboxes in managed)
+    {
+      var tenant = sandboxes.Key;
+      var old = sandboxes
+        .Where(sandbox =>
+          !deleted.Contains(sandbox.Id)
+          && sandbox.CreatedAt is { } createdAt
+          && createdAt <= youngest
+        )
+        .OrderBy(sandbox => sandbox.Id, StringComparer.Ordinal)
+        .ToArray();
+      if (old.Length == 0 || sandboxes.Any(sandbox => sandbox.IsDisabled))
+      {
+        continue;
+      }
+
+      var record = await ReadForPruneAsync(tenant, failures, cancellationToken);
+      if (record is (true, var named))
+      {
+        var leftovers = old.Where(sandbox => sandbox.Id != named).ToArray();
+        foreach (var leftover in leftovers)
+        {
+          Log(tenant, $"Sandbox {leftover.Id} is a renderer no record points to.");
+        }
+
+        if (leftovers.Length > 0)
+        {
+          found.Add((tenant, leftovers));
+        }
+      }
+    }
+
+    if (found.Count == 0)
+    {
+      return [];
+    }
+
+    if (drain > TimeSpan.Zero)
+    {
+      _output.WriteLine(
+        $"Deleting {found.Sum(tenant => tenant.Sandboxes.Count)} leftover renderer sandbox(es) in "
+          + $"{Format(drain)}, unless a record points to them by then."
+      );
+      await Task.Delay(drain, _time, cancellationToken);
+    }
+
+    List<string> pruned = [];
+    foreach (var (tenant, leftovers) in found)
+    {
+      using var hold = _gate.TryHold(tenant);
+      var record = hold is null
+        ? default
+        : await ReadForPruneAsync(tenant, failures, cancellationToken);
+      foreach (var leftover in leftovers)
+      {
+        if (hold is null)
+        {
+          Log(tenant, $"Kept sandbox {leftover.Id}: the tenant is being created or deleted.");
+          continue;
+        }
+
+        if (record is not (true, var named) || named == leftover.Id)
+        {
+          Log(tenant, $"Kept sandbox {leftover.Id}: a record may point to it now.");
+          continue;
+        }
+
+        try
+        {
+          await _sandboxes.DeleteAsync(leftover.Id, cancellationToken);
+          Log(tenant, $"Deleted the leftover sandbox {leftover.Id}.");
+          pruned.Add(leftover.Id);
+        }
+        catch (Exception exception)
+          when (exception is not OperationCanceledException
+            || !cancellationToken.IsCancellationRequested
+          )
+        {
+          failures.TryAdd(
+            tenant,
+            $"the leftover sandbox {leftover.Id} was not deleted ({exception.Message})."
+          );
+          Log(tenant, $"The leftover sandbox {leftover.Id} was not deleted: {exception.Message}");
+        }
+      }
+    }
+
+    return [.. pruned.Order(StringComparer.Ordinal)];
+  }
+
+  /// <summary>
+  /// For a prune: whether the tenant's record could be read, and the sandbox it names, if any. A
+  /// record that cannot be read may name any of the tenant's sandboxes, so it keeps them all.
+  /// </summary>
+  private async Task<(bool Read, string? SandboxId)> ReadForPruneAsync(
+    string tenant,
+    SortedDictionary<string, string> failures,
+    CancellationToken cancellationToken
+  )
+  {
+    try
+    {
+      return (true, (await _records.GetAsync(tenant, cancellationToken))?.SandboxId);
+    }
+    catch (InvalidDataException exception)
+    {
+      Log(
+        tenant,
+        $"Kept the tenant's sandboxes: the record cannot be read ({exception.Message}), so it may "
+          + "point to any of them."
+      );
+    }
+    catch (Exception exception)
+      when (exception is not OperationCanceledException
+        || !cancellationToken.IsCancellationRequested
+      )
+    {
+      failures.TryAdd(tenant, $"its leftovers were not looked at ({exception.Message}).");
+      Log(tenant, $"Its leftovers were not looked at: {exception.Message}");
+    }
+
+    return (false, null);
   }
 
   /// <summary>
@@ -932,6 +1292,9 @@ internal sealed class RendererProvisioner
 
     /// <summary>Kept the renderer: its sandbox is running, waking, or disabled now.</summary>
     SandboxChanged,
+
+    /// <summary>Kept the renderer: it is being created or deleted in this process.</summary>
+    Busy,
   }
 
   /// <summary>
@@ -1139,16 +1502,17 @@ internal sealed class RendererProvisioner
   /// had none. If the record is no longer that when the renderer is ready, another command got
   /// there first, and this launch is discarded.
   /// </param>
+  /// <param name="launchId">The launch's own label value, from <see cref="NewLaunchId"/>.</param>
   private async Task<(RendererRecord Record, SandboxView Sandbox)> LaunchAsync(
     string tenantId,
     RendererSize size,
     string diskImageId,
     RendererRecord? replacing,
+    string launchId,
     CancellationToken cancellationToken
   )
   {
     var credential = RendererCredential.Generate();
-    var launchId = Guid.NewGuid().ToString("N");
     SandboxSpec spec = new()
     {
       DiskImageId = diskImageId,
@@ -1198,7 +1562,7 @@ internal sealed class RendererProvisioner
           $"Sandbox {created.Id} reported no URL for port {RendererPort}."
         );
       Log(tenantId, $"Waiting for {url} to be ready.");
-      await WaitUntilReadyAsync(url, cancellationToken);
+      await WaitUntilReadyAsync(url, created.Id, cancellationToken);
       Log(tenantId, $"Ready {Seconds(_time.GetElapsedTime(started))} after the create call.");
       record = new RendererRecord
       {
@@ -1313,9 +1677,15 @@ internal sealed class RendererProvisioner
   /// <summary>
   /// Asks the renderer whether it is ready until it answers <c>200</c>, for up to the ready timeout.
   /// For its first seconds a new sandbox's proxy answers <c>403</c> or <c>502</c>, and its server
-  /// <c>503</c> until the browser is up.
+  /// <c>503</c> until the browser is up. The proxy answers <c>404</c> for a sandbox that no longer
+  /// exists, so a <c>404</c> asks the data plane whether <paramref name="sandboxId"/> is gone, and a
+  /// sandbox that is gone fails the wait at once rather than at the timeout.
   /// </summary>
-  private async Task WaitUntilReadyAsync(Uri url, CancellationToken cancellationToken)
+  private async Task WaitUntilReadyAsync(
+    Uri url,
+    string sandboxId,
+    CancellationToken cancellationToken
+  )
   {
     var started = _time.GetTimestamp();
     while (true)
@@ -1324,6 +1694,16 @@ internal sealed class RendererProvisioner
       if (answer.IsReady)
       {
         return;
+      }
+
+      if (
+        answer.StatusCode == (int)HttpStatusCode.NotFound
+        && await _sandboxes.GetAsync(sandboxId, cancellationToken) is null
+      )
+      {
+        throw new ProvisioningException(
+          $"Sandbox {sandboxId} was deleted while it started; its port answered {answer.Status}."
+        );
       }
 
       var left = _options.ReadyTimeout - _time.GetElapsedTime(started);
@@ -1477,6 +1857,9 @@ internal sealed class RendererProvisioner
     }
   }
 
+  /// <summary>A new value of the <c>launch</c> label, unique to one create call.</summary>
+  private static string NewLaunchId() => Guid.NewGuid().ToString("N");
+
   private void Log(string tenantId, string message) => _output.WriteLine($"[{tenantId}] {message}");
 
   private void WriteTable(IReadOnlyList<string> header, IEnumerable<IReadOnlyList<string>> rows)
@@ -1528,11 +1911,15 @@ internal sealed record RolloutResult(
 internal sealed record EnsureResult(RendererRecord Record, bool Created);
 
 /// <param name="Retired">Tenants whose renderers were retired.</param>
-/// <param name="Failures">Tenants whose retirement failed, with why.</param>
+/// <param name="Failures">Tenants whose retirement, or the deletion of whose leftovers, failed, with why.</param>
 internal sealed record RetireResult(
   IReadOnlyList<string> Retired,
   IReadOnlyDictionary<string, string> Failures
-);
+)
+{
+  /// <summary>The leftover sandboxes deleted, when the run pruned them.</summary>
+  public IReadOnlyList<string> Pruned { get; init; } = [];
+}
 
 /// <summary>What a prune did.</summary>
 /// <param name="Deleted">The leftover renderer sandboxes deleted.</param>

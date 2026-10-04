@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Atli.Reports.Hosting.Provisioning;
 using Atli.Reports.Hosting.Renderers;
+using Atli.Reports.Provisioner.Service;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Atli.Reports.Provisioner.Tests.Support;
@@ -10,8 +12,8 @@ namespace Atli.Reports.Provisioner.Tests.Support;
 /// <summary>
 /// The provisioning service (<c>serve</c>) on a free loopback port over the provisioner's in-memory
 /// fakes, with what it logs. It manages <c>myapp-</c> (at most 10 renderers, the default size) and
-/// <c>big-</c> (size L), creates at most 60 renderers a minute, and admits two gateway keys,
-/// <see cref="Gateway"/> and <see cref="Rotated"/>.
+/// <c>big-</c> (size L), creates at most 20 renderers a minute under each and 60 in all, and admits
+/// two gateway keys, <see cref="Gateway"/> and <see cref="Rotated"/>.
 /// </summary>
 internal sealed class RunningService : IAsyncDisposable
 {
@@ -63,8 +65,10 @@ internal sealed class RunningService : IAsyncDisposable
       new ManagedTenantPrefix { Prefix = "myapp-", MaxTenants = 10 },
       new ManagedTenantPrefix { Prefix = "big-", Size = "L" },
     ]);
+    // The gateway's address, as serve requires.
+    options.AllowedSourceCidrs.Add("203.0.113.7/32");
     configure?.Invoke(options.Service);
-    options.Service.Validate(requireApiKeys: true);
+    options.ValidateServe();
 
     LogCapture logs = new();
     var app = ProvisioningService.Build(
@@ -92,6 +96,13 @@ internal sealed class RunningService : IAsyncDisposable
     var serving = ProvisioningService.ServeAsync(app, stop.Token);
     // A service that cannot start fails here.
     await await Task.WhenAny(started.Task, serving);
+    // So that a test starts from the census's first listing, whether it succeeded or not, unless
+    // the test holds it.
+    if (records is not ListingRecordStore { HoldListing: not null })
+    {
+      await app.Services.GetRequiredService<TenantCensus>().FirstListing;
+    }
+
     return new RunningService(app, stop, serving, logs);
   }
 
@@ -132,6 +143,19 @@ internal sealed class RunningService : IAsyncDisposable
       Gateway.Credential,
       cancellationToken
     );
+
+  /// <summary>
+  /// Lets the census's next listing start, <see cref="TenantCensus.RefreshInterval"/> on, and waits
+  /// until it has ended, logged as <paramref name="eventId"/>: 40 for a listing that succeeds, 41
+  /// for one that fails.
+  /// </summary>
+  public async Task ListAgainAsync(TestClock clock, int eventId)
+  {
+    var ended = Logs.Of<TenantCensus>(eventId).Count;
+    await clock.WaitForTimerAsync(TenantCensus.RefreshInterval);
+    clock.Advance(TenantCensus.RefreshInterval);
+    await Logs.WaitForAsync<TenantCensus>(eventId, ended + 1);
+  }
 
   /// <summary>Stops the service as a <c>SIGTERM</c> does, and returns its exit code.</summary>
   public async Task<int> StopAsync()

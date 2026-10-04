@@ -30,6 +30,7 @@ public class HttpReadinessProbeTests
 
   [Test]
   [Arguments(HttpStatusCode.Forbidden, "HTTP 403")]
+  [Arguments(HttpStatusCode.NotFound, "HTTP 404")]
   [Arguments(HttpStatusCode.BadGateway, "HTTP 502")]
   [Arguments(HttpStatusCode.ServiceUnavailable, "HTTP 503")]
   public async Task Any_other_answer_is_not_ready(HttpStatusCode status, string expected)
@@ -44,6 +45,8 @@ public class HttpReadinessProbeTests
 
     await Assert.That(answer.IsReady).IsFalse();
     await Assert.That(answer.Status).IsEqualTo(expected);
+    // The provisioner asks whether a sandbox whose port answers 404 still exists.
+    await Assert.That(answer.StatusCode).IsEqualTo((int)status);
   }
 
   [Test]

@@ -149,26 +149,18 @@ public class RetireTests
   }
 
   [Test]
-  public async Task Retires_a_record_whose_sandbox_no_longer_exists()
+  public async Task Leaves_a_record_whose_sandbox_is_gone_for_the_service_to_replace()
   {
     using Provisioning provisioning = new();
-    provisioning.AddRenderer("app-a", "disk-1");
+    var gone = provisioning.AddRenderer("app-a", "disk-1");
     provisioning.Sandboxes.Remove("old-app-a");
-    // Outside the prefixes, a dangling record is left to rollout, which replaces it.
-    provisioning.AddRenderer("contoso", "disk-1");
-    provisioning.Sandboxes.Remove("old-contoso");
 
     var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
 
-    await Assert.That(result.Retired).IsEquivalentTo(["app-a"]);
-    await Assert.That(provisioning.Records["app-a"]).IsNull();
-    await Assert.That(provisioning.Records["contoso"]).IsNotNull();
-    await Assert
-      .That(provisioning.Output.ToString())
-      .StartsWith(
-        "[app-a] Retiring: sandbox old-app-a of the record no longer exists.\n"
-          + "[app-a] Deleted the record;"
-      );
+    // Nothing to retire: the gateway has the provisioning service replace it on its next use.
+    await Assert.That(result.Retired).IsEmpty();
+    await Assert.That(provisioning.Records["app-a"]).IsSameReferenceAs(gone);
+    await Assert.That(provisioning.Output.ToString()).IsEqualTo("Retired 0, failed 0.\n");
   }
 
   [Test]
@@ -201,11 +193,10 @@ public class RetireTests
     await Assert.That(provisioning.Records["app-a"]).IsSameReferenceAs(replacement);
     await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["new-app-a", "old-app-a"]);
     await Assert.That(provisioning.Journal.Matching("delete")).IsEmpty();
+    // The scan's sandbox is a leftover now, which prune deletes.
     await Assert
       .That(provisioning.Output.ToString())
-      .StartsWith(
-        "[app-a] Not retired: the record changed since it was read; another command is at work.\n"
-      );
+      .StartsWith("[app-a] Not retired: its record does not name sandbox old-app-a, a leftover.\n");
   }
 
   [Test]
@@ -277,25 +268,32 @@ public class RetireTests
   }
 
   [Test]
-  public async Task A_record_naming_another_tenants_sandbox_is_not_retired_and_is_reported()
+  public async Task A_sandbox_is_retired_only_for_the_tenant_it_is_labeled_for()
   {
     using Provisioning provisioning = new();
+    // app-b's record names its running renderer; old-app-b is a stopped leftover of app-b's.
     provisioning.AddRenderer("app-b", "disk-1");
     provisioning.Sandboxes.Suspend("old-app-b", TimeSpan.FromDays(8));
-    var tampered = provisioning.AddRenderer("app-a", "disk-1") with { SandboxId = "old-app-b" };
+    var current = provisioning.Records["app-b"]! with { SandboxId = "new-app-b" };
+    provisioning.Sandboxes.Add("new-app-b", RendererLabels.For("app-b", RendererSize.Medium));
+    provisioning.Records.Add(current);
+    // app-a's record names that leftover.
+    var tampered = provisioning.AddRenderer("app-a", "disk-1") with
+    {
+      SandboxId = "old-app-b",
+    };
     provisioning.Records.Add(tampered);
 
     var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
 
-    await Assert
-      .That(result.Failures["app-a"])
-      .IsEqualTo(
-        "the record names sandbox old-app-b, which is labeled for tenant app-b; it was not retired."
-      );
-    // app-b's own renderer is retired; app-a keeps its record and its sandbox.
-    await Assert.That(result.Retired).IsEquivalentTo(["app-b"]);
+    // Neither: app-b's record does not name it, and it is not app-a's.
+    await Assert.That(result.Retired).IsEmpty();
+    await Assert.That(result.Failures).IsEmpty();
     await Assert.That(provisioning.Records["app-a"]).IsSameReferenceAs(tampered);
-    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-app-a"]);
+    await Assert.That(provisioning.Records["app-b"]).IsSameReferenceAs(current);
+    await Assert
+      .That(provisioning.Sandboxes.Ids)
+      .IsEquivalentTo(["new-app-b", "old-app-a", "old-app-b"]);
   }
 
   [Test]
@@ -323,6 +321,62 @@ public class RetireTests
   }
 
   [Test]
+  public async Task Leaves_a_tenant_whose_renderer_is_being_created_or_deleted()
+  {
+    using Provisioning provisioning = new();
+    foreach (var tenant in new[] { "app-a", "app-b", "app-c" })
+    {
+      provisioning.AddRenderer(tenant, "disk-1");
+      provisioning.Sandboxes.Suspend($"old-{tenant}", TimeSpan.FromDays(8));
+    }
+
+    // In the provisioning service, a delete of app-a and a creation for app-b are in flight.
+    using var deleting = provisioning.Gate.TryHold("app-a");
+    TaskCompletionSource<EnsureResult> creating = new();
+    provisioning.Gate.TryStartCreation("app-b", () => creating.Task, out _, out _);
+
+    var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-c"]);
+    await Assert.That(result.Failures).IsEmpty();
+    await Assert.That(provisioning.Records["app-a"]).IsNotNull();
+    await Assert.That(provisioning.Records["app-b"]).IsNotNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-app-a", "old-app-b"]);
+    var output = provisioning.Output.ToString();
+    await Assert
+      .That(output)
+      .Contains("[app-a] Not retired: its renderer is being created or deleted.\n");
+    await Assert
+      .That(output)
+      .Contains("[app-b] Not retired: its renderer is being created or deleted.\n");
+    creating.SetCanceled(TestToken);
+  }
+
+  [Test]
+  public async Task Deletes_only_the_sandboxes_the_run_listed()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1");
+    provisioning.Sandboxes.Suspend("old-app-a", TimeSpan.FromDays(8));
+    // Made for the tenant once the run has listed the sandboxes.
+    provisioning.Sandboxes.AfterList = () =>
+    {
+      provisioning.Sandboxes.AfterList = null;
+      provisioning.Sandboxes.Add(
+        "new-app-a",
+        RendererLabels.For("app-a", RendererSize.Medium),
+        age: TimeSpan.Zero
+      );
+      return Task.CompletedTask;
+    };
+
+    var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["new-app-a"]);
+  }
+
+  [Test]
   public async Task Retires_under_every_managed_prefix()
   {
     using Provisioning provisioning = new();
@@ -337,6 +391,144 @@ public class RetireTests
 
     await Assert.That(result.Retired).IsEquivalentTo(["app-a", "crm-a"]);
     await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+  }
+
+  [Test]
+  public async Task Lists_the_sandboxes_once_and_reads_only_the_candidates_records()
+  {
+    using Provisioning provisioning = new();
+    foreach (var tenant in new[] { "app-a", "app-b", "app-c", "app-d", "contoso" })
+    {
+      provisioning.AddRenderer(tenant, "disk-1");
+    }
+
+    provisioning.Sandboxes.Suspend("old-app-a", TimeSpan.FromDays(8));
+    provisioning.Sandboxes.Suspend("old-app-b", TimeSpan.FromDays(9));
+    provisioning.Sandboxes.Suspend("old-app-d", TimeSpan.FromDays(1));
+    provisioning.Sandboxes.Suspend("old-contoso", TimeSpan.FromDays(30));
+    var listings = 0;
+    provisioning.Sandboxes.AfterList = () =>
+    {
+      Interlocked.Increment(ref listings);
+      return Task.CompletedTask;
+    };
+    ListingRecordStore records = new(provisioning.Records);
+    RendererProvisioner provisioner = new(
+      provisioning.Sandboxes,
+      records,
+      provisioning.Readiness,
+      provisioning.Clock,
+      provisioning.Output,
+      provisioning.Options,
+      provisioning.Gate
+    );
+
+    var result = await provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-a", "app-b"]);
+    await Assert.That(listings).IsEqualTo(1);
+    await Assert.That(records.FullListings).IsEqualTo(0);
+    await Assert.That(records.Gets.Distinct()).IsEquivalentTo(["app-a", "app-b"]);
+  }
+
+  [Test]
+  public async Task Retire_from_the_command_line_deletes_no_leftovers()
+  {
+    using Provisioning provisioning = new();
+    provisioning.Sandboxes.Add("left-app-a", RendererLabels.For("app-a", RendererSize.Medium));
+
+    var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Pruned).IsEmpty();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-app-a"]);
+    await Assert.That(provisioning.Output.ToString()).IsEqualTo("Retired 0, failed 0.\n");
+  }
+
+  [Test]
+  public async Task Deletes_the_leftovers_of_managed_tenants_after_the_drain()
+  {
+    using Provisioning provisioning = new();
+    var labels = (string tenant) => RendererLabels.For(tenant, RendererSize.Medium);
+    // Deleted: a leftover no record names, and one beside a tenant's renderer.
+    provisioning.Sandboxes.Add("left-app-a", labels("app-a"));
+    provisioning.AddRenderer("app-b", "disk-1");
+    provisioning.Sandboxes.Add("left-app-b", labels("app-b"));
+    // Kept: one that may still be being created, one outside the prefixes, one of a tenant whose
+    // record cannot be read, a disabled one, one a record names by the end of the drain, and one
+    // whose tenant is being deleted then.
+    provisioning.Sandboxes.Add("young-app-c", labels("app-c"), age: TimeSpan.FromMinutes(1));
+    provisioning.Sandboxes.Add("left-contoso", labels("contoso"));
+    provisioning.Records.AddUnreadable("app-d");
+    provisioning.Sandboxes.Add("left-app-d", labels("app-d"));
+    provisioning.Sandboxes.Add("left-app-e", labels("app-e"));
+    await provisioning.Sandboxes.DisableAsync("left-app-e", TestToken);
+    provisioning.Sandboxes.Add("left-app-f", labels("app-f"));
+    provisioning.Sandboxes.Add("left-app-g", labels("app-g"));
+    var drain = provisioning.Options.DrainDelay;
+
+    var run = provisioning.Provisioner.RetireIdleAsync(Service(), pruneLeftovers: true, TestToken);
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    provisioning.Records.Add(
+      new RendererRecord
+      {
+        TenantId = "app-f",
+        Url = new Uri("https://left-app-f-8080.example.test/"),
+        ApiKey = RendererCredential.Generate().Credential,
+        SandboxId = "left-app-f",
+      }
+    );
+    using var deleting = provisioning.Gate.TryHold("app-g");
+    provisioning.Clock.Advance(drain);
+    var result = await run;
+
+    await Assert.That(result.Pruned).IsEquivalentTo(["left-app-a", "left-app-b"]);
+    await Assert.That(result.Failures).IsEmpty();
+    await Assert
+      .That(provisioning.Sandboxes.Ids)
+      .IsEquivalentTo([
+        "left-app-d",
+        "left-app-e",
+        "left-app-f",
+        "left-app-g",
+        "left-contoso",
+        "old-app-b",
+        "young-app-c",
+      ]);
+    var output = provisioning.Output.ToString();
+    await Assert
+      .That(output)
+      .Contains(
+        "Deleting 4 leftover renderer sandbox(es) in 00:02:30, unless a record points to them by "
+          + "then.\n"
+      );
+    await Assert
+      .That(output)
+      .Contains("[app-f] Kept sandbox left-app-f: a record may point to it now.\n");
+    await Assert
+      .That(output)
+      .Contains("[app-g] Kept sandbox left-app-g: the tenant is being created or deleted.\n");
+    await Assert.That(output).EndsWith("Retired 0, deleted 2 leftover sandbox(es), failed 0.\n");
+  }
+
+  [Test]
+  public async Task A_young_sandbox_is_not_a_leftover_until_the_drain_and_ready_timeout_have_passed()
+  {
+    using Provisioning provisioning = new();
+    var age = provisioning.Options.DrainDelay + provisioning.Options.ReadyTimeout;
+    provisioning.Sandboxes.Add(
+      "left-app-a",
+      RendererLabels.For("app-a", RendererSize.Medium),
+      age: age - TestClock.Tick
+    );
+
+    var young = await provisioning.Provisioner.RetireIdleAsync(
+      Service(),
+      pruneLeftovers: true,
+      TestToken
+    );
+
+    await Assert.That(young.Pruned).IsEmpty();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-app-a"]);
   }
 
   /// <summary>The service's settings: the prefix <c>app-</c>, and a week before retiring by default.</summary>

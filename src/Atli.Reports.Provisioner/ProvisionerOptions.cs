@@ -180,6 +180,24 @@ internal sealed class ProvisionerOptions
   }
 
   /// <summary>
+  /// Throws <see cref="InvalidOperationException"/> naming the first setting <c>serve</c> cannot run
+  /// with: <see cref="Service"/>, API keys included, and <see cref="AllowedSourceCidrs"/>, which the
+  /// renderers it creates on demand need.
+  /// </summary>
+  public void ValidateServe()
+  {
+    Service.Validate(requireApiKeys: true);
+    if (AllowedSourceCidrs.Count == 0)
+    {
+      throw new InvalidOperationException(
+        $"{SectionName}:AllowedSourceCidrs is empty: serve creates renderers on demand, whose ports "
+          + "must admit only the gateway's outbound addresses and the service's own, such as "
+          + "[\"203.0.113.7/32\"]."
+      );
+    }
+  }
+
+  /// <summary>
   /// Whether <paramref name="value"/> is a duration as the provisioner takes them: <c>hh:mm:ss</c>
   /// (or <c>d.hh:mm:ss</c>), or <c>0</c>. A bare number is refused.
   /// </summary>
