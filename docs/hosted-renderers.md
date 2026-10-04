@@ -263,7 +263,8 @@ ran the gateway and renderers as production would, in one region. What they esta
   replica refused the excess at once with `503 Busy`. Two replicas could each send a renderer what
   it admits, so renderers refused the excess with `429`: the gateway resent 8,031 times in 5
   minutes, 388 conversions still ended in `503 Busy`, and tail latency rose. The renderers' own
-  admission kept them from running out of memory.
+  admission kept them from running out of memory. The gateway's `Replicas` setting, added since,
+  makes each replica admit only its share.
 - **Clones of one memory snapshot share the browser's memory layout and environment.** Two
   sandboxes started from a snapshot of a warm renderer had the same browser executable, libc,
   and stack addresses as the original, and the original's environment, credentials included. The
@@ -386,9 +387,10 @@ renderer template.
 - On Sandboxes: test private ingress through a virtual network, find out why renderers in a
   virtual network wake about 0.9 s more slowly, and measure the time from an image release to
   every renderer recreated.
-- Share tenant admission across gateway replicas, or divide each renderer's admitted requests
-  among them: with two replicas, renderers were sent up to twice what they admit and refused the
-  excess, and some conversions failed after the last resend.
+- Share tenant admission across gateway replicas if the gateway autoscales. Its `Replicas` setting
+  divides each renderer's admitted requests by a fixed count, which leaves renderers partly unused
+  while fewer replicas run, and cannot divide a renderer that admits fewer requests than there
+  are replicas. Measure two replicas with `Replicas=2` at twice the admitted concurrency.
 - Test Chromium's sandbox on Ubuntu 23.10 and later renderer nodes, with the containerd versions
   the platform runs.
 - Choose the API-to-renderer authentication mechanism. It must work without renderer egress or a

@@ -87,6 +87,8 @@ public class GatewayConfigurationTests
     "--ReportsServer:Gateway:MaxConcurrentRequestsPerTenant=0",
     "MaxConcurrentRequestsPerTenant"
   )]
+  [Arguments("--ReportsServer:Gateway:Replicas=0", "Replicas")]
+  [Arguments("--ReportsServer:Gateway:Replicas=1001", "Replicas")]
   public async Task Invalid_settings_fail_at_startup_naming_the_setting(
     string setting,
     string named
@@ -632,6 +634,92 @@ public class GatewayConfigurationTests
     await Assert.That(busy.Status).IsEqualTo(503);
     await Assert.That(busy.Kind).IsEqualTo("Busy");
     await Assert.That(completed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+  }
+
+  [Test]
+  [Arguments(4, 2, 2)]
+  [Arguments(3, 2, 1)]
+  [Arguments(2, 2, 1)]
+  [Arguments(1, 3, 1)]
+  public async Task Each_replica_admits_its_share_of_the_renderers_admitted_requests(
+    int admitted,
+    int replicas,
+    int share
+  )
+  {
+    var entered = 0;
+    TaskCompletionSource allEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var renderer = await FakeRenderer.StartAsync(async context =>
+    {
+      var count = Interlocked.Increment(ref entered);
+      if (count == share)
+      {
+        allEntered.TrySetResult();
+      }
+
+      // Only the share waits, so a request over it fails the test rather than hanging it.
+      if (count <= share)
+      {
+        await release.Task.WaitAsync(context.RequestAborted);
+      }
+
+      await FakeRenderer.WritePdfAsync(context, "%PDF-1.7");
+    });
+    await using var gateway = await GatewayHost.StartAsync([
+      $"--ReportsServer:Gateway:Replicas={replicas}",
+      .. Membership(0, "anonymous", "acme"),
+      .. Renderer(0, "acme", renderer.BaseUrl, TestKey, maxConcurrentRequests: admitted),
+    ]);
+
+    List<HttpRequestMessage> requests = [];
+    List<Task<HttpResponseMessage>> inFlight = [];
+    Problem busy;
+    try
+    {
+      for (var i = 0; i < share; i++)
+      {
+        var request = ConvertRequest();
+        requests.Add(request);
+        inFlight.Add(gateway.Client.SendAsync(request, TestToken));
+      }
+
+      await allEntered.Task.WaitAsync(TestToken);
+      using var overRequest = ConvertRequest();
+      busy = await ReadProblemAsync(await gateway.Client.SendAsync(overRequest, TestToken));
+    }
+    finally
+    {
+      release.TrySetResult();
+    }
+
+    var completed = await Task.WhenAll(inFlight);
+    try
+    {
+      await Assert.That(busy.Status).IsEqualTo(503);
+      await Assert.That(busy.Kind).IsEqualTo("Busy");
+      foreach (var response in completed)
+      {
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+      }
+
+      await Assert
+        .That(Volatile.Read(ref entered))
+        .IsEqualTo(share)
+        .Because("the request over the share never reached the renderer");
+    }
+    finally
+    {
+      foreach (var response in completed)
+      {
+        response.Dispose();
+      }
+
+      foreach (var request in requests)
+      {
+        request.Dispose();
+      }
+    }
   }
 
   private static RendererRecord Record(string tenantId, string url) =>

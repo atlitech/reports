@@ -63,6 +63,13 @@ internal sealed class GatewayOptions
   /// <summary>Conversions in flight per tenant in this instance, across all of its callers.</summary>
   public int MaxConcurrentRequestsPerTenant { get; set; } = 8;
 
+  /// <summary>
+  /// How many gateway replicas send conversions to the same renderers. Each replica admits a tenant
+  /// only its share of the requests the tenant's renderer admits, so that together they do not
+  /// send it more; set it to the most replicas that run at once.
+  /// </summary>
+  public int Replicas { get; set; } = 1;
+
   /// <summary>Allows <c>http</c> renderer URLs. For tests and development only.</summary>
   public bool AllowHttpRenderers { get; set; }
 
@@ -126,7 +133,25 @@ internal sealed class GatewayOptions
         "ReportsServer:Gateway:MaxConcurrentRequestsPerTenant must be between 1 and 10000."
       );
     }
+
+    if (Replicas is < 1 or > 1000)
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Replicas must be between 1 and 1000."
+      );
+    }
   }
+
+  /// <summary>
+  /// A tenant's in-flight limit in this replica when its renderer admits <paramref name="admitted"/>
+  /// requests at once (<see langword="null"/> when unknown): this replica's share of them, rounded
+  /// down so that the replicas' shares add up to no more, but at least 1, and never above
+  /// <see cref="MaxConcurrentRequestsPerTenant"/>.
+  /// </summary>
+  public int TenantLimit(int? admitted) =>
+    admitted is { } requests
+      ? Math.Min(MaxConcurrentRequestsPerTenant, Math.Max(1, requests / Replicas))
+      : MaxConcurrentRequestsPerTenant;
 
   /// <summary>
   /// Whether <paramref name="url"/> is a renderer base address the gateway sends a credential to:

@@ -275,11 +275,11 @@ internal static partial class GatewayRegistration
   }
 
   /// <summary>
-  /// The tenant's in-flight limit: the gateway's, or the number of requests the tenant's renderer
-  /// admits (its record's <see cref="RendererRecord.MaxConcurrentRequests"/>) when that is lower,
-  /// so a burst waits here as <c>Busy</c> rather than piling onto a renderer that would refuse it.
-  /// The record comes from the directory's cache; when it cannot be read, the gateway's limit
-  /// applies and the conversion reports the failure.
+  /// The tenant's in-flight limit: the gateway's, or this replica's share of the requests the
+  /// tenant's renderer admits (its record's <see cref="RendererRecord.MaxConcurrentRequests"/>)
+  /// when that is lower, so a burst waits here as <c>Busy</c> rather than piling onto a renderer
+  /// that would refuse it. The record comes from the directory's cache; when it cannot be read, the
+  /// gateway's limit applies and the conversion reports the failure.
   /// </summary>
   private static async Task<(int Limit, GatewayTenantFeature Feature)> TenantLimitAsync(
     RendererDirectory directory,
@@ -292,10 +292,7 @@ internal static partial class GatewayRegistration
     {
       var record = await directory.GetAsync(tenantId, cancellationToken);
       return (
-        Math.Min(
-          settings.MaxConcurrentRequestsPerTenant,
-          record?.MaxConcurrentRequests ?? int.MaxValue
-        ),
+        settings.TenantLimit(record?.MaxConcurrentRequests),
         new GatewayTenantFeature(tenantId, record, RecordLoaded: true)
       );
     }
