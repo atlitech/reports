@@ -8,6 +8,7 @@ using Atli.Reports.Server;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -341,6 +342,46 @@ public class GatewayTenantDeletionTests
   }
 
   [Test]
+  public async Task Deleting_a_tenant_whose_renderer_the_operator_disabled_is_a_conflict()
+  {
+    await using var renderer = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(_ =>
+      throw new InvalidOperationException("Never created.")
+    );
+    service.Store.Records[Tenant] = Record(Tenant, renderer);
+    service.OnDelete = (context, _) =>
+      FakeProvisioningService.WriteProblemAsync(context, 409, "Disabled");
+    await using var under = await StartAsync(service);
+    // The record is cached from here.
+    await AssertPdfAsync(await under.ConvertAsync(Tenant), "%PDF-1.7");
+    var gets = service.Store.Gets;
+
+    var problem = await ReadProblemAsync(await under.DeleteAsync(Tenant));
+    using var again = await under.ConvertAsync(Tenant);
+
+    await Assert.That(problem.Status).IsEqualTo(409);
+    await Assert.That(problem.Kind).IsEqualTo("InvalidRequest");
+    await Assert.That(problem.Title).IsEqualTo("The tenant's renderer could not be deleted.");
+    await Assert
+      .That(problem.Detail)
+      .IsEqualTo(
+        "The operator disabled the tenant's renderer. The operator must enable or delete it before the tenant can be deleted."
+      );
+    await Assert.That(problem.RetryAfter).IsNull();
+    // Nothing was evicted: the next conversion uses the cached record.
+    await Assert.That(again.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    await Assert.That(service.Store.Gets).IsEqualTo(gets);
+    await Assert.That(renderer.Requests.Count).IsEqualTo(2);
+    var refused = under.Logs.WithEventId(66).Single();
+    await Assert.That(refused.Level).IsEqualTo(LogLevel.Warning);
+    await Assert.That(refused["Operation"]).IsEqualTo("delete");
+    await Assert.That(refused["Kind"]).IsEqualTo("Disabled");
+    await Assert.That(under.Logs.WithEventId(68)).IsEmpty();
+  }
+
+  [Test]
   public async Task A_service_that_cannot_be_reached_fails_the_deletion()
   {
     await using var service = await FakeProvisioningService.StartAsync(_ =>
@@ -427,7 +468,7 @@ public class GatewayTenantDeletionTests
     await Assert.That(parameter.GetProperty("in").GetString()).IsEqualTo("path");
     await Assert
       .That(operation.GetProperty("responses").EnumerateObject().Select(status => status.Name))
-      .IsEquivalentTo(["204", "400", "401", "403", "503"]);
+      .IsEquivalentTo(["204", "400", "401", "403", "409", "503"]);
   }
 
   private static async Task<HttpResponseMessage> DeleteAsync(

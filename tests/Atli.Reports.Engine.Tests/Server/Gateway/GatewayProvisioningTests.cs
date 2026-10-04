@@ -220,6 +220,15 @@ public class GatewayProvisioningTests
     LogLevel.Warning
   )]
   [Arguments(
+    409,
+    "Disabled",
+    null,
+    "BrowserUnavailable",
+    "The tenant's renderer is not running.",
+    5,
+    LogLevel.Warning
+  )]
+  [Arguments(
     429,
     "RateLimited",
     "30",

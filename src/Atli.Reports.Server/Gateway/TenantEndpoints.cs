@@ -27,6 +27,7 @@ internal static partial class TenantEndpoints
       .ProducesProblem(StatusCodes.Status400BadRequest)
       .ProducesProblem(StatusCodes.Status401Unauthorized)
       .ProducesProblem(StatusCodes.Status403Forbidden)
+      .ProducesProblem(StatusCodes.Status409Conflict)
       .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
   /// <summary>
@@ -50,6 +51,10 @@ internal static partial class TenantEndpoints
   /// <response code="403">
   /// <c>Forbidden</c>: the caller lacks the tenants permission, or the tenant is not under one of its
   /// tenant prefixes. Listed tenants are managed by the operator.
+  /// </response>
+  /// <response code="409">
+  /// <c>InvalidRequest</c>: the operator disabled the tenant's renderer, which stays until the
+  /// operator enables or deletes it.
   /// </response>
   /// <response code="503">
   /// <c>BrowserUnavailable</c>: the renderer could not be deleted now (<c>Retry-After: 5</c>).
@@ -113,7 +118,8 @@ internal static partial class TenantEndpoints
         context,
         "The tenant's renderer could not be deleted.",
         failure.Error,
-        failure.RetryAfterSeconds
+        failure.RetryAfterSeconds,
+        failure.Status
       );
       return;
     }
@@ -124,14 +130,16 @@ internal static partial class TenantEndpoints
 
   /// <summary>
   /// Writes <paramref name="error"/> as <see cref="ConversionProblems.WriteAsync"/> does, with its
-  /// status, kind, and <c>Retry-After</c> (<paramref name="retryAfterSeconds"/> when given), but
-  /// titled for the deletion rather than a conversion.
+  /// status (<paramref name="status"/> when given), kind, and <c>Retry-After</c>
+  /// (<paramref name="retryAfterSeconds"/> when given), but titled for the deletion rather than a
+  /// conversion.
   /// </summary>
   private static Task WriteProblemAsync(
     HttpContext context,
     string title,
     ConversionError error,
-    int? retryAfterSeconds = null
+    int? retryAfterSeconds = null,
+    int? status = null
   )
   {
     if ((retryAfterSeconds ?? ConversionProblems.RetryAfterSeconds(error.Kind)) is { } retryAfter)
@@ -142,7 +150,7 @@ internal static partial class TenantEndpoints
     return Results
       .Problem(
         detail: error.Message,
-        statusCode: ConversionProblems.StatusCode(error.Kind),
+        statusCode: status ?? ConversionProblems.StatusCode(error.Kind),
         title: title,
         extensions: new Dictionary<string, object?> { ["kind"] = error.Kind.ToString() }
       )
@@ -198,6 +206,13 @@ internal sealed partial class TenantProvisioning(
   /// </summary>
   private const string QuotaFull =
     "The renderer quota of the tenant's prefix is full. Delete tenants that are no longer used, or ask the operator to raise the quota.";
+
+  /// <summary>
+  /// The caller's message for <see cref="ProvisioningProblemKinds.Disabled"/> when it deletes a
+  /// tenant: the service keeps a renderer the operator disabled until the operator acts.
+  /// </summary>
+  private const string DisabledRenderer =
+    "The operator disabled the tenant's renderer. The operator must enable or delete it before the tenant can be deleted.";
 
   /// <summary>The bounds of a <c>Retry-After</c> the gateway passes on from the service.</summary>
   private const int MinRetryAfterSeconds = 1;
@@ -311,6 +326,16 @@ internal sealed partial class TenantProvisioning(
       case ProvisioningApiException { Kind: ProvisioningProblemKinds.QuotaExceeded } refusal:
         LogRefused(logger, LogLevel.Warning, operation, tenantId, refusal.Kind, refusal.StatusCode);
         return new(Unavailable(QuotaFull));
+      // The operator's kill switch: the service neither deletes nor replaces the renderer until the
+      // operator enables or deletes it. Retrying will not help.
+      case ProvisioningApiException { Kind: ProvisioningProblemKinds.Disabled } refusal:
+        LogRefused(logger, LogLevel.Warning, operation, tenantId, refusal.Kind, refusal.StatusCode);
+        return operation == "create"
+          ? new(Unavailable("The tenant's renderer is not running."))
+          : new(
+            new ConversionError(ConversionErrorKind.InvalidRequest, DisabledRenderer),
+            Status: StatusCodes.Status409Conflict
+          );
       case ProvisioningApiException { Kind: ProvisioningProblemKinds.RateLimited } refusal:
         LogRefused(logger, LogLevel.Warning, operation, tenantId, refusal.Kind, refusal.StatusCode);
         return new(
@@ -398,9 +423,14 @@ internal sealed partial class TenantProvisioning(
 
 /// <summary>
 /// The caller's error for a refusal or failure of the provisioning service, with the
-/// <c>Retry-After</c> to send in place of the kind's own, in seconds, when the service gave one.
+/// <c>Retry-After</c> to send in place of the kind's own, in seconds, when the service gave one, and
+/// for a deletion the status to answer with in place of the kind's own, when it differs.
 /// </summary>
-internal sealed record ProvisioningFailure(ConversionError Error, int? RetryAfterSeconds = null)
+internal sealed record ProvisioningFailure(
+  ConversionError Error,
+  int? RetryAfterSeconds = null,
+  int? Status = null
+)
 {
   /// <summary>
   /// Sends <see cref="RetryAfterSeconds"/> with the response's <c>503</c>, for a conversion, whose

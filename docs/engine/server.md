@@ -308,17 +308,22 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `BrowserUnavailable` and logged as an error; `QuotaExceeded` is `503` `BrowserUnavailable` with a
   message that the prefix's renderer quota is full, until tenants are deleted or retire;
   `RateLimited` is `503` `Busy` with the service's `Retry-After`, kept between 1 and 60 seconds;
-  and `Failed`, any other answer, a service that cannot be reached, and `Provisioning:Timeout` are
-  `503` `BrowserUnavailable`. The gateway's client of the service follows no redirects and reads
-  at most 16 KiB of an answer.
+  `Disabled`, a renderer the operator disabled, is `503` `BrowserUnavailable`; and `Failed`, any
+  other answer, a service that cannot be reached, and `Provisioning:Timeout` are `503`
+  `BrowserUnavailable`. The gateway's client of the service follows no redirects and reads at most
+  16 KiB of an answer.
 - **Deleting tenants.** With `Provisioning:Mode=OnDemand`, `DELETE /tenants/{tenantId}` deletes
   the renderer of a tenant under one of the caller's prefixes, with its record and memory
   snapshot, through the service's `DELETE /tenants/{tenantId}/renderer`, and answers `204`, also
   for a tenant that has none. It needs the permission `reports.tenants` (see
   [Authentication](../security.md#authentication)). A listed tenant is a `403`, since the operator
   manages it, and so is a tenant that is not the caller's; an invalid tenant ID is a `400`
-  `InvalidRequest`. The service's refusals and failures map as for creation, with `503`
-  `BrowserUnavailable` when the renderer could not be deleted. The tenant header, caller
+  `InvalidRequest`. The service's refusals reach the caller as the gateway's own errors, never in
+  the service's words. A renderer the operator disabled (`Disabled`) is a `409` (`InvalidRequest`)
+  with a fixed message: the service neither deletes nor replaces it until the operator enables or
+  deletes it, and the gateway forgets nothing. `NotAllowed`, `Failed`, any other answer, a service
+  that cannot be reached, and `Provisioning:Timeout` are `503` `BrowserUnavailable`; retrying is
+  safe, since deleting a tenant without a renderer succeeds. The tenant header, caller
   admission, and tenant admission take no part. The replica that serves the deletion forgets the
   tenant's record, but other replicas may route the tenant's conversions to the deleted renderer
   for up to `Records:CacheDuration`; such a conversion gets the proxy's `404` and creates a new
