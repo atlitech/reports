@@ -380,6 +380,33 @@ public class GatewayResponseTests
     5
   )]
   [Arguments(
+    404,
+    "application/json; charset=utf-8",
+    """{"error":"Not found"}""",
+    503,
+    "BrowserUnavailable",
+    "The tenant's renderer is unavailable.",
+    5
+  )]
+  [Arguments(
+    403,
+    "application/json; charset=utf-8",
+    """{"error":"Access denied by IP access control policy","errorCode":"IpAccessDenied"}""",
+    503,
+    "BrowserUnavailable",
+    "The tenant's renderer is unavailable.",
+    5
+  )]
+  [Arguments(
+    404,
+    ProblemJson,
+    """{"error":"Not found"}""",
+    500,
+    "RenderFailed",
+    "The tenant's renderer could not convert the document.",
+    0
+  )]
+  [Arguments(
     413,
     ProblemJson,
     """{"kind":"InvalidRequest","detail":"The request body is larger than the server accepts."}""",
