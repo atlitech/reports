@@ -280,6 +280,20 @@ internal sealed class OnDemandGateway : IAsyncDisposable
     return await Gateway.Client.SendAsync(request, cancellationToken ?? TestToken);
   }
 
+  /// <summary>
+  /// Posts a body that is not a conversion, naming <paramref name="tenantId"/>: the gateway looks up
+  /// the tenant's record, as for any conversion, before it reads the body and answers <c>400</c>.
+  /// </summary>
+  public async Task<HttpResponseMessage> LookUpAsync(string tenantId)
+  {
+    using HttpRequestMessage request = new(HttpMethod.Post, "/convert")
+    {
+      Content = new StringContent("not json", Encoding.UTF8, "application/json"),
+    };
+    request.Headers.Add("X-Reports-Tenant", tenantId);
+    return await Gateway.Client.SendAsync(request, TestToken);
+  }
+
   /// <summary>Deletes <paramref name="tenantId"/> through the gateway.</summary>
   public Task<HttpResponseMessage> DeleteAsync(string tenantId) =>
     Gateway.Client.DeleteAsync($"/tenants/{tenantId}", TestToken);

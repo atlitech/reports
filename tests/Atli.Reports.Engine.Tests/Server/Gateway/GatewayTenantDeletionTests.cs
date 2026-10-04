@@ -79,6 +79,83 @@ public class GatewayTenantDeletionTests
   }
 
   [Test]
+  public async Task A_lookup_that_read_the_store_before_a_deletion_does_not_bring_the_record_back()
+  {
+    await using var first = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 first")
+    );
+    await using var second = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 second")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, second)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, first);
+    await using var under = await StartAsync(service);
+    // A request reads the tenant's record and is held before it answers.
+    HeldLookup held = new(service.Store, Tenant);
+    var stale = under.LookUpAsync(Tenant);
+    await held.Read.WaitAsync(TestToken);
+
+    using var deleted = await under.DeleteAsync(Tenant);
+    // The lookup finishes after the deletion, with the record it read before it.
+    held.Release();
+    using var rejected = await stale;
+
+    await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert.That(rejected.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    // The deleted renderer's record is not cached: the next conversion creates a new renderer.
+    await AssertPdfAsync(await under.ConvertAsync(Tenant), "%PDF-1.7 second");
+    await Assert.That(service.Ensures).IsEqualTo(1);
+    await Assert.That(first.Requests).IsEmpty();
+  }
+
+  [Test]
+  public async Task Lookups_after_a_deletion_do_not_join_one_that_started_before_it()
+  {
+    await using var first = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 first")
+    );
+    await using var second = await FakeRenderer.StartAsync(context =>
+      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 second")
+    );
+    await using var service = await FakeProvisioningService.StartAsync(tenant =>
+      Record(tenant, second)
+    );
+    service.Store.Records[Tenant] = Record(Tenant, first);
+    await using var under = await StartAsync(service);
+    HeldLookup held = new(service.Store, Tenant);
+    var stale = under.LookUpAsync(Tenant);
+    await held.Read.WaitAsync(TestToken);
+
+    HttpStatusCode deleted;
+    try
+    {
+      using (var response = await under.DeleteAsync(Tenant))
+      {
+        deleted = response.StatusCode;
+      }
+
+      // While the lookup from before the deletion is still held, a conversion reads the store
+      // itself and creates the tenant's new renderer.
+      await AssertPdfAsync(
+        await under.ConvertAsync(Tenant).WaitAsync(TestEngine.GenerousTimeout, TestToken),
+        "%PDF-1.7 second"
+      );
+    }
+    finally
+    {
+      held.Release();
+    }
+
+    using var rejected = await stale;
+    await Assert.That(deleted).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert.That(rejected.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    await Assert.That(service.Ensures).IsEqualTo(1);
+    await Assert.That(first.Requests).IsEmpty();
+  }
+
+  [Test]
   public async Task Deleting_a_tenant_without_a_renderer_succeeds()
   {
     await using var service = await FakeProvisioningService.StartAsync(_ =>
