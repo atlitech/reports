@@ -113,6 +113,8 @@ internal static class ProvisioningService
     builder.Services.AddSingleton<IHostLifetime>(new CommandLifetime());
 
     builder.Services.AddSingleton(options);
+    // One gate for the requests and the retirement loop alike.
+    builder.Services.AddSingleton<TenantGate>();
     builder.Services.AddSingleton(provider => new ProgressLog(
       provider.GetRequiredService<ILogger<RendererProvisioner>>()
     ));
@@ -122,13 +124,15 @@ internal static class ProvisioningService
       services.Readiness,
       time,
       provider.GetRequiredService<ProgressLog>(),
-      options
+      options,
+      provider.GetRequiredService<TenantGate>()
     ));
     builder.Services.AddSingleton(_ => new TenantCensus(services.Records, time));
     builder.Services.AddSingleton(provider => new ManagedRenderers(
       options,
       provider.GetRequiredService<RendererProvisioner>(),
       provider.GetRequiredService<TenantCensus>(),
+      provider.GetRequiredService<TenantGate>(),
       time,
       provider.GetRequiredService<ILogger<ManagedRenderers>>(),
       provider.GetRequiredService<IHostApplicationLifetime>()

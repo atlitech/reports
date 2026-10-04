@@ -60,6 +60,12 @@ internal static class RendererEndpoints
         "No renderer is created under the prefix until tenants under it are deleted or retired."
       ),
       RendererAnswer.RateLimited => RateLimited(context, outcome.RetryAfter),
+      RendererAnswer.Disabled => ServiceProblems.Problem(
+        StatusCodes.Status409Conflict,
+        ProvisioningProblemKinds.Disabled,
+        "The tenant's renderer is disabled.",
+        "An operator disabled the renderer and keeps it for investigation; nothing was deleted."
+      ),
       _ => ServiceProblems.Problem(
         StatusCodes.Status503ServiceUnavailable,
         ProvisioningProblemKinds.Failed,

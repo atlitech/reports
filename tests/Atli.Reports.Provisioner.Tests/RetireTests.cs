@@ -323,6 +323,62 @@ public class RetireTests
   }
 
   [Test]
+  public async Task Leaves_a_tenant_whose_renderer_is_being_created_or_deleted()
+  {
+    using Provisioning provisioning = new();
+    foreach (var tenant in new[] { "app-a", "app-b", "app-c" })
+    {
+      provisioning.AddRenderer(tenant, "disk-1");
+      provisioning.Sandboxes.Suspend($"old-{tenant}", TimeSpan.FromDays(8));
+    }
+
+    // In the provisioning service, a delete of app-a and a creation for app-b are in flight.
+    using var deleting = provisioning.Gate.TryHold("app-a");
+    TaskCompletionSource<EnsureResult> creating = new();
+    provisioning.Gate.TryStartCreation("app-b", () => creating.Task, out _, out _);
+
+    var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-c"]);
+    await Assert.That(result.Failures).IsEmpty();
+    await Assert.That(provisioning.Records["app-a"]).IsNotNull();
+    await Assert.That(provisioning.Records["app-b"]).IsNotNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-app-a", "old-app-b"]);
+    var output = provisioning.Output.ToString();
+    await Assert
+      .That(output)
+      .Contains("[app-a] Not retired: its renderer is being created or deleted.\n");
+    await Assert
+      .That(output)
+      .Contains("[app-b] Not retired: its renderer is being created or deleted.\n");
+    creating.SetCanceled(TestToken);
+  }
+
+  [Test]
+  public async Task Deletes_only_the_sandboxes_the_run_listed()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1");
+    provisioning.Sandboxes.Suspend("old-app-a", TimeSpan.FromDays(8));
+    // Made for the tenant once the run has listed the sandboxes.
+    provisioning.Sandboxes.AfterList = () =>
+    {
+      provisioning.Sandboxes.AfterList = null;
+      provisioning.Sandboxes.Add(
+        "new-app-a",
+        RendererLabels.For("app-a", RendererSize.Medium),
+        age: TimeSpan.Zero
+      );
+      return Task.CompletedTask;
+    };
+
+    var result = await provisioning.Provisioner.RetireIdleAsync(Service(), TestToken);
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["new-app-a"]);
+  }
+
+  [Test]
   public async Task Retires_under_every_managed_prefix()
   {
     using Provisioning provisioning = new();

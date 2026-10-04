@@ -29,10 +29,13 @@ internal sealed class Provisioning : IDisposable
 
   public ProvisionerOptions Options { get; } = new();
 
+  /// <summary>The gate every <see cref="Provisioner"/> takes tenants through, as one process.</summary>
+  public TenantGate Gate { get; } = new();
+
   public ProvisionerServices Services => new(Sandboxes, Records, Readiness);
 
   public RendererProvisioner Provisioner =>
-    new(Sandboxes, Records, Readiness, Clock, Output, Options);
+    new(Sandboxes, Records, Readiness, Clock, Output, Options, Gate);
 
   /// <summary>
   /// A renderer the provisioner created a week ago: sandbox <c>old-{tenant}</c>, labeled as the

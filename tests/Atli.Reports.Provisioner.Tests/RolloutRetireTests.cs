@@ -175,6 +175,60 @@ public class RolloutRetireTests
   }
 
   [Test]
+  public async Task A_stopped_renderer_being_deleted_meanwhile_is_a_failure_and_left_alone()
+  {
+    using Provisioning provisioning = new();
+    var old = provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+    using var deleting = provisioning.Gate.TryHold("app-a");
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      null,
+      4,
+      TimeSpan.Zero,
+      Service(),
+      TestToken
+    );
+
+    await Assert.That(result.Retired).IsEmpty();
+    await Assert
+      .That(result.Failures["app-a"])
+      .IsEqualTo("a creation or delete of the tenant's renderer is in flight; run rollout again.");
+    await Assert.That(provisioning.Records["app-a"]).IsSameReferenceAs(old);
+    await Assert.That(provisioning.Sandboxes.Created).IsEmpty();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-app-a"]);
+  }
+
+  [Test]
+  public async Task Retiring_deletes_only_the_sandboxes_the_rollout_listed()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("app-a", "disk-1", state: SandboxStates.Stopped);
+    provisioning.Sandboxes.AfterList = () =>
+    {
+      provisioning.Sandboxes.AfterList = null;
+      provisioning.Sandboxes.Add(
+        "new-app-a",
+        RendererLabels.For("app-a", RendererSize.Medium),
+        age: TimeSpan.Zero
+      );
+      return Task.CompletedTask;
+    };
+
+    var result = await provisioning.Provisioner.RolloutAsync(
+      "disk-2",
+      "app-a",
+      4,
+      TimeSpan.Zero,
+      Service(),
+      TestToken
+    );
+
+    await Assert.That(result.Retired).IsEquivalentTo(["app-a"]);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["new-app-a"]);
+  }
+
+  [Test]
   public async Task A_named_tenant_is_retired_by_the_same_rule()
   {
     using Provisioning provisioning = new();

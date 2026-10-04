@@ -49,6 +49,98 @@ public class DeleteTests
   }
 
   [Test]
+  public async Task Deletes_only_the_sandboxes_labeled_for_the_tenant_before_its_record_went()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    var drain = TimeSpan.FromMinutes(1);
+
+    var delete = provisioning.Provisioner.DeleteAsync("a", drain, TestToken);
+    await provisioning.Clock.WaitForTimerAsync(drain);
+    // A creation that starts once the record is gone makes a renderer of its own.
+    provisioning.Sandboxes.Add(
+      "new-a",
+      RendererLabels.For("a", RendererSize.Medium),
+      age: TimeSpan.Zero
+    );
+    provisioning.Clock.Advance(drain);
+    await delete;
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["new-a"]);
+    await Assert
+      .That(provisioning.Journal.Matching("delete"))
+      .IsEquivalentTo(["delete record a", "delete old-a"], CollectionOrdering.Matching);
+  }
+
+  [Test]
+  public async Task Refusing_disabled_sandboxes_deletes_nothing_of_a_disabled_tenant()
+  {
+    using Provisioning provisioning = new();
+    var record = provisioning.AddRenderer("a", "disk-1");
+    provisioning.Sandboxes.Add("left-a", RendererLabels.For("a", RendererSize.Medium));
+    await provisioning.Provisioner.DisableAsync("a", TestToken);
+
+    var exception = await Assert
+      .That(async () =>
+        await provisioning.Provisioner.DeleteAsync(
+          "a",
+          TimeSpan.Zero,
+          refuseDisabled: true,
+          listed: null,
+          TestToken
+        )
+      )
+      .Throws<RendererDisabledException>();
+
+    await Assert
+      .That(exception!.Message)
+      .IsEqualTo(
+        "Sandbox left-a of tenant a is disabled, so nothing was deleted. Enable it, or delete the "
+          + "tenant from the command line."
+      );
+    await Assert.That(provisioning.Records["a"]).IsSameReferenceAs(record);
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["left-a", "old-a"]);
+    await Assert.That(provisioning.Journal.Matching("delete")).IsEmpty();
+  }
+
+  [Test]
+  public async Task The_command_deletes_a_disabled_renderer()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    await provisioning.Provisioner.DisableAsync("a", TestToken);
+
+    await provisioning.Provisioner.DeleteAsync("a", TimeSpan.Zero, TestToken);
+
+    // The last step of incident response, once the investigation is done.
+    await Assert.That(provisioning.Records["a"]).IsNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+  }
+
+  [Test]
+  public async Task The_record_is_deleted_even_when_the_sandboxes_cannot_be_listed()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("a", "disk-1");
+    provisioning.Sandboxes.AfterList = () =>
+      throw new SandboxesException("The data plane is unavailable.");
+
+    await Assert
+      .That(async () => await provisioning.Provisioner.DeleteAsync("a", TimeSpan.Zero, TestToken))
+      .Throws<SandboxesException>();
+
+    // The gateway stops routing to the renderer; deleting again deletes the sandbox.
+    await Assert.That(provisioning.Records["a"]).IsNull();
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["old-a"]);
+    await Assert
+      .That(provisioning.Output.ToString())
+      .Contains(
+        "[a] Could not list the sandboxes (The data plane is unavailable.); deleting the record "
+          + "all the same.\n"
+      );
+  }
+
+  [Test]
   public async Task Deleting_again_succeeds()
   {
     using Provisioning provisioning = new();

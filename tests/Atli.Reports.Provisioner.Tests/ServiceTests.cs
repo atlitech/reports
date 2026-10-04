@@ -6,6 +6,7 @@ using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Provisioner.Service;
 using Atli.Reports.Provisioner.Tests.Support;
 using Microsoft.Extensions.Logging;
+using TUnit.Assertions.Enums;
 
 namespace Atli.Reports.Provisioner.Tests;
 
@@ -597,7 +598,8 @@ public class ServiceTests
     var creating = service.PutAsync("myapp-1", TestToken);
     await probing.Task.WaitAsync(TestToken);
     var deleting = service.DeleteAsync("myapp-1", TestToken);
-    await Task.Delay(TimeSpan.FromMilliseconds(200), TestToken);
+    await service.Logs.WaitForAsync<ManagedRenderers>(12);
+    // Nothing but the creation's end lets it go on.
     await Assert.That(deleting.IsCompleted).IsFalse();
     ready.SetResult();
     using var created = await creating;
@@ -606,8 +608,139 @@ public class ServiceTests
     await Assert.That(created.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
     // Had the delete gone first, the record would now point to a deleted sandbox.
+    await Assert
+      .That(provisioning.Journal.Matching("put", "delete"))
+      .IsEquivalentTo(
+        ["put myapp-1 -> sandbox-1", "delete record myapp-1", "delete sandbox-1"],
+        CollectionOrdering.Matching
+      );
     await Assert.That(provisioning.Records["myapp-1"]).IsNull();
     await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+  }
+
+  [Test]
+  public async Task A_request_during_a_delete_waits_for_it_then_creates_a_renderer_afresh()
+  {
+    using Provisioning provisioning = new();
+    provisioning.AddRenderer("myapp-1", "disk-1");
+    await using var service = await RunningService.StartAsync(provisioning);
+    Task<HttpResponseMessage>? during = null;
+    // Once the delete has listed the tenant's sandboxes, and before it deletes anything.
+    provisioning.Sandboxes.AfterList = async () =>
+    {
+      provisioning.Sandboxes.AfterList = null;
+      during = service.PutAsync("myapp-1", TestToken);
+      await service.Logs.WaitForAsync<ManagedRenderers>(11);
+    };
+
+    using var deleted = await service.DeleteAsync("myapp-1", TestToken);
+    using var created = await during!;
+
+    await Assert.That(deleted.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+    await Assert
+      .That(await created.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
+    await Assert
+      .That(provisioning.Journal.Matching("delete", "create", "put"))
+      .IsEquivalentTo(
+        [
+          "delete record myapp-1",
+          "delete old-myapp-1",
+          "create sandbox-1 (myapp-1)",
+          "put myapp-1 -> sandbox-1",
+        ],
+        CollectionOrdering.Matching
+      );
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
+  }
+
+  [Test]
+  public async Task A_request_that_gives_up_leaves_the_creation_running_for_the_next()
+  {
+    using Provisioning provisioning = new();
+    TaskCompletionSource probing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    provisioning.Readiness.Answer = async (_, cancellationToken) =>
+    {
+      probing.TrySetResult();
+      await ready.Task.WaitAsync(cancellationToken);
+      return ReadinessAnswer.Ready;
+    };
+    await using var service = await RunningService.StartAsync(provisioning);
+    using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestToken);
+
+    var first = service.PutAsync("myapp-1", giveUp.Token);
+    await probing.Task.WaitAsync(TestToken);
+    await giveUp.CancelAsync();
+    await Assert.That(async () => await first).Throws<OperationCanceledException>();
+    ready.SetResult();
+    await service.Logs.WaitForAsync<ManagedRenderers>(1);
+    using var next = await service.PutAsync("myapp-1", TestToken);
+
+    await Assert
+      .That(await next.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":false}""");
+    await Assert.That(provisioning.Sandboxes.Created).HasSingleItem();
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+  }
+
+  [Test]
+  public async Task A_disabled_tenant_is_not_deleted_and_stays_found()
+  {
+    using Provisioning provisioning = new();
+    var record = provisioning.AddRenderer("myapp-1", "disk-1");
+    await provisioning.Sandboxes.DisableAsync("old-myapp-1", TestToken);
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    using var deleted = await service.DeleteAsync("myapp-1", TestToken);
+    using var ensured = await service.PutAsync("myapp-1", TestToken);
+
+    var problem = await AssertProblemAsync(deleted, HttpStatusCode.Conflict, "Disabled");
+    await Assert.That(problem.ToString()).DoesNotContain("old-myapp-1");
+    // The kill switch wins: the gateway's conversions keep failing until an operator acts.
+    await Assert
+      .That(await ensured.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":false}""");
+    await Assert.That(provisioning.Records["myapp-1"]).IsSameReferenceAs(record);
+    await Assert.That(provisioning.Sandboxes.Disabled).IsEquivalentTo(["old-myapp-1"]);
+    await Assert.That(provisioning.Journal.Matching("delete", "create")).IsEmpty();
+    var refused = service.Logs.Of<ManagedRenderers>(13);
+    await Assert.That(refused).HasSingleItem();
+    await Assert.That(refused[0].Level).IsEqualTo(LogLevel.Warning);
+    await Assert.That(refused[0].Message).Contains("Sandbox old-myapp-1 of tenant myapp-1");
+  }
+
+  [Test]
+  public async Task A_retirement_run_leaves_a_renderer_being_created()
+  {
+    using Provisioning provisioning = new();
+    // A record whose sandbox is gone: the service replaces it.
+    provisioning.AddRenderer("myapp-1", "disk-1");
+    provisioning.Sandboxes.Remove("old-myapp-1");
+    TaskCompletionSource probing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    provisioning.Readiness.Answer = async (_, cancellationToken) =>
+    {
+      probing.TrySetResult();
+      await ready.Task.WaitAsync(cancellationToken);
+      return ReadinessAnswer.Ready;
+    };
+    await using var service = await RunningService.StartAsync(provisioning);
+
+    var creating = service.PutAsync("myapp-1", TestToken);
+    await probing.Task.WaitAsync(TestToken);
+    await provisioning.Clock.WaitForTimerAsync(Hour);
+    provisioning.Clock.Advance(Hour);
+    await service.Logs.WaitForAsync<RetirementLoop>(20);
+    ready.SetResult();
+    using var created = await creating;
+
+    await Assert
+      .That(await created.Content.ReadAsStringAsync(TestToken))
+      .IsEqualTo("""{"tenantId":"myapp-1","created":true}""");
+    await Assert.That(provisioning.Records["myapp-1"]!.SandboxId).IsEqualTo("sandbox-1");
+    await Assert.That(provisioning.Sandboxes.Ids).IsEquivalentTo(["sandbox-1"]);
   }
 
   [Test]
@@ -729,11 +862,13 @@ public class ServiceTests
     using Provisioning provisioning = new();
     provisioning.AddRenderer("myapp-found", "disk-1");
     provisioning.AddRenderer("myapp-other", "disk-1");
+    provisioning.AddRenderer("myapp-disabled", "disk-1");
+    await provisioning.Sandboxes.DisableAsync("old-myapp-disabled", TestToken);
     await using var service = await RunningService.StartAsync(
       provisioning,
       service =>
       {
-        service.TenantPrefixes[0].MaxTenants = 3;
+        service.TenantPrefixes[0].MaxTenants = 4;
         service.TenantPrefixes[1].MaxTenants = 2;
         service.MaxCreatesPerMinute = 2;
       }
@@ -762,6 +897,9 @@ public class ServiceTests
     );
     await client.DeleteRendererAsync("myapp-other", TestToken);
     await client.DeleteRendererAsync("myapp-other", TestToken);
+    var disabled = await RefusalAsync(() =>
+      client.DeleteRendererAsync("myapp-disabled", TestToken)
+    );
     provisioning.Records.AddUnreadable("myapp-broken");
     var failed = await RefusalAsync(() => client.EnsureRendererAsync("myapp-broken", TestToken));
 
@@ -774,6 +912,7 @@ public class ServiceTests
     await Assert.That(rate.RetryAfter).IsEqualTo(TimeSpan.FromSeconds(60));
     await Assert.That((notAllowed.StatusCode, notAllowed.Kind)).IsEqualTo((403, "NotAllowed"));
     await Assert.That(unauthorized.StatusCode).IsEqualTo(401);
+    await Assert.That((disabled.StatusCode, disabled.Kind)).IsEqualTo((409, "Disabled"));
     await Assert.That((failed.StatusCode, failed.Kind)).IsEqualTo((503, "Failed"));
     // The reason, that the record is damaged, stays in the service's log.
     await Assert.That(failed.Message).DoesNotContain("damaged");
