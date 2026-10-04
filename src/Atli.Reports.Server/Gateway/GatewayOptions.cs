@@ -180,7 +180,7 @@ internal sealed class GatewayOptions
     if (Tenants.Length == 0)
     {
       throw new InvalidOperationException(
-        "Gateway mode needs ReportsServer:Gateway:Tenants: each authenticated CallerId and the product tenants it belongs to."
+        "Gateway mode needs ReportsServer:Gateway:Tenants: each authenticated CallerId and its product tenants or tenant prefixes."
       );
     }
 
@@ -199,11 +199,15 @@ internal sealed class GatewayOptions
         );
       }
 
+      if (membership.Tenants.Length == 0 && membership.TenantPrefixes.Length == 0)
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' needs at least one tenant ID in Tenants or one prefix in TenantPrefixes."
+        );
+      }
+
       HashSet<string> tenants = new(StringComparer.Ordinal);
-      if (
-        membership.Tenants.Length == 0
-        || !membership.Tenants.All(tenant => TenantId.IsValid(tenant) && tenants.Add(tenant))
-      )
+      if (!membership.Tenants.All(tenant => TenantId.IsValid(tenant) && tenants.Add(tenant)))
       {
         throw new InvalidOperationException(
           $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' must list distinct tenant IDs: 1 to 63 lowercase letters, digits, and hyphens, starting with a letter or digit."
@@ -216,16 +220,80 @@ internal sealed class GatewayOptions
           $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' names the tenant ID '{ReadinessProbeTenantId}', which readiness reserves."
         );
       }
+
+      HashSet<string> prefixes = new(StringComparer.Ordinal);
+      if (
+        !membership.TenantPrefixes.All(prefix =>
+          TenantPrefix.IsValid(prefix) && prefixes.Add(prefix)
+        )
+      )
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' must list distinct TenantPrefixes: 2 to {TenantPrefix.MaxLength} lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen."
+        );
+      }
+
+      var reserved = Array.Find(
+        membership.TenantPrefixes,
+        prefix => TenantPrefix.Owns(prefix, ReadinessProbeTenantId)
+      );
+      if (reserved is not null)
+      {
+        throw new InvalidOperationException(
+          $"ReportsServer:Gateway:Tenants for caller '{membership.CallerId}' has the tenant prefix '{reserved}', which owns the tenant ID '{ReadinessProbeTenantId}' that readiness reserves."
+        );
+      }
+    }
+
+    // A prefix's tenants are its caller's alone: no other caller's prefix may overlap it, and no
+    // other caller may list a tenant under it. Listed tenants may still be shared.
+    foreach (var owner in Tenants)
+    {
+      foreach (var other in Tenants)
+      {
+        if (ReferenceEquals(other, owner))
+        {
+          continue;
+        }
+
+        foreach (var prefix in owner.TenantPrefixes)
+        {
+          var overlapping = Array.Find(
+            other.TenantPrefixes,
+            otherPrefix => TenantPrefix.Overlap(prefix, otherPrefix)
+          );
+          if (overlapping is not null)
+          {
+            throw new InvalidOperationException(
+              $"ReportsServer:Gateway:Tenants for callers '{owner.CallerId}' and '{other.CallerId}' have the tenant prefixes '{prefix}' and '{overlapping}', which overlap: one starts with the other, so both callers would own the same tenants."
+            );
+          }
+
+          var listed = Array.Find(other.Tenants, tenant => TenantPrefix.Owns(prefix, tenant));
+          if (listed is not null)
+          {
+            throw new InvalidOperationException(
+              $"ReportsServer:Gateway:Tenants for caller '{other.CallerId}' lists the tenant ID '{listed}', which is under the tenant prefix '{prefix}' of caller '{owner.CallerId}'. A prefix's tenants are its caller's alone."
+            );
+          }
+        }
+      }
     }
   }
 }
 
-/// <summary>One caller's product tenants.</summary>
+/// <summary>
+/// One caller's product tenants: those it lists, and every valid tenant ID under its prefixes.
+/// </summary>
 internal sealed class GatewayCallerTenants
 {
   /// <summary>The authenticated caller ID: an API key's <c>CallerId</c>, or the JWT caller claim.</summary>
   public string CallerId { get; set; } = "";
 
+  /// <summary>
+  /// Tenant IDs the caller belongs to, which other callers may list too. A caller with exactly one,
+  /// and no prefixes, may leave the tenant header out.
+  /// </summary>
   public string[] Tenants { get; set; } = [];
 
   /// <summary>
