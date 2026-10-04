@@ -107,6 +107,46 @@ public class GatewayTenantPrefixTests
   }
 
   [Test]
+  public async Task A_tenant_with_a_renderer_refreshes_its_record_without_spending_the_budget()
+  {
+    await using var renderer = await StartEchoRendererAsync();
+    ManualClock clock = new();
+    FakeRecordStore store = new();
+    store.Records[Workspace] = new RendererRecord
+    {
+      TenantId = Workspace,
+      Url = new Uri(renderer.BaseUrl),
+      ApiKey = "key-workspace",
+    };
+    await using var gateway = await GatewayHost.StartAsync(
+      [
+        .. Callers(),
+        .. Membership(0, "alpha-app"),
+        .. Prefixes(0, "myapp-"),
+        .. Membership(1, "beta-app", "acme"),
+        "--ReportsServer:Gateway:Records:Store=File",
+        $"--ReportsServer:Gateway:Records:Path={Path.GetTempPath()}",
+        "--ReportsServer:Gateway:MaxNewTenantLookupsPerCallerPerSecond=1",
+      ],
+      builder =>
+      {
+        builder.Services.AddSingleton<IRendererRecordStore>(store);
+        builder.Services.AddSingleton<TimeProvider>(clock);
+      }
+    );
+
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, Workspace), "%PDF-1.7 key-workspace");
+    // Past the record's cache duration; the budget is back, and a new tenant spends it.
+    clock.Advance(TimeSpan.FromSeconds(31));
+    await AssertNoRendererAsync(await SendAsync(gateway, AlphaKey, "myapp-1"));
+
+    // The workspace's record has expired, but the gateway knows it had a renderer.
+    await AssertPdfAsync(await SendAsync(gateway, AlphaKey, Workspace), "%PDF-1.7 key-workspace");
+
+    await Assert.That(store.Lookups.Count(tenant => tenant == Workspace)).IsEqualTo(2);
+  }
+
+  [Test]
   public async Task Each_callers_lookups_of_new_tenants_are_limited()
   {
     await using var renderer = await StartEchoRendererAsync();

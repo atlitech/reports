@@ -15,20 +15,25 @@ namespace Atli.Reports.Hosting.Provisioning;
 /// wrong one is <c>401</c>.</para>
 /// <para><c>PUT /tenants/{tenantId}/renderer</c> ensures the tenant has a ready renderer and record,
 /// and answers <c>200</c> with <see cref="EnsureRendererResponse"/> once it does: at once when the
-/// record exists and names a sandbox that exists (<c>created: false</c>, a disabled sandbox
-/// included, since the kill switch wins), or after creating one when there is no record or its
-/// sandbox no longer exists (<c>created: true</c>). Concurrent calls for one tenant share one
-/// creation.</para>
-/// <para><c>DELETE /tenants/{tenantId}/renderer</c> deletes the tenant's record and then every sandbox
-/// labeled for it, and answers <c>204</c>, also when there was nothing to delete.</para>
+/// record exists and names the tenant's own sandbox, which exists (<c>created: false</c>, a disabled
+/// sandbox included, since the kill switch wins), or after creating one when there is no record or
+/// its sandbox no longer exists (<c>created: true</c>). Concurrent calls for one tenant share one
+/// creation. A tenant that has a record is never refused by quota or rate limit.</para>
+/// <para><c>DELETE /tenants/{tenantId}/renderer</c> deletes the tenant's record and then the
+/// sandboxes labeled for it when the delete began, and answers <c>204</c>, also when there was
+/// nothing to delete. It waits for the tenant's creation in flight, and creations that arrive
+/// meanwhile wait for it. A tenant with a disabled sandbox is refused with <c>409</c>
+/// <see cref="ProvisioningProblemKinds.Disabled"/>, and nothing is deleted.</para>
 /// <para>Failures are RFC 9457 problem details whose <c>kind</c> is one of
 /// <see cref="ProvisioningProblemKinds"/>: <c>400</c>
 /// <see cref="ProvisioningProblemKinds.InvalidRequest"/> for a tenant ID that is not one, <c>401</c>
 /// <see cref="ProvisioningProblemKinds.Unauthorized"/>, <c>403</c>
-/// <see cref="ProvisioningProblemKinds.NotAllowed"/>, <c>429</c>
+/// <see cref="ProvisioningProblemKinds.NotAllowed"/>, <c>409</c>
+/// <see cref="ProvisioningProblemKinds.Disabled"/>, <c>429</c>
 /// <see cref="ProvisioningProblemKinds.QuotaExceeded"/> or
-/// <see cref="ProvisioningProblemKinds.RateLimited"/> (with <c>Retry-After</c>), and <c>503</c>
-/// <see cref="ProvisioningProblemKinds.Failed"/>.</para>
+/// <see cref="ProvisioningProblemKinds.RateLimited"/> (with <c>Retry-After</c>; the prefix's limit
+/// or the one across prefixes), and <c>503</c> <see cref="ProvisioningProblemKinds.Failed"/>, also
+/// for a record that names another tenant's sandbox.</para>
 /// </remarks>
 public static class ProvisioningApi
 {

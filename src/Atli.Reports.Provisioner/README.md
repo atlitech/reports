@@ -354,7 +354,7 @@ Every request but the health probes carries one of the gateway's keys in `X-Repo
 | Request | Answer |
 | --- | --- |
 | `PUT /tenants/{id}/renderer` | `200` with `{"tenantId": "<id>", "created": false}` when the tenant's record names a sandbox that exists, disabled or not: a disabled renderer stays disabled. Otherwise, once a renderer is ready, `200` with `"created": true`: the service creates one as `create` does for a tenant without a record, or replaces the record's missing sandbox as `rollout` does, deleting nothing else |
-| `DELETE /tenants/{id}/renderer` | `204` once the tenant's record, then the sandboxes labeled for it when the delete began, are deleted, as `delete` without `--drain` does; also when there was nothing to delete |
+| `DELETE /tenants/{id}/renderer` | `204` once the tenant's record, then the sandboxes labeled for it when the delete began, are deleted, as `delete` without `--drain` does; also when there was nothing to delete. Each delete lists the whole sandbox group, so at most four run at once, across tenants, and the rest wait their turn |
 | `GET /health/live` | `200` while the service answers; no key needed |
 | `GET /health/ready` | `200` while the service's last listing of the record store that succeeded ended less than two minutes ago, plus twice the time it took; `503` otherwise, and until the first listing succeeds. It never waits for a listing. No key needed |
 

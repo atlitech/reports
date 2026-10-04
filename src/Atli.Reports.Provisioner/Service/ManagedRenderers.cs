@@ -29,8 +29,15 @@ namespace Atli.Reports.Provisioner.Service;
 /// second discards its sandbox and finds the other's.
 /// </para>
 /// </remarks>
-internal sealed partial class ManagedRenderers
+internal sealed partial class ManagedRenderers : IDisposable
 {
+  /// <summary>
+  /// Deletes run at most this many at once, across tenants: each lists the whole sandbox group, and
+  /// the gateways' own limits are per caller and replica.
+  /// </summary>
+  public const int MaxConcurrentDeletes = 4;
+
+  private readonly SemaphoreSlim _deletes = new(MaxConcurrentDeletes, MaxConcurrentDeletes);
   private readonly ProvisionerOptions _options;
   private readonly RendererProvisioner _provisioner;
   private readonly TenantCensus _census;
@@ -222,6 +229,9 @@ internal sealed partial class ManagedRenderers
       );
     }
 
+    // Before the tenant's gate, so that a delete waiting its turn holds up no creation.
+    await _deletes.WaitAsync(cancellationToken);
+    using var turn = new Releaser(_deletes);
     // Otherwise the creation could write its record after the delete, or lose its sandbox to it.
     using var hold = await _gate.HoldAsync(
       tenantId,
@@ -254,6 +264,14 @@ internal sealed partial class ManagedRenderers
       LogDeleteFailed(_logger, tenantId, exception);
       return new RendererOutcome(RendererAnswer.Failed);
     }
+  }
+
+  public void Dispose() => _deletes.Dispose();
+
+  /// <summary>Releases a turn of <see cref="MaxConcurrentDeletes"/> once.</summary>
+  private sealed class Releaser(SemaphoreSlim semaphore) : IDisposable
+  {
+    public void Dispose() => semaphore.Release();
   }
 
   /// <summary>Waits until no creation is in flight, as after stopping, when each cleans up.</summary>

@@ -242,15 +242,17 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   renderer. Key Vault throttles a vault at about 4,000 operations per 10 seconds, 400 a second,
   and once one caller spends that, every tenant's record reads fail. So each caller may start at
   most `MaxNewTenantLookupsPerCallerPerSecond` lookups a second in a replica, with a burst of as
-  many, for tenants under its prefixes whose answer the gateway does not have: neither cached (a
-  record or none) nor being read for another request. One more is `503` `Busy` with
-  `Retry-After: 1`, and reads nothing. Cached answers cost nothing, and listed tenants are never
-  limited. The budget holds per replica, so size it against the vault's limit with every replica
-  and every caller with a prefix counted: a new tenant costs up to about four vault operations
-  (the gateway's lookup, the service's lookup and its writing of the record, and the gateway's
-  reading of it), so the budget times the replicas times those callers times four must stay well
-  under 400 a second, with room left for the vault's other traffic. The default, 20, lets one
-  caller on two replicas cause about 160 operations a second.
+  many, for tenants under its prefixes that the gateway does not know: neither cached (a record or
+  none), nor being read for another request, nor found with a renderer within the last ten minutes
+  or so. One more is `503` `Busy` with `Retry-After: 1`, and reads nothing. Refreshing the record
+  of a tenant that had a renderer costs nothing, since such tenants are as many as renderers, which
+  the provisioning service's quotas bound; nor do listed tenants. The budget holds per replica, so
+  size it against the vault's limit with every replica and every caller with a prefix counted: a
+  new tenant costs up to about five vault operations (the gateway's lookup and its reading of the
+  new record, and the service's lookup, its check just before writing, and the write), so the
+  budget times the replicas times those callers times five must stay well under 400 a second, with
+  room left for the vault's other traffic and the records' refreshes. The default, 20, lets one
+  caller on two replicas cause about 200 operations a second.
 - **Forwarding.** The gateway validates the request as above, looks up the tenant's renderer
   record, and posts the conversion to `{Url}/convert` in `Atli.Reports.Client`'s wire format, with
   the record's credential in `X-Reports-Api-Key`. Nothing of the caller's request goes along: no

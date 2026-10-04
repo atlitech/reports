@@ -875,6 +875,57 @@ public class ServiceTests
   }
 
   [Test]
+  public async Task Deletes_across_tenants_run_a_few_at_a_time()
+  {
+    using Provisioning provisioning = new();
+    const int Tenants = ManagedRenderers.MaxConcurrentDeletes + 2;
+    for (var i = 1; i <= Tenants; i++)
+    {
+      provisioning.AddRenderer($"myapp-{i}", "disk-1");
+    }
+
+    var listing = 0;
+    var entered = 0;
+    TaskCompletionSource full = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    await using var service = await RunningService.StartAsync(provisioning);
+    // Holds every delete in its first listing of the group, once the service has started.
+    provisioning.Sandboxes.AfterList = async () =>
+    {
+      Interlocked.Increment(ref entered);
+      if (Interlocked.Increment(ref listing) == ManagedRenderers.MaxConcurrentDeletes)
+      {
+        full.TrySetResult();
+      }
+
+      await release.Task;
+      Interlocked.Decrement(ref listing);
+    };
+
+    var deletes = Enumerable
+      .Range(1, Tenants)
+      .Select(i => service.DeleteAsync($"myapp-{i}", TestToken))
+      .ToArray();
+    await full.Task.WaitAsync(TestToken);
+    // The others wait their turn; give them time to pass the limit if it does not hold.
+    await Task.Delay(TimeSpan.FromMilliseconds(200), TestToken);
+    var enteredAtOnce = Volatile.Read(ref entered);
+    release.TrySetResult();
+    var responses = await Task.WhenAll(deletes);
+
+    await Assert.That(enteredAtOnce).IsEqualTo(ManagedRenderers.MaxConcurrentDeletes);
+    foreach (var response in responses)
+    {
+      using (response)
+      {
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+      }
+    }
+
+    await Assert.That(provisioning.Sandboxes.Ids).IsEmpty();
+  }
+
+  [Test]
   public async Task A_delete_that_fails_is_503()
   {
     using Provisioning provisioning = new();

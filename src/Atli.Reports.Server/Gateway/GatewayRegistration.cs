@@ -278,8 +278,8 @@ internal static partial class GatewayRegistration
         var tenantId = resolution.TenantId!;
         // A caller can name a new tenant under its prefixes on every request, and each costs a read
         // of the record store before the body is read: only within the caller's budget. Answers
-        // the directory already has cost nothing.
-        if (resolution.ViaPrefix && !directory.HasAnswer(tenantId) && !lookups.TryTake(caller))
+        // the directory already has, and tenants it knows had a renderer, cost nothing.
+        if (resolution.ViaPrefix && !directory.IsKnown(tenantId) && !lookups.TryTake(caller))
         {
           LogLookupsSpent(logger, caller, lookups.PerSecond);
           await ConversionProblems.WriteAsync(

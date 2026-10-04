@@ -46,6 +46,12 @@ internal sealed class RendererDirectory(
   /// </summary>
   private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
 
+  /// <summary>
+  /// How long an expired record is kept after it expires, so that refreshing it does not count as a
+  /// new tenant's lookup (see <see cref="IsKnown"/>). Missing answers and evictions go at expiry.
+  /// </summary>
+  private static readonly TimeSpan KnownRecordRetention = TimeSpan.FromMinutes(10);
+
   private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
   private readonly ConcurrentDictionary<string, Lazy<Task<RendererRecord?>>> _loads = new(
     StringComparer.Ordinal
@@ -76,12 +82,17 @@ internal sealed class RendererDirectory(
   }
 
   /// <summary>
-  /// Whether looking the tenant up now would read nothing from the store: an answer, a record or
-  /// none, is cached, or a lookup is in flight for it to join.
+  /// Whether the tenant is known to the gateway, so that looking it up costs its caller none of the
+  /// budget for new tenants: an answer, a record or none, is cached, a lookup is in flight for it to
+  /// join, or its last answer was a record, which has since expired. Refreshing a tenant that had a
+  /// renderer reads the store, but such tenants are as many as renderers, which the provisioning
+  /// service's quotas bound, unlike the tenant IDs a caller can make up.
   /// </summary>
-  public bool HasAnswer(string tenantId) =>
-    (_entries.TryGetValue(tenantId, out var cached) && IsFresh(cached))
-    || _loads.ContainsKey(tenantId);
+  public bool IsKnown(string tenantId) =>
+    (
+      _entries.TryGetValue(tenantId, out var cached)
+      && (IsFresh(cached) || (!cached.Evicted && cached.Record is not null))
+    ) || _loads.ContainsKey(tenantId);
 
   /// <summary>
   /// Reads the tenant's record from the store again, past its cached answer and any lookup already
@@ -199,9 +210,14 @@ internal sealed class RendererDirectory(
       return;
     }
 
+    var retention = (long)(KnownRecordRetention.TotalSeconds * timeProvider.TimestampFrequency);
     foreach (var entry in _entries)
     {
-      if (now >= entry.Value.ExpiresAt)
+      var keptUntil =
+        entry.Value.Record is not null && !entry.Value.Evicted
+          ? entry.Value.ExpiresAt + retention
+          : entry.Value.ExpiresAt;
+      if (now >= keptUntil)
       {
         // Only this answer: a newer one may have replaced it meanwhile.
         _entries.TryRemove(entry);
