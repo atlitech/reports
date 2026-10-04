@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Creates, rolls out, and deletes per-customer renderers on Azure Container Apps Sandboxes. Runs off
+    the request path, with rights the public API never holds; see docs/hosted-renderers.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>atli-reports-provisioner</AssemblyName>
+    <RootNamespace>Atli.Reports.Provisioner</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Atli.Reports.Hosting\Atli.Reports.Hosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atli.Reports.Provisioner.Tests" />
+  </ItemGroup>
+</Project>

@@ -30,5 +30,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atli.Reports.Client.Tests" />
+    <!-- The server's gateway mode forwards conversions to renderers in the client's wire format. -->
+    <InternalsVisibleTo Include="Atli.Reports.Server" />
   </ItemGroup>
 </Project>
