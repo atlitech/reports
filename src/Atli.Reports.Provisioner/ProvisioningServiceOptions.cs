@@ -109,7 +109,7 @@ internal sealed class ProvisioningServiceOptions
         );
       }
 
-      if (prefix.Size.Length > 0 && !RendererSizes.TryParse(prefix.Size, out _))
+      if (prefix.Size.Length > 0 && !RendererSize.TryParse(prefix.Size, out _))
       {
         throw new InvalidOperationException(
           $"{SectionName}:TenantPrefixes:{i}:Size is '{prefix.Size}'; use S, M, or L, or leave it "

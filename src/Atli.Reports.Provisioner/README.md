@@ -14,12 +14,12 @@ port, its sandbox ID, that credential, and how many requests the renderer admits
 gateway reads the record to route conversions.
 
 A suspended renderer is woken by the request itself: its port is exposed with on-demand
-activation (`Provisioner:PortActivation`, `OnDemand` by default), so the platform's proxy resumes
+activation (`OnDemand`), so the platform's proxy resumes
 the sandbox and then serves the request. Measured with the server image, an invoice came back in
 about 0.6 to 1.5 seconds from a stopped renderer, and every request of a burst during the wake
-succeeded. The gateway then needs no permission on the sandbox group. With `Manual` activation the
-proxy answers `403 {"error":"Sandbox is not running"}` instead, and the gateway's
-`Wake:Mode=Sandboxes` resumes the sandbox and retries; that remains the fallback.
+succeeded. The gateway needs no permission on the sandbox group. Existing `Manual` ports must be
+[migrated before upgrading the gateway](#migrating-manual-renderer-ports); it no longer resumes
+sandboxes through the data plane.
 
 An anonymous on-demand port lets anyone who learns its URL wake the renderer, and run up its
 compute, before the renderer checks a credential. Set `Provisioner:AllowedSourceCidrs` to the
@@ -35,16 +35,12 @@ address, so its `/32` is the gateway's entry.
 | Provisioner, with `Records:Store` set to `KeyVault` | Key Vault Secrets Officer | The record vault |
 | [Provisioning service](#the-provisioning-service) (`serve`), an identity of its own | The provisioner's two roles: Container Apps SandboxGroup Data Owner, and Key Vault Secrets Officer with a `KeyVault` store | The renderer sandbox group, and the record vault |
 | Gateway | Key Vault Secrets User | The record vault |
-| Gateway, only with `Wake:Mode=Sandboxes` (renderers with `Manual` ports) | A custom role with only `Microsoft.App/sandboxGroups/sandboxes/read` and `Microsoft.App/sandboxGroups/sandboxes/resume/action` | The renderer sandbox group |
 
 Data Owner also allows running commands and reading files in every sandbox of the group, so
-nothing on the request path may hold it. The gateway's custom role cannot create, delete, or
-reconfigure renderers, run commands in them, or read their files. In the
-[production-shaped run](../../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md),
-the gateway's user-assigned identity, holding only that role, the vault role, and `AcrPull` on its
-registry, resumed every `Manual` renderer it was asked to. The renderer sandbox group itself has no
-managed identity. `aca sandboxgroup create` grants Data Owner on the new group to whoever created
-it; remove that assignment once setup is done, so that only the provisioner's identities hold it.
+nothing on the request path may hold it. The gateway holds no sandbox-group role: the port proxy
+activates renderers on demand. The renderer sandbox group itself has no managed identity.
+`aca sandboxgroup create` grants Data Owner on the new group to whoever created it; remove that
+assignment once setup is done, so that only the provisioner's identities hold it.
 
 The provisioner authenticates as the user-assigned managed identity named by
 `Sandboxes:ManagedIdentityClientId` (and `Records:ManagedIdentityClientId` for the vault), or
@@ -57,18 +53,18 @@ minutes to take effect in the
 
 Settings come from `appsettings.json` next to the binary (optional), then environment variables
 named `Provisioner__…`, then command-line flags; each source overrides the one before it.
+`File` and `KeyVault` store names are case-insensitive.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `Provisioner:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region` | Required | The renderer sandbox group: a subscription GUID, Azure resource names, and a region name such as `eastus2` |
 | `Provisioner:Sandboxes:ManagedIdentityClientId` | Empty | A user-assigned identity for the data plane; empty for the default chain |
 | `Provisioner:Records:Store` | Required | `KeyVault`, or `File` for development and tests. One store per renderer sandbox group: every record in it counts as a renderer of this group, so a store shared with another group shows that group's tenants as `missing`, and a `rollout` without `--tenant` recreates them here |
-| `Provisioner:Records:VaultUri` | | For `KeyVault`: the vault, such as `https://contoso.vault.azure.net/` |
+| `Provisioner:Records:VaultUri` | | For `KeyVault`: an absolute HTTPS vault address, such as `https://contoso.vault.azure.net/` |
 | `Provisioner:Records:ManagedIdentityClientId` | Empty | For `KeyVault`: a user-assigned identity for the vault |
 | `Provisioner:Records:Path` | | For `File`: the directory of record files, which only its owner may write to |
 | `Provisioner:DiskImageId` | | The disk image new renderers start from; `--disk-image` overrides it |
 | `Provisioner:Size` | `M` | The size `create` uses: `S` (0.5 vCPU, 1 GiB, one conversion at a time), `M` (1 vCPU, 2 GiB, one), or `L` (2 vCPU, 4 GiB, two) |
-| `Provisioner:PortActivation` | `OnDemand` | What a request to a suspended renderer does: `OnDemand` resumes it; `Manual` leaves that to the gateway |
 | `Provisioner:AllowedSourceCidrs` | Empty; required for `serve` | The source ranges a renderer's port admits, such as `["203.0.113.7/32"]`: the gateway's outbound addresses, and the provisioner's own; empty admits any. At most 100 |
 | `Provisioner:NetworkConnection` | Empty | The renderer group's virtual network connection (`aca sandboxgroup network create --name`) new renderers start in; empty for none. A network whose security group denies the `AzurePlatformDNS` service tag leaves renderers without DNS; see the [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes). Renderers in such a network were ready 1.4 to 3.5 s after the create call started, against 1.2 to 1.3 s without one |
 | `Provisioner:AutoSuspendAfter` | `00:05:00` | Idle time after which the platform suspends a renderer; at most a day |
@@ -117,9 +113,46 @@ gateway's environment behind its NAT gateway, rather than adding an operator's a
 renderer's list. A changed list
 applies to renderers created from then on; `rollout` does not replace renderers on the current disk
 image, so recreate them (`delete`, then `create`) to apply it to existing ones. The same holds for
-`PortActivation` and `NetworkConnection`, and a rollout's replacements take the settings it runs with, not their
-predecessors': a tenant created with a one-off `Manual` override comes back `OnDemand` unless the
-rollout runs with the same override.
+`NetworkConnection`; a rollout's replacements take the settings it runs with, not their
+predecessors'. New ports always activate on demand.
+
+## Migrating Manual renderer ports
+
+Migrate existing `Manual` ports while the old gateway is still running. A new gateway never calls
+the Sandboxes data plane and returns `503 BrowserUnavailable` for a stopped Manual renderer.
+Both the removed `ReportsServer:Gateway:Wake` section (including `Mode=None`) and
+`Provisioner:PortActivation` setting are rejected at startup; remove them rather than changing
+their values. The tenant selector is always `X-Reports-Tenant`; remove any `TenantHeader` setting
+and update callers that used another header.
+
+1. Inventory existing renderer ports and disabled tenants using the provisioner's operator
+   identity. Keep disabled tenants quarantined; resolve them separately rather than including them
+   in a migration rollout. Before returning one to service, replace its Manual port with an
+   OnDemand renderer through the operator's recovery procedure. Preserve each tenant's source
+   CIDRs, size, and network connection.
+2. Upgrade the provisioner and remove `Provisioner:PortActivation`. Configure the original
+   `AllowedSourceCidrs` (including the gateway and readiness probe's addresses) and
+   `NetworkConnection`. Pause `serve` while CLI commands run, as described under
+   [one command at a time](#one-command-at-a-time).
+3. Roll out each enabled tenant to a **different disk image ID** with the existing command:
+
+   ```bash
+   atli-reports-provisioner rollout --tenant contoso --disk-image <new-disk-image-id> --drain 00:02:30
+   ```
+
+   The new port is OnDemand, readiness is checked before the record switches, and the old renderer
+   remains through the drain. Keep the old gateway running until every migrated record has aged
+   past its cache and every old request has drained. A rollout using the same image ID skips an
+   existing renderer; it does not change its port. A same-image migration requires deliberate
+   tenant recreation (`delete`, then `create`), which loses its memory snapshot and interrupts
+   conversions for that tenant.
+4. Verify the new ports have OnDemand activation and their original source restrictions. Stop and
+   then convert through each migrated renderer using the old gateway to verify the port wakes it
+   without a data-plane resume. Resume `serve` with the new image and matching network settings.
+5. Remove the entire `ReportsServer:Gateway:Wake` section and any `TenantHeader` setting, then
+   upgrade the gateway. Remove its old sandbox read/resume role assignment after the old gateway
+   replicas are gone. Keep the gateway's record-store access. Disabled renderers still fail
+   immediately; neither a conversion nor an application delete bypasses the operator's kill switch.
 
 ## Commands
 
@@ -158,7 +191,7 @@ Creates a renderer for a tenant that has none:
    `tenant=<id>`, `size=<S|M|L>`, and `launch=<a new GUID>`. The renderer runs the size's
    conversions at once and queues as many more from the gateway, and accepts request bodies up to
    30 MiB: the gateway's JSON encoding of a body it admitted can grow it up to three times.
-3. Exposes port 8080 anonymously, with `Provisioner:PortActivation`, and admitting only
+3. Exposes port 8080 anonymously, with `OnDemand` activation, and admitting only
    `Provisioner:AllowedSourceCidrs` when it is set. The port URL is public; the renderer's
    credential check is the gate, as the
    [design](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) explains.
@@ -329,8 +362,7 @@ atli-reports-provisioner enable --tenant contoso
 it again, whether a request reaches its on-demand port (`403`) or something resumes it
 (`409 SandboxAdminDisabled`), until `enable`. The record and the sandbox's disk stay, for
 investigation; the tenant's conversions fail meanwhile, with `503` from the gateway at once,
-whether its `Wake:Mode` is `None` or `Sandboxes`. Every sandbox is tried even when one
-fails, and the command then exits with `1`. A sandbox the record names that is labeled for another
+without a retry or replacement. Every sandbox is tried even when one fails, and the command then exits with `1`. A sandbox the record names that is labeled for another
 tenant is left alone. `enable` lets the tenant's sandboxes start again; they stay stopped until a
 request or a resume starts them.
 

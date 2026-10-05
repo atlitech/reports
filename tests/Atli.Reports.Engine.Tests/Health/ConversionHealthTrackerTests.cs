@@ -9,7 +9,7 @@ public class ConversionHealthTrackerTests
   {
     ConversionHealthTracker tracker = new(new ManualTimeProvider());
 
-    await Assert.That(tracker.IsHealthy).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().IsHealthy).IsTrue();
     await Assert.That(tracker.GetHealthStatus().Total).IsEqualTo(0);
   }
 
@@ -19,14 +19,13 @@ public class ConversionHealthTrackerTests
     ConversionHealthTracker tracker = new(new ManualTimeProvider());
 
     tracker.RecordSuccess();
-    tracker.RecordFailure("render failed");
-    tracker.RecordFailure("render failed");
+    tracker.RecordFailure();
+    tracker.RecordFailure();
 
     var status = tracker.GetHealthStatus();
-    await Assert.That(tracker.IsHealthy).IsFalse();
+    await Assert.That(tracker.GetHealthStatus().IsHealthy).IsFalse();
     await Assert.That(status.Successes).IsEqualTo(1);
     await Assert.That(status.Failures).IsEqualTo(2);
-    await Assert.That(status.LastFailureReason).IsEqualTo("render failed");
   }
 
   [Test]
@@ -40,7 +39,7 @@ public class ConversionHealthTrackerTests
 
     time.Advance(TimeSpan.FromSeconds(121));
 
-    await Assert.That(tracker.IsHealthy).IsTrue();
+    await Assert.That(tracker.GetHealthStatus().IsHealthy).IsTrue();
     await Assert.That(tracker.GetHealthStatus().Total).IsEqualTo(0);
   }
 
@@ -54,6 +53,41 @@ public class ConversionHealthTrackerTests
     tracker.RecordSuccess();
 
     await Assert.That(tracker.GetHealthStatus().ConsecutiveFailures).IsEqualTo(0);
+  }
+
+  [Test]
+  public async Task A_snapshot_keeps_its_decision_when_later_conversions_recover()
+  {
+    ConversionHealthTracker tracker = new(new ManualTimeProvider());
+    tracker.RecordFailure();
+    tracker.RecordFailure();
+    tracker.RecordFailure();
+    var failed = tracker.GetHealthStatus();
+
+    tracker.RecordSuccess();
+    tracker.RecordSuccess();
+    tracker.RecordSuccess();
+
+    await Assert.That(failed.IsHealthy).IsFalse();
+    await Assert.That(failed.Failures).IsEqualTo(3);
+    await Assert.That(tracker.GetHealthStatus().IsHealthy).IsTrue();
+  }
+
+  [Test]
+  public async Task An_unbroken_failure_streak_stays_unhealthy_as_older_samples_expire()
+  {
+    ManualTimeProvider time = new();
+    ConversionHealthTracker tracker = new(time);
+    tracker.RecordFailure();
+    time.Advance(TimeSpan.FromSeconds(60));
+    tracker.RecordFailure();
+    time.Advance(TimeSpan.FromSeconds(61));
+    tracker.RecordFailure();
+
+    var status = tracker.GetHealthStatus();
+    await Assert.That(status.Total).IsEqualTo(2);
+    await Assert.That(status.ConsecutiveFailures).IsEqualTo(3);
+    await Assert.That(status.IsHealthy).IsFalse();
   }
 
   /// <summary>

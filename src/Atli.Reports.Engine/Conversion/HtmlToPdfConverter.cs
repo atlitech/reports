@@ -301,7 +301,7 @@ internal sealed class HtmlToPdfConverter(
       )
     )
     {
-      healthTracker.RecordFailure(error.Message);
+      healthTracker.RecordFailure();
     }
   }
 }

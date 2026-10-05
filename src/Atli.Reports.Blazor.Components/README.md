@@ -4,7 +4,8 @@ Razor components for
 [Atli.Reports.Blazor](https://www.nuget.org/packages/Atli.Reports.Blazor) reports:
 
 - `BlazorReportBase`: a base class for report components. Inherit it to receive the files of the
-  configured assets folder as `data:` URIs in `GlobalAssets`, keyed by file name.
+  globally configured assets folder as `data:` URIs in `GlobalAssets`, and per-report assets in
+  `ReportAssets`, both keyed by file name. Intermediate base classes receive both parameters too.
 - `BlazorReportTemplate`: the HTML document every report renders into. It inlines the base
   styles and defines `blazorReport.completed()` for reports that wait for their JavaScript.
 

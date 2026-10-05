@@ -22,10 +22,4 @@ public class BlazorReportOptions
   /// with their own copy of these options.
   /// </summary>
   public PdfOptions PdfOptions { get; set; } = new();
-
-  /// <summary>
-  /// The default settings for reports whose JavaScript must finish before the PDF is printed. Each report
-  /// can override them through <see cref="BlazorReportRegistrationOptions.JavaScriptSettings"/>.
-  /// </summary>
-  public BlazorReportJavaScriptOptions JavaScriptSettings { get; set; } = new();
 }

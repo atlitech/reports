@@ -9,9 +9,6 @@ namespace Atli.Reports.Engine.Health;
 internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
 {
   private const int BufferSize = 20;
-  private const int MinSamples = 3;
-  private const double UnhealthyThreshold = 0.5;
-  private const int ConsecutiveFailureThreshold = 3;
   private static readonly long ExpiryWindowTicks = TimeSpan.FromSeconds(120).Ticks;
 
   private readonly TimestampedResult[] _results = new TimestampedResult[BufferSize];
@@ -20,7 +17,6 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
   private int _count;
   private int _consecutiveFailures;
   private long _lastRecordTicks;
-  private string? _lastFailureReason;
 
   public void RecordSuccess()
   {
@@ -36,7 +32,7 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
     }
   }
 
-  public void RecordFailure(string? reason = null)
+  public void RecordFailure()
   {
     lock (_lock)
     {
@@ -45,7 +41,6 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
 
       _results[_index] = new TimestampedResult(now, false);
       _consecutiveFailures++;
-      _lastFailureReason = reason;
       _lastRecordTicks = now;
       Advance();
     }
@@ -57,7 +52,7 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
     {
       if (_count == 0)
       {
-        return new ConversionHealthStatus(0, 0, 0, 1.0, null, 0);
+        return new ConversionHealthStatus(0, 0, 0, 1.0, 0);
       }
 
       var now = timeProvider.GetTimestamp();
@@ -65,7 +60,7 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
 
       if (elapsed.Ticks > ExpiryWindowTicks)
       {
-        return new ConversionHealthStatus(0, 0, 0, 1.0, null, _consecutiveFailures);
+        return new ConversionHealthStatus(0, 0, 0, 1.0, _consecutiveFailures);
       }
 
       var total = Math.Min(_count, BufferSize);
@@ -96,38 +91,8 @@ internal sealed class ConversionHealthTracker(TimeProvider timeProvider)
         successes,
         failures,
         successRate,
-        _lastFailureReason,
         _consecutiveFailures
       );
-    }
-  }
-
-  public bool IsHealthy
-  {
-    get
-    {
-      var status = GetHealthStatus();
-
-      // No data yet OR stale data (no activity in expiry window) → healthy (deadlock recovery)
-      if (status.Total == 0)
-      {
-        return true;
-      }
-
-      // Enough non-expired samples → use success rate
-      if (status.Total >= MinSamples)
-      {
-        return status.SuccessRate >= UnhealthyThreshold;
-      }
-
-      // Low-traffic: consecutive failures hit threshold → unhealthy
-      if (status.ConsecutiveFailures >= ConsecutiveFailureThreshold)
-      {
-        return false;
-      }
-
-      // Not enough data to determine → healthy
-      return true;
     }
   }
 
@@ -163,6 +128,19 @@ internal sealed record ConversionHealthStatus(
   int Successes,
   int Failures,
   double SuccessRate,
-  string? LastFailureReason,
   int ConsecutiveFailures
-);
+)
+{
+  private const int MinSamples = 3;
+  private const double UnhealthyThreshold = 0.5;
+  private const int ConsecutiveFailureThreshold = 3;
+
+  // Empty/expired samples recover readiness. With few recent samples, retain the failure streak.
+  public bool IsHealthy =>
+    Total == 0
+    || (
+      Total >= MinSamples
+        ? SuccessRate >= UnhealthyThreshold
+        : ConsecutiveFailures < ConsecutiveFailureThreshold
+    );
+}

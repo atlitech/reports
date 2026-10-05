@@ -57,12 +57,6 @@ internal sealed class ListingRecordStore(IRendererRecordStore inner) : IRenderer
     return inner.GetAsync(tenantId, cancellationToken);
   }
 
-  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken)
-  {
-    Interlocked.Increment(ref _fullListings);
-    return inner.ListAsync(cancellationToken);
-  }
-
   public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken)
   {
     Interlocked.Increment(ref _fullListings);

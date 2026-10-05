@@ -6,7 +6,6 @@ using System.Text;
 using System.Text.Json;
 using Atli.Reports.Engine.Tests.Support;
 using Atli.Reports.Hosting.Renderers;
-using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -27,9 +26,6 @@ internal static class GatewayHost
 
   /// <summary>The name of the gateway's renderer <see cref="HttpClient"/>.</summary>
   public const string RendererClientName = "Atli.Reports.Gateway.Renderers";
-
-  /// <summary>The name of the gateway's Sandboxes data-plane <see cref="HttpClient"/>.</summary>
-  public const string SandboxesClientName = "Atli.Reports.Gateway.Sandboxes";
 
   /// <summary>
   /// Starts a gateway with anonymous callers (the caller ID <c>anonymous</c>, allowed for tests) and
@@ -153,17 +149,6 @@ internal static class GatewayHost
   /// <summary>A renderer credential for tests that do not check it.</summary>
   public const string TestKey = "reports-000000000000.test-renderer-key";
 
-  /// <summary>Waking through Sandboxes; the group settings only need to be complete.</summary>
-  public static string[] SandboxesWake(string timeout = "00:00:10") =>
-    [
-      "--ReportsServer:Gateway:Wake:Mode=Sandboxes",
-      $"--ReportsServer:Gateway:Wake:Timeout={timeout}",
-      "--ReportsServer:Gateway:Wake:Sandboxes:SubscriptionId=00000000-0000-0000-0000-000000000000",
-      "--ReportsServer:Gateway:Wake:Sandboxes:ResourceGroup=reports",
-      "--ReportsServer:Gateway:Wake:Sandboxes:SandboxGroup=renderers",
-      "--ReportsServer:Gateway:Wake:Sandboxes:Region=eastus2",
-    ];
-
   /// <summary>Reads, checks, and disposes a problem details response.</summary>
   public static async Task<Problem> ReadProblemAsync(HttpResponseMessage response)
   {
@@ -241,12 +226,25 @@ internal sealed class FakeRecordStore : IRendererRecordStore
     return record;
   }
 
-  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken)
+  public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken)
   {
     Interlocked.Increment(ref _lists);
     return Failure is { } failure
-      ? Task.FromException<IReadOnlyList<RendererRecord>>(failure)
-      : Task.FromResult<IReadOnlyList<RendererRecord>>([.. Records.Values]);
+      ? Task.FromException<IReadOnlyList<string>>(failure)
+      : Task.FromResult<IReadOnlyList<string>>([.. Records.Keys.Order(StringComparer.Ordinal)]);
+  }
+
+  public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken)
+  {
+    Interlocked.Increment(ref _lists);
+    return Failure is { } failure
+      ? Task.FromException<RendererRecordListing>(failure)
+      : Task.FromResult(
+        new RendererRecordListing(
+          [.. Records.Values.OrderBy(record => record.TenantId, StringComparer.Ordinal)],
+          []
+        )
+      );
   }
 
   public Task PutAsync(RendererRecord record, CancellationToken cancellationToken) =>
@@ -300,82 +298,6 @@ internal sealed class HeldLookup
     _read.TrySetResult();
     await _release.Task;
   }
-}
-
-/// <summary>
-/// A Sandboxes data plane that only reads and resumes sandboxes. <paramref name="state"/> is a
-/// sandbox's state (<see langword="null"/> for one that does not exist), or throws; each resume runs
-/// <paramref name="onResume"/>, which wakes the fake platform or fails, and answers with the state
-/// after it. <paramref name="stoppedReason"/>, when given, is why a sandbox last stopped. Calls are
-/// counted and timed, and note the ambient activity they ran under.
-/// </summary>
-internal sealed class FakeSandboxesClient(
-  Func<string, string?> state,
-  Func<string, CancellationToken, Task> onResume,
-  Func<string, string?>? stoppedReason = null
-) : ISandboxesClient
-{
-  private int _resumes;
-  private int _gets;
-
-  public int Resumes => Volatile.Read(ref _resumes);
-
-  public int Gets => Volatile.Read(ref _gets);
-
-  /// <summary>When each resume call started.</summary>
-  public ConcurrentQueue<DateTimeOffset> ResumeTimes { get; } = new();
-
-  /// <summary>The <see cref="Activity.Current"/> of each call, null included.</summary>
-  public ConcurrentQueue<Activity?> Activities { get; } = new();
-
-  public async Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken)
-  {
-    Interlocked.Increment(ref _resumes);
-    ResumeTimes.Enqueue(DateTimeOffset.UtcNow);
-    Activities.Enqueue(Activity.Current);
-    await onResume(sandboxId, cancellationToken);
-    return new SandboxView
-    {
-      Id = sandboxId,
-      State = state(sandboxId) ?? throw new SandboxesException("Gone.", HttpStatusCode.NotFound),
-      StoppedReason = stoppedReason?.Invoke(sandboxId),
-    };
-  }
-
-  public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken)
-  {
-    Interlocked.Increment(ref _gets);
-    Activities.Enqueue(Activity.Current);
-    return Task.FromResult(
-      state(sandboxId) is { } current
-        ? new SandboxView
-        {
-          Id = sandboxId,
-          State = current,
-          StoppedReason = stoppedReason?.Invoke(sandboxId),
-        }
-        : (SandboxView?)null
-    );
-  }
-
-  public Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only reads and resumes sandboxes.");
-
-  public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only resumes sandboxes.");
-
-  public Task DeleteAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only resumes sandboxes.");
-
-  public Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken) =>
-    throw new NotSupportedException("The gateway only resumes sandboxes.");
-
-  public Task<SandboxView> AddPortAsync(
-    string sandboxId,
-    int port,
-    bool anonymous,
-    CancellationToken cancellationToken
-  ) => throw new NotSupportedException("The gateway only resumes sandboxes.");
 }
 
 /// <summary>

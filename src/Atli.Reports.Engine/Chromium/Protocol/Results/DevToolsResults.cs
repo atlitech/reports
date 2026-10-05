@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atli.Reports.Engine.Chromium.Protocol.Results;
@@ -57,12 +56,6 @@ internal sealed class EvaluateResult
 /// </summary>
 internal sealed class RemoteObject
 {
-  [JsonPropertyName("type")]
-  public string? Type { get; set; }
-
-  [JsonPropertyName("value")]
-  public JsonElement Value { get; set; }
-
   [JsonPropertyName("description")]
   public string? Description { get; set; }
 }

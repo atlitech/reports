@@ -1,6 +1,3 @@
+@inherits ApplicationReportBase
+<img alt="logo" src="@GlobalAssets.GetValueOrDefault("logo.png")" />
 <img alt="stamp" src="@ReportAssets.GetValueOrDefault("stamp.png")" />
-
-@code {
-  [Parameter]
-  public Dictionary<string, string> ReportAssets { get; set; } = [];
-}

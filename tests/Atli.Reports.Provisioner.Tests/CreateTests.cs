@@ -251,19 +251,6 @@ public class CreateTests
   }
 
   [Test]
-  public async Task Exposes_a_manual_port_when_configured_to()
-  {
-    using Provisioning provisioning = new();
-    provisioning.Options.PortActivation = "manual";
-
-    await provisioning.Provisioner.CreateAsync("contoso", RendererSize.Medium, "disk-1", TestToken);
-
-    await Assert
-      .That(provisioning.Journal.Matching("port"))
-      .IsEquivalentTo(["port sandbox-1 8080 anonymous Manual"]);
-  }
-
-  [Test]
   public async Task A_record_write_that_failed_after_writing_keeps_the_renderer()
   {
     using Provisioning provisioning = new();

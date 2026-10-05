@@ -51,13 +51,6 @@ internal sealed class ProvisionerOptions
   public TimeSpan DrainDelay { get; set; } = TimeSpan.FromSeconds(150);
 
   /// <summary>
-  /// What a request to a stopped renderer's port does: <c>OnDemand</c> (the default) resumes it, so
-  /// the gateway needs no resume permission; <c>Manual</c> leaves resuming to the gateway's
-  /// <c>Wake:Mode=Sandboxes</c>.
-  /// </summary>
-  public string PortActivation { get; set; } = nameof(SandboxPortActivation.OnDemand);
-
-  /// <summary>
   /// The source ranges a renderer's port admits, in CIDR notation, such as the gateway's outbound
   /// addresses; empty admits any address. With an anonymous on-demand port, anyone who learns the
   /// URL can otherwise wake the renderer, and run up its compute, before its credential is checked.
@@ -80,23 +73,13 @@ internal sealed class ProvisionerOptions
   /// <summary><see cref="Size"/>, parsed; <see cref="Load"/> has checked it.</summary>
   public RendererSize RendererSize => RendererSize.Parse(Size);
 
-  /// <summary><see cref="PortActivation"/>, parsed; <see cref="Load"/> has checked it.</summary>
-  public SandboxPortActivation Activation =>
-    string.Equals(
-      PortActivation,
-      nameof(SandboxPortActivation.Manual),
-      StringComparison.OrdinalIgnoreCase
-    )
-      ? SandboxPortActivation.Manual
-      : SandboxPortActivation.OnDemand;
-
   /// <summary>How the renderer's port is exposed; <see cref="Load"/> has checked it.</summary>
   public SandboxPortOptions PortOptions =>
     new()
     {
       // The port URL is public; the renderer admits only the gateway's credential.
       Anonymous = true,
-      Activation = Activation,
+      Activation = SandboxPortActivation.OnDemand,
       AllowedSourceCidrs = [.. AllowedSourceCidrs],
     };
 
@@ -107,6 +90,12 @@ internal sealed class ProvisionerOptions
   public static ProvisionerOptions Load(IConfiguration configuration)
   {
     var section = configuration.GetSection(SectionName);
+    if (section["PortActivation"] is not null)
+    {
+      throw new InvalidOperationException(
+        "Provisioner:PortActivation was removed. New renderer ports always activate OnDemand; remove the setting and migrate existing Manual ports before upgrading the gateway."
+      );
+    }
     // Before binding: TimeSpan reads a bare number as days, so DrainDelay=150 would bind as
     // 150 days. Durations must say hh:mm:ss.
     CheckDuration(section, nameof(AutoSuspendAfter));
@@ -118,28 +107,10 @@ internal sealed class ProvisionerOptions
     ProvisionerOptions options = new();
     section.Bind(options);
     options.Sandboxes.Validate();
-    if (!RendererSizes.TryParse(options.Size, out _))
+    if (!RendererSize.TryParse(options.Size, out _))
     {
       throw new InvalidOperationException(
         $"{SectionName}:Size is '{options.Size}'; use S, M, or L."
-      );
-    }
-
-    if (
-      !string.Equals(
-        options.PortActivation,
-        nameof(SandboxPortActivation.OnDemand),
-        StringComparison.OrdinalIgnoreCase
-      )
-      && !string.Equals(
-        options.PortActivation,
-        nameof(SandboxPortActivation.Manual),
-        StringComparison.OrdinalIgnoreCase
-      )
-    )
-    {
-      throw new InvalidOperationException(
-        $"{SectionName}:PortActivation is '{options.PortActivation}'; use OnDemand or Manual."
       );
     }
 

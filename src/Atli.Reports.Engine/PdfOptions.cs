@@ -64,15 +64,14 @@ public sealed class PdfOptions
 
   /// <summary>
   /// Whether the browser writes a tagged (accessible) PDF, with a structure tree that screen readers
-  /// and text extraction use. <see langword="null"/> (the default) leaves the choice to the browser;
-  /// current Chromium versions tag by default.
+  /// and text extraction use. Defaults to <see langword="true"/>.
   /// </summary>
   /// <remarks>
   /// Tagging costs size and time: for long, table-heavy documents the tagged PDF can be many times
   /// larger and noticeably slower to produce. Set <see langword="false"/> when accessibility is not
   /// needed and size or speed matters; set <see langword="true"/> to require tagging.
   /// </remarks>
-  public bool? GenerateTaggedPdf { get; set; }
+  public bool GenerateTaggedPdf { get; set; } = true;
 
   /// <summary>
   /// The name of a global JavaScript function the engine exposes to the page, which the page calls to

@@ -62,10 +62,7 @@ internal static class EngineActivities
         options.Orientation == PageOrientation.Landscape ? "landscape" : "portrait"
       );
       activity.SetTag(Tags.WaitForSignal, options.WaitForSignal is not null);
-      if (options.GenerateTaggedPdf is { } tagged)
-      {
-        activity.SetTag(Tags.Tagged, tagged);
-      }
+      activity.SetTag(Tags.Tagged, options.GenerateTaggedPdf);
     }
 
     return activity;

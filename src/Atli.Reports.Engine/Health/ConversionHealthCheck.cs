@@ -26,7 +26,7 @@ internal sealed class ConversionHealthCheck(ConversionHealthTracker tracker) : I
       description += $" — {status.ConsecutiveFailures} consecutive failure(s)";
     }
 
-    if (tracker.IsHealthy)
+    if (status.IsHealthy)
     {
       return Task.FromResult(HealthCheckResult.Healthy(description));
     }

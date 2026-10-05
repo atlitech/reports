@@ -26,8 +26,6 @@ public sealed class ReportService(
   IHtmlToPdfConverter converter
 ) : IReportService
 {
-  internal const string CompletedSignalName = "atliReportCompleted";
-
   /// <inheritdoc />
   public async ValueTask<OneOf<Success, ConversionError>> GenerateReport<T>(
     Stream destination,
@@ -67,14 +65,7 @@ public sealed class ReportService(
   )
     where T : class
   {
-    var javaScriptSettings =
-      blazorReport.JavaScriptSettings ?? reportRegistry.DefaultJavaScriptSettings;
-    var pdfOptions = (blazorReport.PdfOptions ?? reportRegistry.DefaultPdfOptions).Clone();
-    if (javaScriptSettings.WaitForCompletedSignal)
-    {
-      pdfOptions.WaitForSignal = CompletedSignalName;
-      pdfOptions.WaitTimeout = javaScriptSettings.CompletedSignalTimeout;
-    }
+    var pdfOptions = blazorReport.PdfOptions.Clone();
 
     var html = await RenderAsync(
       typeof(BlazorReportTemplate),
@@ -136,7 +127,7 @@ public sealed class ReportService(
 
     Dictionary<string, object?> childComponentParameters = [];
     if (
-      blazorReport.Component.BaseType == typeof(BlazorReportBase)
+      typeof(BlazorReportBase).IsAssignableFrom(blazorReport.Component)
       && reportRegistry.GlobalAssets.Count != 0
     )
     {

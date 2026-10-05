@@ -49,12 +49,10 @@ public class NetworkBoundaryTests
   }
 
   [Test]
-  public async Task Top_level_navigation_cannot_reach_loopback()
+  public async Task Document_networking_is_disabled_by_default()
   {
     await using TestHttpServer server = new();
-    await using var engine = TestEngine.Create(options =>
-      options.Network.Mode = ReportsEngineNetworkMode.Disabled
-    );
+    await using var engine = TestEngine.Create();
     var converter = engine.GetRequiredService<IHtmlToPdfConverter>();
 
     var result = await converter.ConvertAsync(

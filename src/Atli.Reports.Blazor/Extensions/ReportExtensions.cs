@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
 namespace Atli.Reports.Blazor.Extensions;
@@ -32,11 +31,9 @@ public static partial class ReportExtensions
   )
     where T : ComponentBase
   {
-    using var serviceScope = app.ApplicationServices.CreateScope();
-    var options = GetReportRegistrationOptions(serviceScope, setupAction);
-    var reportRegistry = serviceScope.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
+    var reportRegistry = app.ApplicationServices.GetRequiredService<BlazorReportRegistry>();
 
-    reportRegistry.AddReport<T>(options);
+    reportRegistry.AddReport<T>(setupAction);
 
     return app;
   }
@@ -55,8 +52,9 @@ public static partial class ReportExtensions
   /// 400 for <see cref="ConversionErrorKind.InvalidRequest"/>; 503 for <see cref="ConversionErrorKind.Busy"/>
   /// and <see cref="ConversionErrorKind.BrowserUnavailable"/>; 504 for <see cref="ConversionErrorKind.Timeout"/>
   /// and <see cref="ConversionErrorKind.SignalTimeout"/>; 499 for <see cref="ConversionErrorKind.Canceled"/>;
-  /// and 500 otherwise. When it fails after part of the report was sent, the request fails with an
-  /// exception and the response ends incomplete.
+  /// 422 for <see cref="ConversionErrorKind.PolicyDenied"/>; and 500 for rendering failures or
+  /// upstream authentication/authorization errors. When it fails after part of the report was sent,
+  /// the request fails with an exception and the response ends incomplete.
   /// </remarks>
   public static RouteHandlerBuilder MapBlazorReport<T>(
     this IEndpointRouteBuilder endpoints,
@@ -64,11 +62,8 @@ public static partial class ReportExtensions
   )
     where T : ComponentBase
   {
-    using var serviceScope = endpoints.ServiceProvider.CreateScope();
-    var options = GetReportRegistrationOptions(serviceScope, setupAction);
-
-    var reportRegistry = serviceScope.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
-    var blazorReport = reportRegistry.AddReport<T>(options);
+    var reportRegistry = endpoints.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
+    var blazorReport = reportRegistry.AddReport<T>(setupAction);
 
     return endpoints
       .MapPost(
@@ -97,8 +92,9 @@ public static partial class ReportExtensions
   /// 400 for <see cref="ConversionErrorKind.InvalidRequest"/>; 503 for <see cref="ConversionErrorKind.Busy"/>
   /// and <see cref="ConversionErrorKind.BrowserUnavailable"/>; 504 for <see cref="ConversionErrorKind.Timeout"/>
   /// and <see cref="ConversionErrorKind.SignalTimeout"/>; 499 for <see cref="ConversionErrorKind.Canceled"/>;
-  /// and 500 otherwise. When it fails after part of the report was sent, the request fails with an
-  /// exception and the response ends incomplete.
+  /// 422 for <see cref="ConversionErrorKind.PolicyDenied"/>; and 500 for rendering failures or
+  /// upstream authentication/authorization errors. When it fails after part of the report was sent,
+  /// the request fails with an exception and the response ends incomplete.
   /// </remarks>
   public static RouteHandlerBuilder MapBlazorReport<T, TD>(
     this IEndpointRouteBuilder endpoints,
@@ -107,11 +103,8 @@ public static partial class ReportExtensions
     where T : ComponentBase
     where TD : class
   {
-    using var serviceScope = endpoints.ServiceProvider.CreateScope();
-    var options = GetReportRegistrationOptions(serviceScope, setupAction);
-
-    var reportRegistry = serviceScope.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
-    var blazorReport = reportRegistry.AddReport<T>(options);
+    var reportRegistry = endpoints.ServiceProvider.GetRequiredService<BlazorReportRegistry>();
+    var blazorReport = reportRegistry.AddReport<T>(setupAction);
 
     return endpoints
       .MapPost(
@@ -126,37 +119,52 @@ public static partial class ReportExtensions
       .WithReportResponses(blazorReport);
   }
 
-  /// <summary>
-  /// Gets the HTTP status code that report endpoints answer with for a failed conversion.
-  /// </summary>
-  internal static int GetStatusCode(ConversionErrorKind kind)
-  {
-    return kind switch
+  private static (int StatusCode, string Title) GetProblem(ConversionErrorKind kind) =>
+    kind switch
     {
-      ConversionErrorKind.InvalidRequest => StatusCodes.Status400BadRequest,
-      ConversionErrorKind.Busy => StatusCodes.Status503ServiceUnavailable,
-      ConversionErrorKind.BrowserUnavailable => StatusCodes.Status503ServiceUnavailable,
-      ConversionErrorKind.Timeout => StatusCodes.Status504GatewayTimeout,
-      ConversionErrorKind.SignalTimeout => StatusCodes.Status504GatewayTimeout,
-      ConversionErrorKind.Canceled => StatusCodes.Status499ClientClosedRequest,
-      _ => StatusCodes.Status500InternalServerError,
+      ConversionErrorKind.InvalidRequest => (
+        StatusCodes.Status400BadRequest,
+        "The report could not be converted to PDF."
+      ),
+      ConversionErrorKind.Busy => (
+        StatusCodes.Status503ServiceUnavailable,
+        "The report engine is busy. Try again later."
+      ),
+      ConversionErrorKind.BrowserUnavailable => (
+        StatusCodes.Status503ServiceUnavailable,
+        "The browser that renders reports is unavailable."
+      ),
+      ConversionErrorKind.Timeout => (
+        StatusCodes.Status504GatewayTimeout,
+        "The browser that renders reports did not respond in time."
+      ),
+      ConversionErrorKind.SignalTimeout => (
+        StatusCodes.Status504GatewayTimeout,
+        "The report did not signal that its JavaScript completed in time."
+      ),
+      ConversionErrorKind.Canceled => (
+        StatusCodes.Status499ClientClosedRequest,
+        "The request was canceled."
+      ),
+      // These errors refer to the app's upstream converter credentials, not the report caller.
+      ConversionErrorKind.Unauthorized => (
+        StatusCodes.Status500InternalServerError,
+        "The report service could not authenticate with the renderer."
+      ),
+      ConversionErrorKind.Forbidden => (
+        StatusCodes.Status500InternalServerError,
+        "The report service is not permitted to use the renderer."
+      ),
+      ConversionErrorKind.PolicyDenied => (
+        StatusCodes.Status422UnprocessableEntity,
+        "The report attempted to access a resource forbidden by the rendering policy."
+      ),
+      ConversionErrorKind.RenderFailed => (
+        StatusCodes.Status500InternalServerError,
+        "The report could not be rendered."
+      ),
+      _ => (StatusCodes.Status500InternalServerError, "The report could not be rendered."),
     };
-  }
-
-  private static string GetProblemTitle(ConversionErrorKind kind)
-  {
-    return kind switch
-    {
-      ConversionErrorKind.InvalidRequest => "The report could not be converted to PDF.",
-      ConversionErrorKind.Busy => "The report engine is busy. Try again later.",
-      ConversionErrorKind.BrowserUnavailable => "The browser that renders reports is unavailable.",
-      ConversionErrorKind.Timeout => "The browser that renders reports did not respond in time.",
-      ConversionErrorKind.SignalTimeout =>
-        "The report did not signal that its JavaScript completed in time.",
-      ConversionErrorKind.Canceled => "The request was canceled.",
-      _ => "The report could not be rendered.",
-    };
-  }
 
   private static RouteHandlerBuilder WithReportResponses(
     this RouteHandlerBuilder builder,
@@ -167,6 +175,7 @@ public static partial class ReportExtensions
     return builder
       .Produces<Stream>(StatusCodes.Status200OK, blazorReport.GetContentType())
       .ProducesProblem(StatusCodes.Status400BadRequest)
+      .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
       .ProducesProblem(StatusCodes.Status500InternalServerError)
       .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
       .ProducesProblem(StatusCodes.Status504GatewayTimeout);
@@ -209,25 +218,12 @@ public static partial class ReportExtensions
 
     response.Headers.Remove(HeaderNames.ContentDisposition);
     response.ContentType = null;
+    var (statusCode, title) = GetProblem(error.Kind);
     return Results.Problem(
-      statusCode: GetStatusCode(error.Kind),
-      title: GetProblemTitle(error.Kind)
+      statusCode: statusCode,
+      title: title,
+      extensions: new Dictionary<string, object?> { ["kind"] = error.Kind.ToString() }
     );
-  }
-
-  private static BlazorReportRegistrationOptions GetReportRegistrationOptions(
-    IServiceScope serviceScope,
-    Action<BlazorReportRegistrationOptions>? setupAction = null
-  )
-  {
-    BlazorReportRegistrationOptions options = new();
-    var globalOptions = serviceScope
-      .ServiceProvider.GetRequiredService<IOptionsSnapshot<BlazorReportOptions>>()
-      .Value;
-    options.PdfOptions = globalOptions.PdfOptions.Clone();
-    options.JavaScriptSettings = globalOptions.JavaScriptSettings.Clone();
-    setupAction?.Invoke(options);
-    return options;
   }
 
   [LoggerMessage(

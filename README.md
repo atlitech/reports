@@ -11,6 +11,9 @@ browser over the Chrome DevTools Protocol, and turns Blazor components into PDF 
 > `BlazorReports` and `BlazorReports.Components` will be deprecated in favor of
 > `Atli.Reports.Blazor`.
 
+Source integrations upgrading from earlier commits should follow the
+[0.26 migration guide](docs/migration-0.26.md).
+
 ## What's inside
 
 | Component | What it does | How you get it |
@@ -182,7 +185,7 @@ the HTML, and prints at the moment it is called. A page that does not call it wi
 
 - **Server:** send `"options": {"waitForSignal": "pdfReady", "waitTimeoutSeconds": 10}`. A missing
   signal is `422 Unprocessable Content`.
-- **Blazor:** set `JavaScriptSettings.WaitForCompletedSignal = true` (see
+- **Blazor:** set `PdfOptions.WaitForSignal = "reportReady"` (see
   [below](#waiting-for-a-reports-javascript)), and call `blazorReport.completed()` from the report.
 
 The [JavaScript completion signal guide](docs/engine/reactive-signal-approach.md)
@@ -247,8 +250,12 @@ The [configuration reference](docs/engine/architecture.md#configuration-referenc
 key. Invalid values fail with an `OptionsValidationException` that lists every problem, at host
 start-up or when the engine is first used.
 
-Per-conversion settings live on `PdfOptions`. The defaults print a portrait US Letter page with
-0.4 inch margins and backgrounds. You can set `Orientation`, `PaperSize` (`Letter`, `Legal`, `A4`,
+Document networking is disabled by default in both embedded applications and the server. Inline
+assets work without configuration; use an explicit allowlist for external assets (see
+[document networking](docs/security.md#document-networking)).
+
+Per-conversion settings live on `PdfOptions`. The defaults print a tagged portrait US Letter page
+with 0.4 inch margins and backgrounds. You can set `Orientation`, `PaperSize` (`Letter`, `Legal`, `A4`,
 `A3`, or a custom size in inches), `Margins`, `PrintBackground`, `Scale`, `HeaderTemplate`,
 `FooterTemplate`, `DisplayHeaderFooter`, `PageRanges`, `PreferCssPageSize`, `GenerateTaggedPdf`,
 `WaitForSignal`, and `WaitTimeout`.
@@ -409,8 +416,8 @@ PDF to be printed only once that work is done:
 ```csharp
 app.MapBlazorReport<SalesChart, SalesData>(options =>
 {
-  options.JavaScriptSettings.WaitForCompletedSignal = true;
-  options.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromSeconds(10);
+  options.PdfOptions.WaitForSignal = "reportReady";
+  options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(10);
 });
 ```
 
@@ -424,16 +431,17 @@ app.MapBlazorReport<SalesChart, SalesData>(options =>
 </script>
 ```
 
-Set the same properties on `AddBlazorReports(options => options.JavaScriptSettings...)` to make
+Set the same properties on `AddBlazorReports(options => options.PdfOptions...)` to make
 them the default for every report. A report that does not call `blazorReport.completed()` within
-`CompletedSignalTimeout` (default 30 seconds) fails with `504 Gateway Timeout`.
+`WaitTimeout` (default 30 seconds) fails with `504 Gateway Timeout`.
 [`examples/SimpleReportServer`](examples/SimpleReportServer) includes such a report.
 
 ### Errors, OpenAPI, and authorization
 
 When a report fails before any of it was sent, the endpoint answers with problem details. The
 status depends on the cause: 400 for an invalid request, 503 when the engine is busy or the
-browser is unavailable, 504 for timeouts, and 500 for rendering failures. A failure after part
+browser is unavailable, 504 for timeouts, 422 for denied document networking, and 500 for rendering
+failures or an upstream service credential problem. Problem details include a structured `kind`. A failure after part
 of the PDF was sent aborts the response, so a client never mistakes a truncated PDF for a
 complete one.
 
@@ -518,7 +526,6 @@ aspire stop
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
 | `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |
 | `tailwind-css` | Generates the Tailwind example's stylesheet (`bun install`, then the Tailwind CLI) and exits |
-| `gotenberg` | [Gotenberg](https://gotenberg.dev) 8.37 with Chromium, for side-by-side comparisons. Off unless you start with `aspire start -- --Gotenberg:Enabled=true` |
 
 Ports are assigned when the AppHost starts; the dashboard and `aspire describe` list each
 resource's URLs. The examples run the engine in-process with the Chrome or Chromium installed on

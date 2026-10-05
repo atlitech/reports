@@ -133,3 +133,9 @@ create its sandbox fails to launch with an error that says so; see
   engine as an HTTP service in a container
 - [Atli.Reports.Client](https://www.nuget.org/packages/Atli.Reports.Client): the same
   `IHtmlToPdfConverter`, converting on that server
+
+Document networking is disabled by default. Inline assets work without configuration; configure
+`options.Network.Mode = ReportsEngineNetworkMode.AllowList` with approved public origins for
+external assets, or explicitly select `Unrestricted` for trusted documents. See the repository's
+[networking guide](https://github.com/atlitech/reports/blob/main/docs/security.md#document-networking).
+`PdfOptions.GenerateTaggedPdf` defaults to `true`; set it to `false` to request an untagged PDF.

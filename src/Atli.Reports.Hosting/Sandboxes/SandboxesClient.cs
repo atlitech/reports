@@ -361,28 +361,6 @@ public sealed class SandboxesClient : ISandboxesClient
 
   /// <inheritdoc />
   /// <remarks>
-  /// Adding a port the sandbox already exposes with the same access succeeds. A port that is not
-  /// anonymous needs another way in (one user's email), which this call does not set, so the data
-  /// plane refuses <paramref name="anonymous"/> <see langword="false"/> with <c>400</c>. The port's
-  /// activation mode is the data plane's default, <c>Manual</c>: a request to a stopped sandbox
-  /// gets <c>403</c> until it is resumed.
-  /// </remarks>
-  public Task<SandboxView> AddPortAsync(
-    string sandboxId,
-    int port,
-    bool anonymous,
-    CancellationToken cancellationToken
-  ) =>
-    AddPortCoreAsync(
-      sandboxId,
-      port,
-      new SandboxPortOptions { Anonymous = anonymous },
-      nameActivation: false,
-      cancellationToken
-    );
-
-  /// <inheritdoc />
-  /// <remarks>
   /// <para>
   /// The source ranges become IP access rules that allow them, in order, at most
   /// <see cref="SandboxPortOptions.MaxCidrsPerRule"/> to a rule, with every other address denied.
@@ -393,23 +371,10 @@ public sealed class SandboxesClient : ISandboxesClient
   /// <c>409</c> stands.
   /// </para>
   /// </remarks>
-  public Task<SandboxView> AddPortAsync(
+  public async Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
     SandboxPortOptions options,
-    CancellationToken cancellationToken
-  ) => AddPortCoreAsync(sandboxId, port, options, nameActivation: true, cancellationToken);
-
-  /// <summary>
-  /// Adds the port as <paramref name="options"/> say. Without <paramref name="nameActivation"/>
-  /// the request names no activation, which the data plane takes as <c>Manual</c>, as requests did
-  /// before activation modes.
-  /// </summary>
-  private async Task<SandboxView> AddPortCoreAsync(
-    string sandboxId,
-    int port,
-    SandboxPortOptions options,
-    bool nameActivation,
     CancellationToken cancellationToken
   )
   {
@@ -422,11 +387,8 @@ public sealed class SandboxesClient : ISandboxesClient
       {
         Port = port,
         Auth = new PortAuthWire { Anonymous = options.Anonymous },
-        ActivationMode = nameActivation
-          ? options.Activation == SandboxPortActivation.OnDemand
-            ? "OnDemand"
-            : "Manual"
-          : null,
+        ActivationMode =
+          options.Activation == SandboxPortActivation.OnDemand ? "OnDemand" : "Manual",
         IpAccessControl = ToIpAccessControl(options.AllowedSourceCidrs),
       },
       SandboxesJsonContext.Default.AddPortRequest

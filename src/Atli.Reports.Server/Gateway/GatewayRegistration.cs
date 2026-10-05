@@ -1,10 +1,8 @@
 using System.Diagnostics;
 using System.Net;
 using Atli.Reports.Engine;
-using Atli.Reports.Hosting;
 using Atli.Reports.Hosting.Provisioning;
 using Atli.Reports.Hosting.Renderers;
-using Atli.Reports.Hosting.Sandboxes;
 using Atli.Reports.Server.Endpoints;
 using Atli.Reports.Server.Security;
 using Microsoft.AspNetCore.OpenApi;
@@ -26,12 +24,25 @@ internal static partial class GatewayRegistration
   /// <summary>
   /// Binds and validates <c>ReportsServer:Gateway</c> and registers the gateway in place of the
   /// engine. Runs after the application's <c>configure</c> callback, so test doubles registered
-  /// there (a record store, a Sandboxes client) take precedence.
+  /// there (a record store or provisioning client) take precedence.
   /// </summary>
   public static void AddReportsGateway(this WebApplicationBuilder builder)
   {
+    var section = builder.Configuration.GetSection(GatewayOptions.SectionName);
+    if (section.GetSection("Wake").Exists())
+    {
+      throw new InvalidOperationException(
+        "ReportsServer:Gateway:Wake was removed. Renderer ports must activate OnDemand; migrate existing Manual ports and remove the Wake section before upgrading the gateway."
+      );
+    }
+    if (section["TenantHeader"] is not null)
+    {
+      throw new InvalidOperationException(
+        $"ReportsServer:Gateway:TenantHeader was removed. Use the {GatewayOptions.TenantHeader} header and remove the setting."
+      );
+    }
     var settings = new GatewayOptions();
-    builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(settings);
+    section.Bind(settings);
     settings.Validate();
     // Under Authentication:Mode=None every caller is "anonymous", so whoever reaches the gateway
     // converts as that caller's tenants.
@@ -79,36 +90,6 @@ internal static partial class GatewayRegistration
       // The gateway logs its own outcomes with tenant and sandbox IDs.
       .RemoveAllLoggers();
 
-    if (settings.Wake.Enabled)
-    {
-      services
-        .AddHttpClient(SandboxWaker.HttpClientName)
-        .ConfigurePrimaryHttpMessageHandler(() =>
-          new SocketsHttpHandler
-          {
-            AllowAutoRedirect = false,
-            UseCookies = false,
-            // The Sandboxes client keeps this HttpClient for the process's lifetime; recycling
-            // connections keeps it following DNS changes.
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            // No trace context or baggage reaches the Azure data plane: a resume serves every
-            // request waiting for that sandbox, and none of their callers' context belongs there.
-            ActivityHeadersPropagator = null,
-          }
-        )
-        .RemoveAllLoggers();
-      services.TryAddSingleton<ISandboxesClient>(provider => new SandboxesClient(
-        provider.GetRequiredService<IHttpClientFactory>().CreateClient(SandboxWaker.HttpClientName),
-        AzureCredentials.Create(
-          string.IsNullOrWhiteSpace(settings.Wake.Sandboxes.ManagedIdentityClientId)
-            ? null
-            : settings.Wake.Sandboxes.ManagedIdentityClientId
-        ),
-        settings.Wake.Sandboxes
-      ));
-      services.AddSingleton<SandboxWaker>();
-    }
-
     if (settings.Provisioning.Enabled)
     {
       services
@@ -136,7 +117,6 @@ internal static partial class GatewayRegistration
       settings,
       provider.GetRequiredService<TimeProvider>(),
       provider.GetRequiredService<ILogger<RendererGateway>>(),
-      provider.GetService<SandboxWaker>(),
       provider.GetService<TenantProvisioning>()
     ));
     // Not TryAdd: in gateway mode nothing converts in this process.
@@ -173,7 +153,7 @@ internal static partial class GatewayRegistration
               operation.Parameters.Add(
                 new OpenApiParameter
                 {
-                  Name = settings.TenantHeader,
+                  Name = GatewayOptions.TenantHeader,
                   In = ParameterLocation.Header,
                   Required = false,
                   Description =
@@ -202,10 +182,9 @@ internal static partial class GatewayRegistration
   /// </summary>
   public static void UseReportsGateway(this WebApplication app)
   {
-    // Built now rather than on the first request, so a store, Sandboxes client, or provisioning
+    // Built now rather than on the first request, so a store or provisioning
     // client that cannot be created fails the start.
     _ = app.Services.GetRequiredService<IRendererRecordStore>();
-    _ = app.Services.GetService<SandboxWaker>();
     _ = app.Services.GetService<TenantProvisioning>();
 
     var settings = app.Services.GetRequiredService<GatewayOptions>();
@@ -240,7 +219,10 @@ internal static partial class GatewayRegistration
         // authentication is explicitly None and AllowAnonymousCallers admits that.
         var caller =
           context.User.FindFirst(ReportsSecurityRegistration.CallerClaim)?.Value ?? "anonymous";
-        var resolution = membership.Resolve(caller, context.Request.Headers[settings.TenantHeader]);
+        var resolution = membership.Resolve(
+          caller,
+          context.Request.Headers[GatewayOptions.TenantHeader]
+        );
         switch (resolution.Rejection)
         {
           case TenantRejection.NoTenants:
@@ -268,8 +250,8 @@ internal static partial class GatewayRegistration
               new ConversionError(
                 ConversionErrorKind.InvalidRequest,
                 resolution.Rejection == TenantRejection.HeaderRequired
-                  ? $"Name the product tenant in the {settings.TenantHeader} header."
-                  : $"Send the {settings.TenantHeader} header once."
+                  ? $"Name the product tenant in the {GatewayOptions.TenantHeader} header."
+                  : $"Send the {GatewayOptions.TenantHeader} header once."
               )
             );
             return;
