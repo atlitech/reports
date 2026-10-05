@@ -261,8 +261,16 @@ internal sealed class ConfigurationRendererRecordStore(GatewayOptions options)
   public Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken) =>
     Task.FromResult(_records.GetValueOrDefault(tenantId));
 
-  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-    Task.FromResult<IReadOnlyList<RendererRecord>>([.. _records.Values]);
+  public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken) =>
+    Task.FromResult<IReadOnlyList<string>>([.. _records.Keys.Order(StringComparer.Ordinal)]);
+
+  public Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken) =>
+    Task.FromResult(
+      new RendererRecordListing(
+        [.. _records.Values.OrderBy(record => record.TenantId, StringComparer.Ordinal)],
+        []
+      )
+    );
 
   public Task PutAsync(RendererRecord record, CancellationToken cancellationToken) =>
     throw new NotSupportedException("The configuration renderer store is read-only.");

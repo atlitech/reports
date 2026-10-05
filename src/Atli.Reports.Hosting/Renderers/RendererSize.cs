@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Atli.Reports.Hosting.Renderers;
 
 /// <summary>
@@ -32,14 +34,23 @@ public sealed record RendererSize(
 
   /// <summary>Returns the size named <paramref name="name"/> (case-insensitive).</summary>
   public static RendererSize Parse(string name) =>
-    name?.ToUpperInvariant() switch
+    TryParse(name, out var size)
+      ? size
+      : throw new ArgumentException(
+        $"Unknown renderer size '{name}'. Use S, M, or L.",
+        nameof(name)
+      );
+
+  /// <summary>Finds the named size (case-insensitive), without throwing for an unknown name.</summary>
+  public static bool TryParse(string? name, [NotNullWhen(true)] out RendererSize? size)
+  {
+    size = name?.ToUpperInvariant() switch
     {
       "S" => Small,
       "M" => Medium,
       "L" => Large,
-      _ => throw new ArgumentException(
-        $"Unknown renderer size '{name}'. Use S, M, or L.",
-        nameof(name)
-      ),
+      _ => null,
     };
+    return size is not null;
+  }
 }

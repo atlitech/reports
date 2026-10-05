@@ -91,7 +91,7 @@ public sealed class PdfOptionsRequest
   public bool? PreferCSSPageSize { get; set; }
 
   /// <summary>
-  /// Whether the browser writes a tagged (accessible) PDF. Omitted leaves the choice to the browser.
+  /// Whether the browser writes a tagged (accessible) PDF. Defaults to true when omitted or null.
   /// </summary>
   public bool? GenerateTaggedPdf { get; set; }
 

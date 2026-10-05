@@ -22,6 +22,9 @@ public class ReportEndpointTests
   [Arguments(ConversionErrorKind.SignalTimeout, HttpStatusCode.GatewayTimeout)]
   [Arguments(ConversionErrorKind.Canceled, (HttpStatusCode)499)]
   [Arguments(ConversionErrorKind.RenderFailed, HttpStatusCode.InternalServerError)]
+  [Arguments(ConversionErrorKind.Unauthorized, HttpStatusCode.InternalServerError)]
+  [Arguments(ConversionErrorKind.Forbidden, HttpStatusCode.InternalServerError)]
+  [Arguments(ConversionErrorKind.PolicyDenied, HttpStatusCode.UnprocessableEntity)]
   public async Task Conversion_errors_become_problem_responses(
     ConversionErrorKind kind,
     HttpStatusCode expectedStatus
@@ -43,6 +46,7 @@ public class ReportEndpointTests
     var problem = await response.Content.ReadFromJsonAsync<ProblemBody>();
     await Assert.That(problem?.Status).IsEqualTo((int)expectedStatus);
     await Assert.That(problem?.Title).IsNotNull();
+    await Assert.That(problem?.Kind).IsEqualTo(kind.ToString());
   }
 
   [Test]
@@ -138,5 +142,5 @@ public class ReportEndpointTests
     );
   }
 
-  private sealed record ProblemBody(int? Status, string? Title);
+  private sealed record ProblemBody(int? Status, string? Title, string? Kind);
 }

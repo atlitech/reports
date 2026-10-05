@@ -111,7 +111,7 @@ internal sealed class PdfOptionsBody
   [JsonPropertyName("preferCSSPageSize")]
   public bool PreferCssPageSize { get; init; }
 
-  public bool? GenerateTaggedPdf { get; init; }
+  public bool GenerateTaggedPdf { get; init; } = true;
 
   public string? WaitForSignal { get; init; }
 

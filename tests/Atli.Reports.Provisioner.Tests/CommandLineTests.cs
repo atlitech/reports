@@ -125,11 +125,9 @@ public class CommandLineTests
     "1.00:00:01",
     "Provisioner:AutoSuspendAfter is 1.00:00:01; the most is 1.00:00:00."
   )]
-  [Arguments(
-    "Provisioner:PortActivation",
-    "Always",
-    "Provisioner:PortActivation is 'Always'; use OnDemand or Manual."
-  )]
+  [Arguments("Provisioner:PortActivation", "Manual", "Provisioner:PortActivation was removed.")]
+  [Arguments("Provisioner:PortActivation", "OnDemand", "Provisioner:PortActivation was removed.")]
+  [Arguments("Provisioner:PortActivation", "Always", "Provisioner:PortActivation was removed.")]
   [Arguments(
     "Provisioner:AllowedSourceCidrs:0",
     "203.0.113.7",
@@ -176,7 +174,6 @@ public class CommandLineTests
             ["Provisioner:DrainDelay"] = "01:00:00",
             ["Provisioner:ReadyTimeout"] = "00:15:00",
             ["Provisioner:AutoSuspendAfter"] = "1.00:00:00",
-            ["Provisioner:PortActivation"] = "manual",
             ["Provisioner:AllowedSourceCidrs:0"] = "203.0.113.7/32",
             ["Provisioner:AllowedSourceCidrs:1"] = "2001:db8::/48",
             ["Provisioner:NetworkConnection"] = "renderers",
@@ -198,7 +195,7 @@ public class CommandLineTests
     await Assert.That(options!.DrainDelay).IsEqualTo(TimeSpan.FromHours(1));
     await Assert.That(options.ReadyTimeout).IsEqualTo(TimeSpan.FromMinutes(15));
     await Assert.That(options.AutoSuspendAfter).IsEqualTo(TimeSpan.FromDays(1));
-    await Assert.That(options.Activation).IsEqualTo(SandboxPortActivation.Manual);
+    await Assert.That(options.PortOptions.Activation).IsEqualTo(SandboxPortActivation.OnDemand);
     await Assert
       .That(options.PortOptions.AllowedSourceCidrs)
       .IsEquivalentTo(["203.0.113.7/32", "2001:db8::/48"]);

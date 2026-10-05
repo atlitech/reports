@@ -42,6 +42,64 @@ public class GatewayConfigurationTests
   }
 
   [Test]
+  [Arguments("file")]
+  [Arguments("FILE")]
+  public async Task File_store_names_follow_the_shared_case_insensitive_contract(string store)
+  {
+    await using var app = ReportsServerApplication.Create([
+      .. Valid()
+        .Where(argument =>
+          !argument.StartsWith("--ReportsServer:Gateway:Records:", StringComparison.Ordinal)
+        ),
+      $"--ReportsServer:Gateway:Records:Store={store}",
+      $"--ReportsServer:Gateway:Records:Path={Path.GetTempPath()}",
+    ]);
+
+    await Assert
+      .That(app.Services.GetRequiredService<IRendererRecordStore>())
+      .IsTypeOf<FileRendererRecordStore>();
+  }
+
+  [Test]
+  [Arguments("keyvault")]
+  [Arguments("KEYVAULT")]
+  public async Task Key_vault_store_names_follow_the_shared_case_insensitive_contract(string store)
+  {
+    await using var app = ReportsServerApplication.Create([
+      .. Valid()
+        .Where(argument =>
+          !argument.StartsWith("--ReportsServer:Gateway:Records:", StringComparison.Ordinal)
+        ),
+      $"--ReportsServer:Gateway:Records:Store={store}",
+      "--ReportsServer:Gateway:Records:VaultUri=https://contoso.vault.azure.net/",
+    ]);
+
+    await Assert
+      .That(app.Services.GetRequiredService<IRendererRecordStore>())
+      .IsTypeOf<KeyVaultRendererRecordStore>();
+  }
+
+  [Test]
+  public async Task The_gateway_requires_https_for_key_vault_even_when_http_renderers_are_allowed()
+  {
+    var failure = await Assert
+      .That(() =>
+        ReportsServerApplication.Create([
+          .. Valid()
+            .Where(argument =>
+              !argument.StartsWith("--ReportsServer:Gateway:Records:", StringComparison.Ordinal)
+            ),
+          "--ReportsServer:Gateway:AllowHttpRenderers=true",
+          "--ReportsServer:Gateway:Records:Store=keyvault",
+          "--ReportsServer:Gateway:Records:VaultUri=http://contoso.vault.azure.net/",
+        ])
+      )
+      .Throws<InvalidOperationException>();
+
+    await Assert.That(failure!.Message).Contains("HTTPS");
+  }
+
+  [Test]
   [Arguments("--ReportsServer:Mode=gateway", "ReportsServer:Mode")]
   [Arguments("--ReportsServer:Mode=Proxy", "ReportsServer:Mode")]
   [Arguments("--ReportsServer:Gateway:Tenants:0:CallerId=", "CallerId")]
@@ -50,12 +108,13 @@ public class GatewayConfigurationTests
   [Arguments("--ReportsServer:Gateway:Tenants:1:CallerId=anonymous", "unique")]
   [Arguments("--ReportsServer:Gateway:Tenants:0:Tenants:1=readiness-probe", "reserves")]
   [Arguments("--ReportsServer:Gateway:Records:Renderers:0:TenantId=readiness-probe", "TenantId")]
+  [Arguments("--ReportsServer:Gateway:TenantHeader=X-Reports-Tenant", "TenantHeader was removed")]
   [Arguments("--ReportsServer:Gateway:TenantHeader=X Tenant", "TenantHeader")]
   [Arguments("--ReportsServer:Gateway:TenantHeader=X-Reports-Api-Key", "TenantHeader")]
-  [Arguments("--ReportsServer:Gateway:Records:Store=", "Records:Store")]
-  [Arguments("--ReportsServer:Gateway:Records:Store=Redis", "Records:Store")]
-  [Arguments("--ReportsServer:Gateway:Records:Store=File", "Records:Path")]
-  [Arguments("--ReportsServer:Gateway:Records:Store=KeyVault", "Records:VaultUri")]
+  [Arguments("--ReportsServer:Gateway:Records:Store=", "Records configuration")]
+  [Arguments("--ReportsServer:Gateway:Records:Store=Redis", "Records configuration")]
+  [Arguments("--ReportsServer:Gateway:Records:Store=File", "needs Path")]
+  [Arguments("--ReportsServer:Gateway:Records:Store=KeyVault", "needs VaultUri")]
   [Arguments("--ReportsServer:Gateway:Records:CacheDuration=-00:00:01", "CacheDuration")]
   [Arguments("--ReportsServer:Gateway:Records:Renderers:0:TenantId=ACME", "TenantId")]
   [Arguments(
@@ -78,9 +137,10 @@ public class GatewayConfigurationTests
     "--ReportsServer:Gateway:Records:Renderers:0:MaxConcurrentRequests=0",
     "MaxConcurrentRequests"
   )]
-  [Arguments("--ReportsServer:Gateway:Wake:Mode=Always", "Wake:Mode")]
-  [Arguments("--ReportsServer:Gateway:Wake:Mode=Sandboxes", "Wake:Sandboxes")]
-  [Arguments("--ReportsServer:Gateway:Wake:Timeout=00:00:00", "Wake:Timeout")]
+  [Arguments("--ReportsServer:Gateway:Wake:Mode=None", "Wake was removed")]
+  [Arguments("--ReportsServer:Gateway:Wake:Mode=Always", "Wake was removed")]
+  [Arguments("--ReportsServer:Gateway:Wake:Mode=Sandboxes", "Wake was removed")]
+  [Arguments("--ReportsServer:Gateway:Wake:Timeout=00:00:00", "Wake was removed")]
   [Arguments("--ReportsServer:Gateway:RendererTimeout=00:00:00", "RendererTimeout")]
   [Arguments("--ReportsServer:Gateway:MaxPdfBytes=1023", "MaxPdfBytes")]
   [Arguments(

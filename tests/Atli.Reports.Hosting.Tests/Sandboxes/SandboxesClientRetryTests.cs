@@ -134,7 +134,12 @@ public class SandboxesClientRetryTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var add = sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    var add = sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
     sandboxes.Clock.Advance(await sandboxes.Clock.NextTimerAsync(TestToken));
     var sandbox = await add;
 
@@ -239,7 +244,12 @@ public class SandboxesClientRetryTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var add = sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    var add = sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
     sandboxes.Clock.Advance(await sandboxes.Clock.NextTimerAsync(TestToken));
     await add;
 

@@ -137,7 +137,7 @@ does not need a managed identity or a mounted Kubernetes service-account token.
 
 ## Document networking
 
-The server defaults to `ReportsEngine:Network:Mode=Disabled`. Inline HTML, CSS, JavaScript, and
+The embedded engine and server default to `ReportsEngine:Network:Mode=Disabled`. Inline HTML, CSS, JavaScript, and
 data URI assets still work. Intercepted external requests and unsupported browser channels fail
 the conversion with `PolicyDenied` (`422`). Chromium can reject some URLs, such as local files,
 before an observable request occurs; those assets remain absent from an otherwise successful PDF.
@@ -147,11 +147,12 @@ A conversion request cannot override the host's network policy.
 | --- | --- |
 | `Disabled` | Reject external document requests. Prefer self-contained reports. |
 | `AllowList` | Fetch approved public HTTP(S) assets through a bounded broker. |
-| `Unrestricted` | Browser networking follows the host; explicit opt-in on the server. |
+| `Unrestricted` | Browser networking follows the host; explicit opt-in for trusted documents. |
 
-The embedded engine retains `Unrestricted` as its compatibility default. Set a restricted mode
-explicitly when embedding. Remote mode uses the server's settings; configuring the idle engine
-inside a client application does not change the report server's policy.
+For embedded reports that need external assets, configure `AllowList` with approved public origins,
+or explicitly select `Unrestricted` for trusted documents that need unrestricted host networking.
+Remote mode uses the server's settings; configuring the idle engine inside a client application
+does not change the report server's policy.
 
 ```text
 ReportsEngine__Network__Mode=AllowList

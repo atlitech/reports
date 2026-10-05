@@ -83,6 +83,7 @@ public class RequestBodyTests
           "scale": 1,
           "displayHeaderFooter": false,
           "preferCSSPageSize": false,
+          "generateTaggedPdf": true,
           "waitTimeoutSeconds": 30
         }
       }

@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using System.Text;
 using Atli.Reports.Engine.Tests.Support;
 using Atli.Reports.Hosting.Provisioning;
-using Atli.Reports.Hosting.Sandboxes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -452,38 +451,25 @@ public class GatewayProvisioningTests
   }
 
   [Test]
-  public async Task A_manual_renderer_whose_sandbox_is_gone_is_replaced_and_the_conversion_resent()
+  public async Task A_disabled_renderer_fails_without_being_replaced()
   {
-    // A Manual port answers for its stopped sandbox, and the data plane no longer knows it.
-    await using var gone = await FakeRenderer.StartAsync(NotRunningAsync);
-    await using var replacement = await FakeRenderer.StartAsync(context =>
-      FakeRenderer.WritePdfAsync(context, "%PDF-1.7 replacement")
-    );
+    // Disabled on-demand ports answer not-running. Never turn that into provisioning or a retry.
+    await using var disabled = await FakeRenderer.StartAsync(NotRunningAsync);
     await using var service = await FakeProvisioningService.StartAsync(tenant =>
-      Record(tenant, replacement)
+      Record(tenant, disabled)
     );
-    service.Store.Records[Tenant] = Record(Tenant, gone) with { SandboxId = "sandbox-gone" };
-    service.OnEnsure = async (context, tenant) =>
-    {
-      service.Store.Records[tenant] = Record(tenant, replacement);
-      await FakeProvisioningService.WriteEnsuredAsync(context, tenant, true);
-    };
-    FakeSandboxesClient sandboxes = new(_ => null, (_, _) => Task.CompletedTask);
-    await using var under = await StartAsync(
-      service,
-      SandboxesWake(),
-      builder => builder.Services.AddSingleton<ISandboxesClient>(sandboxes)
-    );
+    var record = Record(Tenant, disabled) with { SandboxId = "sandbox-disabled" };
+    service.Store.Records[Tenant] = record;
+    await using var under = await StartAsync(service);
 
-    using var response = await under.ConvertAsync(Tenant);
+    var problem = await ReadProblemAsync(await under.ConvertAsync(Tenant));
 
-    await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-    await Assert
-      .That(await response.Content.ReadAsStringAsync(TestToken))
-      .IsEqualTo("%PDF-1.7 replacement");
-    await Assert.That(service.Ensures).IsEqualTo(1);
-    await Assert.That(sandboxes.Resumes).IsEqualTo(0);
-    await Assert.That(under.Logs.WithEventId(55)).HasSingleItem();
+    await Assert.That(problem.Status).IsEqualTo(503);
+    await Assert.That(problem.Kind).IsEqualTo("BrowserUnavailable");
+    await Assert.That(service.Ensures).IsEqualTo(0);
+    await Assert.That(disabled.Requests).HasSingleItem();
+    await Assert.That(service.Store.Records[Tenant]).IsEqualTo(record);
+    await Assert.That(under.Logs.WithEventId(50)).HasSingleItem();
   }
 
   [Test]

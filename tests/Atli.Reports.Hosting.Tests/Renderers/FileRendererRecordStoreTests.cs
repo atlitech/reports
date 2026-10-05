@@ -170,7 +170,7 @@ public sealed class FileRendererRecordStoreTests : IDisposable
     await File.WriteAllTextAsync(Path.Combine(Directory, "Not_A_Tenant.json"), "{", TestToken);
     await File.WriteAllTextAsync(Path.Combine(Directory, "acme.json.bak"), "{", TestToken);
 
-    var records = await store.ListAsync(TestToken);
+    var records = (await store.ListWithUnreadableAsync(TestToken)).Records;
 
     await Assert
       .That(records.Select(record => record.TenantId))
@@ -182,7 +182,9 @@ public sealed class FileRendererRecordStoreTests : IDisposable
   {
     FileRendererRecordStore store = new(Directory);
 
-    await Assert.That((await store.ListAsync(TestToken)).Count).IsEqualTo(0);
+    await Assert
+      .That(((await store.ListWithUnreadableAsync(TestToken)).Records).Count)
+      .IsEqualTo(0);
     await Assert.That(await store.GetAsync("acme", TestToken)).IsNull();
     await store.DeleteAsync("acme", TestToken);
     await Assert.That(System.IO.Directory.Exists(Directory)).IsFalse();
@@ -228,7 +230,9 @@ public sealed class FileRendererRecordStoreTests : IDisposable
     var listing = await store.ListWithUnreadableAsync(TestToken);
 
     await Assert.That(listing.Records).IsEquivalentTo([Records.Acme()]);
-    await Assert.That(await store.ListAsync(TestToken)).IsEquivalentTo([Records.Acme()]);
+    await Assert
+      .That((await store.ListWithUnreadableAsync(TestToken)).Records)
+      .IsEquivalentTo([Records.Acme()]);
     await Assert
       .That(listing.Unreadable.Select(record => record.TenantId))
       .IsEquivalentTo(["bogus", "globex"], CollectionOrdering.Matching);
@@ -285,7 +289,7 @@ public sealed class FileRendererRecordStoreTests : IDisposable
       .Throws<UnauthorizedAccessException>();
     await Assert.That(exception!.Message).Contains("is writable by other users");
     await Assert
-      .That(async () => await store.ListAsync(TestToken))
+      .That(async () => (await store.ListWithUnreadableAsync(TestToken)).Records)
       .Throws<UnauthorizedAccessException>();
     await Assert
       .That(async () => await store.PutAsync(Records.Acme(), TestToken))

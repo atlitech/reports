@@ -9,13 +9,6 @@ public interface IRendererRecordStore
   Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken);
 
   /// <summary>
-  /// Returns every record. A record the store cannot read (damaged, or holding another tenant's
-  /// record) is left out rather than failing the whole list; <see cref="ListWithUnreadableAsync"/>
-  /// names them.
-  /// </summary>
-  Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken);
-
-  /// <summary>
   /// Creates or replaces the tenant's record in one step, so a reader sees the old record or the new
   /// one, never a mix.
   /// </summary>
@@ -27,19 +20,13 @@ public interface IRendererRecordStore
   /// <summary>
   /// Returns the tenant ID of every record, in ordinal order, reading as little as the store can:
   /// a Key Vault store lists secret names without reading any value. It includes tenants whose
-  /// record <see cref="ListAsync"/> would leave out as unreadable.
+  /// record cannot be read.
   /// </summary>
   /// <remarks>
   /// For a readiness check that asks whether the store answers: it neither reads every credential
-  /// nor fails because one record is damaged. Stores written before this member existed return the
-  /// tenants of <see cref="ListAsync"/>.
+  /// nor fails because one record is damaged.
   /// </remarks>
-  async Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken) =>
-    [
-      .. (await ListAsync(cancellationToken))
-        .Select(record => record.TenantId)
-        .Order(StringComparer.Ordinal),
-    ];
+  Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken);
 
   /// <summary>
   /// Returns every record it can read, and names each one it cannot, with the reason. Failures of
@@ -47,10 +34,9 @@ public interface IRendererRecordStore
   /// </summary>
   /// <remarks>
   /// The provisioner reports unreadable records, and never deletes a renderer whose record it could
-  /// not read. Stores written before this member existed report none.
+  /// not read.
   /// </remarks>
-  async Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken) =>
-    new(await ListAsync(cancellationToken), []);
+  Task<RendererRecordListing> ListWithUnreadableAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>What <see cref="IRendererRecordStore.ListWithUnreadableAsync"/> found.</summary>

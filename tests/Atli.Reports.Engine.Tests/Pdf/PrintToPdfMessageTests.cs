@@ -17,6 +17,7 @@ public class PrintToPdfMessageTests
     await Assert.That((bool)message.Parameters["printBackground"]).IsTrue();
     await Assert.That(message.Parameters["scale"]).IsEqualTo(1.0);
     await Assert.That(message.Parameters["transferMode"]).IsEqualTo("ReturnAsStream");
+    await Assert.That((bool)message.Parameters["generateTaggedPDF"]).IsTrue();
     await Assert.That(message.Parameters.ContainsKey("headerTemplate")).IsFalse();
     await Assert.That(message.Parameters.ContainsKey("displayHeaderFooter")).IsFalse();
     await Assert.That(message.Parameters.ContainsKey("pageRanges")).IsFalse();
@@ -38,6 +39,7 @@ public class PrintToPdfMessageTests
       DisplayHeaderFooter = true,
       PageRanges = "1-2",
       PreferCssPageSize = true,
+      GenerateTaggedPdf = false,
     };
 
     var parameters = ChromiumPdfGenerator.CreatePrintToPdfMessage(options).Parameters;
@@ -56,5 +58,6 @@ public class PrintToPdfMessageTests
     await Assert.That((bool)parameters["displayHeaderFooter"]).IsTrue();
     await Assert.That(parameters["pageRanges"]).IsEqualTo("1-2");
     await Assert.That((bool)parameters["preferCSSPageSize"]).IsTrue();
+    await Assert.That((bool)parameters["generateTaggedPDF"]).IsFalse();
   }
 }

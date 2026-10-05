@@ -4,8 +4,7 @@ with the provisioning service creating each workspace's renderer on its first co
 
 Everything runs in a resource group of its own, rg-atli-reports-workspaces-<UTC stamp> (and the
 Container Apps environment's infrastructure group, <that>-cae), tagged
-purpose=atli-reports-workspaces, plus one custom role definition whose only assignable scope is
-that group. `cleanup` deletes all of it and checks.
+purpose=atli-reports-workspaces. `cleanup` deletes all of it and checks.
 
   setup       The renderer network (no DNS: a DNS server address nothing holds, and a network
               security group denying the AzurePlatformDNS service tag); the gateway's network (a
@@ -15,7 +14,7 @@ that group. `cleanup` deletes all of it and checks.
               records; a Basic registry with the server and provisioner images (`az acr build`); two
               user-assigned identities: the provisioning service's (Data Owner on the renderer
               group, Key Vault Secrets Officer, AcrPull) and the gateway's (AcrPull, Key Vault
-              Secrets User, a custom resume-only role on the renderer group); a workload-profiles
+              Secrets User); a workload-profiles
               Container Apps environment on the gateway subnet; the provisioning service
               (`serve`, internal ingress only, one replica) and the gateway (external ingress, two
               callers with tenant prefixes, Provisioning:Mode=OnDemand) as Container Apps; the
@@ -45,7 +44,7 @@ that group. `cleanup` deletes all of it and checks.
 Added during the run, for what it found:
 
   rebuild            A new build round of the server image and disks a and b (round 1's build
-                     context was extracted under umask 077; contexts now get normalize_modes).
+                     context was extracted under umask 077; the server Dockerfile now sets readable modes).
   listing            The raw GET sandboxes answer: 25 of the group's sandboxes on 2026-02-01-preview.
   listbug            The provisioner at f03e90e with more than 25 sandboxes: `list`, `disable` of a
                      tenant off the first page, and deletes through the gateway (`listbug delete`
@@ -73,7 +72,6 @@ import socket
 import ssl
 import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -81,12 +79,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import production as prod  # noqa: E402  production.py's helpers: Context, Rest, Aca, arm, redaction
+import common  # noqa: E402
+from common import elapsed, utc  # noqa: E402
 
-spike = prod.spike
-from production import az, az_json, elapsed, log, run, sensitive, utc  # noqa: E402
+spike = common.spike
+runtime = common.Runtime(public_addresses=True)
+az, az_json, run = runtime.az, runtime.az_json, runtime.run
+log, sensitive, redact = runtime.log, runtime.sensitive, runtime.redact
+_IPV4 = common._IPV4
+_private = common.private_ipv4
 
-REPO = prod.REPO
+REPO = common.REPO
 PURPOSE = "atli-reports-workspaces"
 PREFIX = "rg-atli-reports-workspaces-"
 SUBSCRIPTION_NAME = "Atli"
@@ -102,41 +105,15 @@ LEFTOVER = "appa-leftover"
 
 
 # ---------------------------------------------------------------------------------------------
-# Redaction: production.py's, plus port URLs and public IPv4 addresses
-# ---------------------------------------------------------------------------------------------
-
-_base_redact = prod.redact
-_PORT_URL = re.compile(r"https?://[A-Za-z0-9.-]+\.adcproxy\.io[^\s\"',)]*")
-_IPV4 = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])")
-
-
-def _private(match):
-    a, b = int(match.group(1)), int(match.group(2))
-    text = match.group(0)
-    return (a in (10, 127, 0) or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168)
-            or (a == 169 and b == 254) or text == "168.63.129.16" or a > 255)
-
-
-def redact(text):
-    text = _base_redact(text)
-    text = _PORT_URL.sub("<port URL>", text)
-    return _IPV4.sub(lambda m: m.group(0) if _private(m) else "<ip>", text)
-
-
-prod.redact = redact  # production.py's log, run, and record use it from now on
-
-
-# ---------------------------------------------------------------------------------------------
 # Context
 # ---------------------------------------------------------------------------------------------
 
-class Ctx(prod.Context):
+class Ctx(common.Context):
     def __init__(self, options):
-        super().__init__(options)
+        super().__init__(options, runtime)
         account = az_json("account", "show")
         if account["name"] != SUBSCRIPTION_NAME or account["id"] != self.subscription:
             raise RuntimeError(f"The Azure CLI's subscription is not {SUBSCRIPTION_NAME}, or not the run's.")
-        prod.CONTEXT_WORK[0] = str(self.work)
         self.results.setdefault("notes", [])
 
     def note(self, text):
@@ -193,31 +170,8 @@ def stats(values):
 # Key Vault over REST, with a cached token
 # ---------------------------------------------------------------------------------------------
 
-_tokens = {}
-_tokens_lock = threading.Lock()
-
-
-def access_token(resource, name):
-    """A token for `resource`, reused until 5 minutes before it expires. The Azure CLI hands out
-    its own cached token, which may have little time left, so its expiry decides, not a fixed age."""
-    with _tokens_lock:
-        cached = _tokens.get(resource)
-        if cached and time.time() < cached[1] - 300:
-            return cached[0]
-    view = az_json("account", "get-access-token", "--resource", resource)
-    token, expires = view["accessToken"], float(view.get("expires_on") or time.time() + 600)
-    sensitive(name, token)
-    with _tokens_lock:
-        _tokens[resource] = (token, expires)
-    return token
-
-
 def vault_token():
-    return access_token("https://vault.azure.net", "vault token")
-
-
-# production.py's Rest and listings use it: its own cache assumed 30 minutes.
-prod.data_plane_token = lambda: access_token("https://dynamicsessions.io", "data-plane token")
+    return runtime.access_token("https://vault.azure.net", "vault token")
 
 
 def vault_request(url):
@@ -259,10 +213,10 @@ def read_record(ctx, tenant):
     key = record.pop("apiKey", None)
     if key:
         sensitive(f"renderer key {tenant} {str(record.get('sandboxId', ''))[:8]}", key)
-        with prod._lock:
+        with ctx.secret.lock:
             keys = list(ctx.secret.get("renderer_keys", []))
-        if key not in keys:
-            ctx.secret.save(renderer_keys=keys + [key])
+            if key not in keys:
+                ctx.secret.save(renderer_keys=keys + [key])
     record["disk"] = ctx.disk_name(record.pop("diskImageId", None))
     record.pop("url", None)
     return record
@@ -284,7 +238,7 @@ PAGED_API_VERSION = "2026-09-01-preview"
 
 
 def _get_json(url):
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {prod.data_plane_token()}"})
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {runtime.data_plane_token()}"})
     for attempt in range(5):
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
@@ -314,7 +268,7 @@ def list_sandboxes(ctx, key="rend"):
 
 def list_sandboxes_unpaged(ctx, key="rend"):
     """GET sandboxes as the hosting library's SandboxesClient sends it at f03e90e."""
-    return _get_json(f"{ctx.rest(key).base}/sandboxes?api-version={prod.API_VERSION}")
+    return _get_json(f"{ctx.rest(key).base}/sandboxes?api-version={common.API_VERSION}")
 
 
 def renderer_tenant(sandbox):
@@ -394,11 +348,10 @@ def setup(ctx):
                        workspace=f"log-atli-ws-{stamp}", identity_gateway=f"id-atli-ws-gateway-{stamp}",
                        identity_service=f"id-atli-ws-provisioner-{stamp}",
                        environment=f"cae-atli-ws-{stamp}",
-                       role_name=f"Atli Reports Sandbox Resumer (workspaces {stamp})",
                        service_settings=dict(SERVICE_DEFAULTS))
     if ctx.state["resource_group"] != PREFIX + ctx.state["stamp"]:
         raise RuntimeError("The state names a resource group that is not this run's.")
-    prod.check_laptop_ip(ctx)
+    common.check_laptop_ip(ctx)
     me = az("ad", "signed-in-user", "show", "--query", "id", "-o", "tsv").stdout.strip()
     ctx.secret.save(my_object_id=me)
     sensitive("my object id", me)
@@ -451,36 +404,7 @@ def setup(ctx):
 
 
 def setup_networks(ctx):
-    rg = ctx.rg
-    if "renderer_subnet_id" not in ctx.state:
-        log("Renderer network: DNS server 10.42.0.4 (unused), subnet 10.42.1.0/24, NSG denying AzurePlatformDNS")
-        az("network", "nsg", "create", "-g", rg, "-n", "nsg-renderers", "-l", ctx.region, *tags(), "-o", "none")
-        az("network", "nsg", "rule", "create", "-g", rg, "--nsg-name", "nsg-renderers", "-n", "deny-azure-platform-dns",
-           "--priority", "100", "--direction", "Outbound", "--access", "Deny", "--protocol", "*",
-           "--source-address-prefixes", "*", "--source-port-ranges", "*",
-           "--destination-address-prefixes", "AzurePlatformDNS", "--destination-port-ranges", "*", "-o", "none")
-        az("network", "vnet", "create", "-g", rg, "-n", "vnet-renderers", "-l", ctx.region, *tags(),
-           "--address-prefixes", "10.42.0.0/16", "--dns-servers", "10.42.0.4", "-o", "none")
-        subnet = az_json("network", "vnet", "subnet", "create", "-g", rg, "--vnet-name", "vnet-renderers",
-                         "-n", "renderers", "--address-prefixes", "10.42.1.0/24",
-                         "--delegations", "Microsoft.App/environments", "--network-security-group", "nsg-renderers")
-        ctx.state.save(renderer_subnet_id=subnet["id"])
-    if "gateway_subnet_id" not in ctx.state:
-        log("Gateway network: subnet 10.60.0.0/27 with a NAT gateway and a static Standard public address")
-        az("network", "public-ip", "create", "-g", rg, "-n", "pip-gateway", "-l", ctx.region, *tags(),
-           "--sku", "Standard", "--allocation-method", "Static", "--version", "IPv4", "-o", "none")
-        az("network", "nat", "gateway", "create", "-g", rg, "-n", "nat-gateway", "-l", ctx.region, *tags(),
-           "--public-ip-addresses", "pip-gateway", "--idle-timeout", "4", "-o", "none")
-        az("network", "vnet", "create", "-g", rg, "-n", "vnet-gateway", "-l", ctx.region, *tags(),
-           "--address-prefixes", "10.60.0.0/16", "-o", "none")
-        subnet = az_json("network", "vnet", "subnet", "create", "-g", rg, "--vnet-name", "vnet-gateway",
-                         "-n", "gateway", "--address-prefixes", "10.60.0.0/27",
-                         "--delegations", "Microsoft.App/environments", "--nat-gateway", "nat-gateway")
-        ctx.state.save(gateway_subnet_id=subnet["id"])
-    nat_ip = az("network", "public-ip", "show", "-g", rg, "-n", "pip-gateway", "--query", "ipAddress",
-                "-o", "tsv").stdout.strip()
-    ctx.secret.save(nat_ip=nat_ip)
-    sensitive("nat ip", nat_ip)
+    common.setup_networks(ctx, PURPOSE)
 
 
 def setup_vault(ctx):
@@ -525,9 +449,10 @@ def setup_identities(ctx):
 
 
 def normalize_modes(context):
-    """Gives the build context the modes a checkout under umask 022 has (0644, 0755 for
-    executables and directories). The server image copies appsettings.json with its mode from the
-    context, so a context extracted under umask 077 makes an image whose server cannot read it."""
+    """Normalize the provisioner context for its non-root runtime image.
+
+    The server Dockerfile normalizes its own published files; the provisioner still needs this.
+    """
     for root, dirs, files in os.walk(context):
         for name in dirs:
             os.chmod(os.path.join(root, name), 0o755)
@@ -536,10 +461,6 @@ def normalize_modes(context):
             os.chmod(path, 0o755 if os.stat(path).st_mode & 0o100 else 0o644)
     os.chmod(context, 0o755)
     return context
-
-
-def server_context(work):
-    return normalize_modes(spike.build_context(work))
 
 
 def build_suffix(ctx):
@@ -577,7 +498,7 @@ def setup_registry(ctx, commit):
         work = Path(tempfile.mkdtemp(prefix=f"atli-ws-acr-{kind}-", dir=ctx.work))
         try:
             if kind == "server":
-                context = server_context(work)
+                context = spike.build_context(work)
                 dockerfile = context / "Dockerfile"
                 image = f"atli-reports-server:{commit}{build_suffix(ctx)}"
             else:
@@ -605,53 +526,20 @@ def image(ctx, kind):
 
 def setup_sandbox_groups(ctx, networks, commit):
     def create(key):
-        aca = ctx.aca(key)
-        if f"propagation_{key}" not in ctx.state:
-            created = aca("sandboxgroup", "create", "--name", ctx.group(key), "--location", ctx.region, check=False)
-            if created.returncode != 0 and "exist" not in created.stderr.lower():
-                raise RuntimeError(redact(f"sandboxgroup create {key}: {created.stderr[-800:]}"))
-            started = time.monotonic()
-            while aca("sandbox", "list", "-o", "json", check=False).returncode != 0:
-                if time.monotonic() - started > 1200:
-                    raise RuntimeError("The data-plane role did not propagate within 20 minutes.")
-                time.sleep(10)
-            ctx.state.save(**{f"propagation_{key}": elapsed(started)})
-            log(f"Sandbox group {ctx.group(key)}: data plane works after {ctx.state[f'propagation_{key}']} s")
+        common.create_sandbox_group(ctx, key)
 
     with concurrent.futures.ThreadPoolExecutor(2) as pool:
         list(pool.map(create, ["rend", "client"]))
     networks.result()
-    if "network_connection" not in ctx.state:
-        log("Connecting the renderer group to the renderer network (connection 'renderers')")
-        started = time.monotonic()
-        ctx.aca("rend")("sandboxgroup", "network", "create", "--group", ctx.group("rend"),
-                        "--vnet-subnet-id", ctx.state["renderer_subnet_id"], "--name", "renderers", timeout=1800)
-        ctx.state.save(network_connection="renderers", network_connection_s=elapsed(started))
+    common.connect_renderer_network(ctx, "rend")
 
     def build(suffix):
         name = f"reports-server-{commit}{build_suffix(ctx)}-{suffix}"
         if f"disk_{suffix}" in ctx.secret:
             return
-        aca = ctx.aca("rend")
-        work = Path(tempfile.mkdtemp(prefix="atli-ws-context-", dir=ctx.work))
-        try:
-            context = server_context(work)
-            started = time.monotonic()
-            for attempt in range(6):
-                result = aca("sandboxgroup", "disk", "create", "--source", str(context), "--name", name,
-                             "--wait-timeout", "3000", check=False, timeout=3600)
-                if result.returncode == 0:
-                    break
-                if "403" not in result.stderr or attempt == 5:
-                    raise RuntimeError(f"Disk image {name} failed:\n{result.stderr[-1500:]}")
-                time.sleep(30)
-            seconds = elapsed(started)
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
-        disks = json.loads(aca("sandboxgroup", "disk", "list", "-o", "json").stdout)
-        disk = next(d for d in disks if d.get("name") == name)
-        ctx.secret.save(**{f"disk_{suffix}": disk["id"]})
-        sensitive(f"disk {suffix}", disk["id"])
+        disk_id, seconds = common.build_sandbox_disk(ctx, "rend", name, spike.build_context)
+        ctx.secret.save(**{f"disk_{suffix}": disk_id})
+        sensitive(f"disk {suffix}", disk_id)
         ctx.state.save(**{f"disk_{suffix}_name": name, f"disk_{suffix}_build_s": seconds})
         log(f"Disk {name}: {seconds} s")
 
@@ -672,28 +560,13 @@ def assign(ctx, name, principal, role, scope):
         time.sleep(15)
     else:
         raise RuntimeError(f"Role assignment {name} failed: {redact(result.stderr[-500:])}")
-    with prod._lock:
+    with ctx.state.lock:
         assignments = dict(ctx.state.get("assignments", {}))
-    assignments[name] = result.stdout.strip()
-    ctx.state.save(assignments=assignments, **{f"assigned_{name}_utc": utc()})
+        assignments[name] = result.stdout.strip()
+        ctx.state.save(assignments=assignments, **{f"assigned_{name}_utc": utc()})
 
 
 def setup_roles(ctx):
-    if "role_definition_id" not in ctx.state:
-        definition = {
-            "Name": ctx.state["role_name"], "IsCustom": True,
-            "Description": "Temporary test role: read and resume sandboxes only.",
-            "Actions": [], "NotActions": [],
-            "DataActions": ["Microsoft.App/sandboxGroups/sandboxes/read",
-                            "Microsoft.App/sandboxGroups/sandboxes/resume/action"],
-            "NotDataActions": [], "AssignableScopes": [ctx.rg_id()],
-        }
-        path = ctx.work / "role.json"
-        path.write_text(json.dumps(definition))
-        path.chmod(0o600)
-        created = az_json("role", "definition", "create", "--role-definition", f"@{path}")
-        path.unlink()
-        ctx.state.save(role_definition_id=created["id"], role_definition_name=created["name"])
     gateway, service = ctx.secret["identity_gateway_principal_id"], ctx.secret["identity_service_principal_id"]
     group = ctx.group_id("rend")
     plan = [
@@ -702,24 +575,23 @@ def setup_roles(ctx):
         ("service_acr_pull", service, "AcrPull", ctx.state["registry_id"]),
         ("gateway_acr_pull", gateway, "AcrPull", ctx.state["registry_id"]),
         ("gateway_vault_user", gateway, "Key Vault Secrets User", ctx.state["vault_id"]),
-        ("gateway_resumer", gateway, ctx.state["role_definition_name"], group),
     ]
     with concurrent.futures.ThreadPoolExecutor(3) as pool:
         list(pool.map(lambda item: assign(ctx, *item), plan))
     log("Service identity: Data Owner, Key Vault Secrets Officer, AcrPull. Gateway identity: AcrPull, "
-        "Key Vault Secrets User, the resume-only role.")
+        "Key Vault Secrets User.")
 
 
 def setup_environment(ctx):
     path = f"{ctx.rg_id()}/providers/Microsoft.App/managedEnvironments/{ctx.state['environment']}"
     ctx.state.save(environment_id=path)
-    view = prod.arm("GET", path, check=False)
+    view = ctx.arm("GET", path, check=False)
     if not view:
         log(f"Container Apps environment {ctx.state['environment']} (workload profiles, gateway subnet)")
         key = az("monitor", "log-analytics", "workspace", "get-shared-keys", "-g", ctx.rg, "-n",
                  ctx.state["workspace"], "--query", "primarySharedKey", "-o", "tsv").stdout.strip()
         sensitive("workspace key", key)
-        prod.arm("PUT", path, {
+        ctx.arm("PUT", path, {
             "location": ctx.region, "tags": {"purpose": PURPOSE},
             "properties": {
                 "vnetConfiguration": {"infrastructureSubnetId": ctx.state["gateway_subnet_id"], "internal": False},
@@ -731,7 +603,7 @@ def setup_environment(ctx):
             }})
     started = time.monotonic()
     while True:
-        view = prod.arm("GET", path)
+        view = ctx.arm("GET", path)
         state = view["properties"].get("provisioningState")
         if state == "Succeeded":
             break
@@ -805,7 +677,7 @@ def provisioner_env(ctx, disk, with_service=True, retire_after_idle="00:00:00", 
 
 def wait_app(ctx, path, started, limit=2400):
     while True:
-        view = prod.arm("GET", path)
+        view = ctx.arm("GET", path)
         properties = view["properties"]
         if (properties.get("provisioningState") == "Succeeded"
                 and properties.get("latestReadyRevisionName") == properties.get("latestRevisionName")):
@@ -861,7 +733,7 @@ def deploy_service(ctx, **changes):
     log(f"Deploying the provisioning service: {settings}")
     started = time.monotonic()
     since = utc()
-    prod.arm("PUT", app_path(ctx, SERVICE), body)
+    ctx.arm("PUT", app_path(ctx, SERVICE), body)
     properties = wait_app(ctx, app_path(ctx, SERVICE), started)
     fqdn = properties["configuration"]["ingress"]["fqdn"]
     ctx.secret.save(service_fqdn=fqdn)
@@ -875,7 +747,7 @@ def deploy_service(ctx, **changes):
 
 
 def deploy_gateway(ctx, log_requests=False):
-    settings = {"log_requests": log_requests, "image": image(ctx, "server")}
+    settings = {"log_requests": log_requests, "image": image(ctx, "server"), "activation": "OnDemand"}
     if ctx.state.get("gateway_deployed") == settings and ctx.secret.get("gateway_fqdn"):
         return
     keys = {caller: credentials(ctx, caller) for caller in CALLERS}
@@ -887,7 +759,6 @@ def deploy_gateway(ctx, log_requests=False):
         "ReportsServer__Gateway__Records__Store": "KeyVault",
         "ReportsServer__Gateway__Records__VaultUri": ctx.state["vault_uri"],
         "ReportsServer__Gateway__Records__ManagedIdentityClientId": ctx.secret["identity_gateway_client_id"],
-        "ReportsServer__Gateway__Wake__Mode": "None",
         "ReportsServer__Gateway__Provisioning__Mode": "OnDemand",
         "ReportsServer__Gateway__Provisioning__Url": f"https://{ctx.secret['service_fqdn']}",
         **logging_env(),
@@ -936,12 +807,12 @@ def deploy_gateway(ctx, log_requests=False):
     log(f"Deploying the gateway: {settings}")
     started = time.monotonic()
     since = utc()
-    prod.arm("PUT", app_path(ctx, GATEWAY), body)
+    ctx.arm("PUT", app_path(ctx, GATEWAY), body)
     properties = wait_app(ctx, app_path(ctx, GATEWAY), started)
     fqdn = properties["configuration"]["ingress"]["fqdn"]
     ctx.secret.save(gateway_fqdn=fqdn)
     sensitive("gateway host", fqdn)
-    while prod.http_get(f"https://{fqdn}/health/ready")[0] != 200:
+    while common.http_get(f"https://{fqdn}/health/ready")[0] != 200:
         if time.monotonic() - started > 1200:
             raise RuntimeError("The gateway did not answer /health/ready")
         time.sleep(2)
@@ -1346,7 +1217,7 @@ def leftover(ctx):
             "resources": {"cpu": "500m", "memory": "1024Mi"},
             "egressPolicy": {"defaultAction": "Deny"},
             "entrypoint": spike.ENTRYPOINT,
-            "environment": prod.renderer_environment("S"),
+            "environment": common.renderer_environment("S"),
             "labels": {"app": "atli-reports", "role": "renderer", "tenant": tenant, "size": "S",
                        "launch": "leftover-probe"},
             "lifecycle": {"autoSuspendPolicy": {"enabled": True, "interval": 60, "mode": "Memory"}},
@@ -1823,20 +1694,20 @@ def run_job(ctx, args):
             }]},
         },
     }
-    prod.arm("PUT", job_path(ctx), body)
+    ctx.arm("PUT", job_path(ctx), body)
     started = time.monotonic()
-    while (prod.arm("GET", job_path(ctx))["properties"].get("provisioningState")) != "Succeeded":
+    while (ctx.arm("GET", job_path(ctx))["properties"].get("provisioningState")) != "Succeeded":
         if time.monotonic() - started > 600:
             raise RuntimeError("The job was not created")
         time.sleep(5)
     since = utc()
-    execution = prod.arm("POST", f"{job_path(ctx)}/start", {})
+    execution = ctx.arm("POST", f"{job_path(ctx)}/start", {})
     name = execution.get("name") or execution.get("id", "").rsplit("/", 1)[-1]
     return name, since
 
 
 def job_status(ctx, name):
-    view = prod.arm("GET", f"{job_path(ctx)}/executions/{name}", check=False) or {}
+    view = ctx.arm("GET", f"{job_path(ctx)}/executions/{name}", check=False) or {}
     properties = view.get("properties", {})
     return properties.get("status"), properties.get("startTime"), properties.get("endTime")
 
@@ -1936,7 +1807,7 @@ def rollout_finish(ctx):
 # ---------------------------------------------------------------------------------------------
 
 def verify(ctx, extra_paths=()):
-    values = dict(prod.SENSITIVE)
+    values = dict(runtime.redactor.values)
     for key, value in ctx.secret.items():
         if isinstance(value, str) and len(value) >= 6:
             values.setdefault(f"<{key}>", value)
@@ -1987,7 +1858,7 @@ def cleanup(ctx):
     if exists:
         # Container Apps first (the job, the gateway, the service), then the environment.
         for path in [job_path(ctx), app_path(ctx, GATEWAY), app_path(ctx, SERVICE)]:
-            prod.arm("DELETE", path, check=False)
+            ctx.arm("DELETE", path, check=False)
         # Role assignments at scopes inside the group (the identities', the operator's, and those
         # the aca CLI made for the sandbox groups' creator), then the custom role definition.
         assignments = az_json("role", "assignment", "list", "--all", "--query",
@@ -2002,7 +1873,7 @@ def cleanup(ctx):
             az("monitor", "log-analytics", "workspace", "delete", "-g", rg, "-n", ctx.state["workspace"],
                "--force", "true", "--yes", check=False)
         if ctx.state.get("environment_id"):
-            prod.arm("DELETE", ctx.state["environment_id"], check=False)
+            ctx.arm("DELETE", ctx.state["environment_id"], check=False)
         for key in ["client", "rend"]:
             group = ctx.state.get(f"group_{key}")
             if not group or ctx.state.get(f"propagation_{key}") is None:
@@ -2043,7 +1914,7 @@ def cleanup(ctx):
         "resources_with_tag": len(az_json("resource", "list", "--tag", f"purpose={PURPOSE}", "--query", "[].name") or []),
         "role_assignments_in_scope": len(az_json("role", "assignment", "list", "--all", "--query",
                                                  f"[?starts_with(scope, '{ctx.rg_id()}')].id", check=False) or []),
-        "role_definition_left": bool(ctx.state.get("role_definition_name") and prod.arm(
+        "role_definition_left": bool(ctx.state.get("role_definition_name") and ctx.arm(
             "GET", f"/subscriptions/{ctx.subscription}/providers/Microsoft.Authorization/roleDefinitions/"
                    f"{ctx.state['role_definition_name']}", api="2022-04-01", check=False)),
         "role_definitions_named": len(az_json("role", "definition", "list", "--custom-role-only", "true", "--query",
@@ -2107,8 +1978,8 @@ def listing(ctx):
     """The raw GET sandboxes answer: its shape, headers, and count; and each record's sandbox read
     one by one (GET sandboxes/{id})."""
     rest = ctx.rest("rend")
-    url = f"{rest.base}/sandboxes?api-version={prod.API_VERSION}"
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {prod.data_plane_token()}"})
+    url = f"{rest.base}/sandboxes?api-version={common.API_VERSION}"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {runtime.data_plane_token()}"})
     with urllib.request.urlopen(request, timeout=120) as response:
         headers = {k: v for k, v in response.headers.items() if k.lower() not in ("set-cookie",)}
         body = json.loads(response.read())
@@ -2124,7 +1995,7 @@ def listing(ctx):
                       "their_state_by_get": collections.Counter(found.values())}, indent=1))
     for parameter in ["$top=100", "top=100", "maxResults=100", "pageSize=100", "$skip=25", "skip=25"]:
         probe = urllib.request.Request(f"{url}&{parameter}",
-                                       headers={"Authorization": f"Bearer {prod.data_plane_token()}"})
+                                       headers={"Authorization": f"Bearer {runtime.data_plane_token()}"})
         try:
             with urllib.request.urlopen(probe, timeout=120) as response:
                 view = json.loads(response.read())
@@ -2282,7 +2153,7 @@ def listbug(ctx):
 def debug(ctx):
     """An app's revisions and its latest console and system log lines, redacted."""
     app = ctx.options.app
-    revisions = prod.arm("GET", f"{app_path(ctx, app)}/revisions", check=False) or {}
+    revisions = ctx.arm("GET", f"{app_path(ctx, app)}/revisions", check=False) or {}
     for revision in revisions.get("value", []):
         p = revision.get("properties", {})
         print(redact(json.dumps({k: p.get(k) for k in ["active", "healthState", "runningState", "provisioningState",

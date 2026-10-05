@@ -117,8 +117,8 @@ public sealed record SandboxPortOptions
   /// </summary>
   public required bool Anonymous { get; init; }
 
-  /// <summary>What a request to the port does while the sandbox is stopped.</summary>
-  public SandboxPortActivation Activation { get; init; } = SandboxPortActivation.Manual;
+  /// <summary>Requests activate the sandbox on demand; Manual is only for existing ports.</summary>
+  public SandboxPortActivation Activation { get; init; } = SandboxPortActivation.OnDemand;
 
   /// <summary>
   /// The source ranges the port admits, in CIDR notation (<c>203.0.113.7/32</c>); the proxy refuses

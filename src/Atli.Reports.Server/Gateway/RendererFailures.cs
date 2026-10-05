@@ -23,8 +23,8 @@ internal static class RendererFailures
   /// <summary>
   /// What the Azure Container Apps Sandboxes proxy answers, with <c>403</c>, for a suspended
   /// sandbox. The renderer's own <c>403</c> is problem details, so the two cannot be confused; a
-  /// compromised renderer can still send this, so the gateway checks the sandbox's state before it
-  /// resumes it (see <see cref="SandboxWaker"/>).
+  /// disabled sandbox also answers this way. The gateway fails at once without retrying or asking
+  /// the provisioning service to replace it, preserving the operator's kill switch.
   /// </summary>
   private const string SandboxNotRunning = "Sandbox is not running";
 

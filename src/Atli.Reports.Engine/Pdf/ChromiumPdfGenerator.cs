@@ -61,10 +61,7 @@ internal static class ChromiumPdfGenerator
       message.Parameters.Add("preferCSSPageSize", true);
     }
 
-    if (options.GenerateTaggedPdf is { } tagged)
-    {
-      message.Parameters.Add("generateTaggedPDF", tagged);
-    }
+    message.Parameters.Add("generateTaggedPDF", options.GenerateTaggedPdf);
 
     return message;
   }

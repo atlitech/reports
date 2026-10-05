@@ -279,7 +279,7 @@ Attributes:
 | `atli.reports.pdf.paper_size` | `convert` | `letter`, `legal`, `a4`, `a3`, or the size in inches (`8x10in`) |
 | `atli.reports.pdf.orientation` | `convert` | `portrait` or `landscape` |
 | `atli.reports.pdf.wait_for_signal` | `convert` | Whether the conversion waits for a completion signal |
-| `atli.reports.pdf.tagged` | `convert` | `PdfOptions.GenerateTaggedPdf`, when set |
+| `atli.reports.pdf.tagged` | `convert` | `PdfOptions.GenerateTaggedPdf` (defaults to `true`) |
 | `atli.reports.pdf.size` | `convert`, `pdf.print`, `pdf.stream` | PDF bytes written to the destination |
 | `atli.reports.page.wait_for` | `page.wait` | `load` or `signal` |
 | `atli.reports.browser.generation` | `page.open`, `browser.launch` | Which browser (1 for the first one launched) served the conversion or was launched |
@@ -369,6 +369,6 @@ All keys live under the `ReportsEngine` section (environment variables use `__`,
 | `Concurrency:QueueTimeout` | `00:00:30` | Longest wait for a turn; infinite waits until canceled |
 | `ConversionTimeout` | infinite | Longest a whole conversion may take, queue wait included |
 
-Per-conversion settings are on `PdfOptions`; `GenerateTaggedPdf` (default: the browser's choice,
-which tags) maps to `generateTaggedPDF`. Tagged PDFs are larger and slower to produce for long,
+Per-conversion settings are on `PdfOptions`; `GenerateTaggedPdf` defaults to `true` and always
+maps to `generateTaggedPDF`. Tagged PDFs are larger and slower to produce for long,
 table-heavy documents; set it to `false` when accessibility is not needed.

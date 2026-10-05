@@ -64,7 +64,9 @@ public class KeyVaultRendererRecordStoreTests
     var store = Store(vault);
 
     await Assert.That(await store.GetAsync("acme", TestToken)).IsNull();
-    await Assert.That((await store.ListAsync(TestToken)).Count).IsEqualTo(0);
+    await Assert
+      .That(((await store.ListWithUnreadableAsync(TestToken)).Records).Count)
+      .IsEqualTo(0);
   }
 
   [Test]
@@ -122,7 +124,7 @@ public class KeyVaultRendererRecordStoreTests
     vault.Seed("renderer-", "{}");
     vault.Seed("renderer--bad", "{}");
 
-    var records = await store.ListAsync(TestToken);
+    var records = (await store.ListWithUnreadableAsync(TestToken)).Records;
 
     await Assert
       .That(records.Select(record => record.TenantId))
@@ -141,7 +143,9 @@ public class KeyVaultRendererRecordStoreTests
 
     await Assert.That(vault.Calls).Contains("Delete renderer-acme");
     await Assert.That(await store.GetAsync("acme", TestToken)).IsNull();
-    await Assert.That((await store.ListAsync(TestToken)).Count).IsEqualTo(0);
+    await Assert
+      .That(((await store.ListWithUnreadableAsync(TestToken)).Records).Count)
+      .IsEqualTo(0);
   }
 
   [Test]
@@ -228,7 +232,11 @@ public class KeyVaultRendererRecordStoreTests
       if (write == 3)
       {
         seenAfterRecovery = store.GetAsync("acme", TestToken).GetAwaiter().GetResult();
-        listedAfterRecovery = store.ListAsync(TestToken).GetAwaiter().GetResult().Count;
+        listedAfterRecovery = store
+          .ListWithUnreadableAsync(TestToken)
+          .GetAwaiter()
+          .GetResult()
+          .Records.Count;
       }
 
       return null;
@@ -306,7 +314,7 @@ public class KeyVaultRendererRecordStoreTests
     vault.Seed("renderer-globex", Records.Json(Records.Acme()));
 
     var listing = await store.ListWithUnreadableAsync(TestToken);
-    var records = await store.ListAsync(TestToken);
+    var records = (await store.ListWithUnreadableAsync(TestToken)).Records;
 
     await Assert.That(listing.Records).IsEquivalentTo([Records.Acme()]);
     await Assert.That(records).IsEquivalentTo([Records.Acme()]);
@@ -336,7 +344,7 @@ public class KeyVaultRendererRecordStoreTests
     vault.ReadFailure = new RequestFailedException(403, "Forbidden.", "Forbidden", null);
 
     await Assert
-      .That(async () => await store.ListAsync(TestToken))
+      .That(async () => (await store.ListWithUnreadableAsync(TestToken)).Records)
       .Throws<RequestFailedException>();
   }
 
@@ -398,12 +406,12 @@ public class KeyVaultRendererRecordStoreTests
       }
     };
 
-    var list = store.ListAsync(TestToken);
+    var list = store.ListWithUnreadableAsync(TestToken);
     await eightReading.Task.WaitAsync(TestToken);
     // Eight reads wait; a ninth would have started by now if it could.
     await Task.Delay(TimeSpan.FromMilliseconds(200), TestToken);
     release.SetResult();
-    var records = await list;
+    var records = (await list).Records;
 
     await Assert.That(records.Count).IsEqualTo(20);
     await Assert.That(mostReading).IsEqualTo(8);

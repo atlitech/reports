@@ -7,17 +7,15 @@ Everything runs in a resource group of its own, which `setup` creates and `clean
            disk images built remotely from this commit's server Dockerfile (as run.py builds one):
            reports-server-<sha>-a for the tenants, reports-server-<sha>-b as the rollout target.
   run      The provisioner (src/Atli.Reports.Provisioner, built in Release and configured by
-           Provisioner__* variables) creates tenant `acme` (OnDemand port) and tenant `globex`
-           (Manual port), size S, auto-suspend after 60 s, the port admitting only this machine's
+           Provisioner__* variables) creates tenants `acme` and `globex` with OnDemand ports, size S,
+           auto-suspend after 60 s, the port admitting only this machine's
            public IPv4 address, records in a File store. The server, built the same way, runs on
-           127.0.0.1 in gateway mode with an API-key caller, the same File store, and
-           Wake:Mode=Sandboxes with the az login. Through the gateway:
+           127.0.0.1 in gateway mode with an API-key caller and the same File store. Through the gateway:
              a. both tenants convert; a missing tenant header is 400, a tenant the caller lacks
                 403, a wrong caller key 401;
              b. acme, stopped by auto-suspend, wakes on the request (OnDemand); the 49-page report
                 right after a wake;
-             c. globex, stopped by auto-suspend, wakes through the gateway's resume (Manual port),
-                with events 60 and 61 in the gateway log;
+             c. globex, stopped by auto-suspend, wakes on two concurrent OnDemand requests;
              d. from a client sandbox in the region, acme's port refuses the request by source
                 address (403 IpAccessDenied) without waking acme;
              e. a rollout to disk b while a loop converts for acme every 0.5 s: every status, the
@@ -273,7 +271,6 @@ class Provisioner:
             "Provisioner__Size": "S",
             "Provisioner__AutoSuspendAfter": "00:01:00",
             "Provisioner__AllowedSourceCidrs__0": f"{public_ip}/32",
-            "Provisioner__PortActivation": "OnDemand",
         })
 
     def __call__(self, *args, overrides=None, check=True):
@@ -329,11 +326,6 @@ class Gateway:
             "ReportsServer__Gateway__Tenants__0__Tenants__1": "globex",
             "ReportsServer__Gateway__Records__Store": "File",
             "ReportsServer__Gateway__Records__Path": str(ctx.records),
-            "ReportsServer__Gateway__Wake__Mode": "Sandboxes",
-            "ReportsServer__Gateway__Wake__Sandboxes__SubscriptionId": ctx.subscription,
-            "ReportsServer__Gateway__Wake__Sandboxes__ResourceGroup": ctx.resource_group,
-            "ReportsServer__Gateway__Wake__Sandboxes__SandboxGroup": ctx.group,
-            "ReportsServer__Gateway__Wake__Sandboxes__Region": ctx.region,
             "Logging__Console__FormatterName": "simple",
             "Logging__Console__FormatterOptions__SingleLine": "true",
             "Logging__Console__FormatterOptions__UseUtcTimestamp": "true",
@@ -537,8 +529,7 @@ def run(ctx):
         # 2. Tenants.
         log("Creating tenants")
         created = {"acme": provisioner("create", "--tenant", "acme"),
-                   "globex": provisioner("create", "--tenant", "globex",
-                                         overrides={"Provisioner__PortActivation": "Manual"})}
+                   "globex": provisioner("create", "--tenant", "globex")}
         listed = provisioner("list")
         rows, _ = parse_list(listed["lines"])
         records = read_records(ctx)
@@ -599,16 +590,15 @@ def run(ctx):
         wake["long_table_right_after"] = caller.convert("acme", "long-table")
         wake["invoice_warm"] = caller.convert("acme")
         results["b_ondemand_wake"] = wake
-        log("c. globex: the gateway's resume (Manual port)")
-        globex_url = records["globex"]["url"].rstrip("/")
-        manual = {"direct_while_stopped": direct(f"{globex_url}/health/live"),
-                  "state_after_direct": fresh_rest().state_of(records["globex"]["sandbox"])}
-        manual["invoice"] = caller.convert("globex")
-        manual["invoice_warm"] = caller.convert("globex")
-        time.sleep(1)
-        manual["gateway_log"] = [line for line in gateway_events(gateway.log_lines(), "globex",
-                                                                                  [60, 61, 62, 63])]
-        results["c_manual_wake"] = manual
+        log("c. globex: concurrent OnDemand wake through the gateway")
+        # Size S admits two requests (one conversion plus one queued request).
+        with concurrent.futures.ThreadPoolExecutor(2) as pool:
+            waking = list(pool.map(lambda _: caller.convert("globex"), range(2)))
+        results["c_concurrent_ondemand_wake"] = {
+            "invoices": waking,
+            "state_after": fresh_rest().state_of(records["globex"]["sandbox"]),
+            "invoice_warm": caller.convert("globex"),
+        }
         ctx.record("run", results)
 
         # d. The port's source allow-list, while acme is stopped; then the report as the waking request.
@@ -790,7 +780,8 @@ def verdicts(r):
         return line_list[0].split()[0]
 
     return {
-        "a_convert_and_refusals": check("a", lambda: all(ok(x) for t in TENANTS for x in r["a_basic"][f"{t}_invoice"])
+        "a_convert_and_refusals": check("a", lambda: all(r["tenants"][t]["port"]["activationMode"] == "OnDemand" for t in TENANTS)
+                                        and all(ok(x) for t in TENANTS for x in r["a_basic"][f"{t}_invoice"])
                                         and all(ok(r["a_basic"][f"{t}_long_table"]) for t in TENANTS)
                                         and r["a_basic"]["missing_header"]["status"] == 400
                                         and r["a_basic"]["other_tenant"]["status"] == 403
@@ -801,12 +792,11 @@ def verdicts(r):
         "b_ondemand_wake": check("b", lambda: "acme" in r["auto_suspend"] and ok(r["b_ondemand_wake"]["invoice"])
                                  and ok(r["b_ondemand_wake"]["long_table_right_after"])
                                  and ok(r["b_ondemand_wake"]["long_table_as_waking_request"])),
-        "c_manual_wake": check("c", lambda: "globex" in r["auto_suspend"]
-                               and r["c_manual_wake"]["direct_while_stopped"]["status"] == 403
-                               and r["c_manual_wake"]["state_after_direct"] == "Stopped"
-                               and ok(r["c_manual_wake"]["invoice"])
-                               and any("[60]" in line for line in r["c_manual_wake"]["gateway_log"])
-                               and any("[61]" in line for line in r["c_manual_wake"]["gateway_log"])),
+        "c_concurrent_ondemand_wake": check("c", lambda: "globex" in r["auto_suspend"]
+                                            and r["c_concurrent_ondemand_wake"]["state_after"] == "Running"
+                                            and len(r["c_concurrent_ondemand_wake"]["invoices"]) == 2
+                                            and all(ok(x) for x in r["c_concurrent_ondemand_wake"]["invoices"])
+                                            and ok(r["c_concurrent_ondemand_wake"]["invoice_warm"])),
         "d_ip_allow_list": check("d", lambda: first_status(r["d_ip_allow_list"]["client_lines"]) == "403"
                                  and "IpAccessDenied" in r["d_ip_allow_list"]["client_lines"][1]
                                  and r["d_ip_allow_list"]["acme_state_10s_later"] == "Stopped"),

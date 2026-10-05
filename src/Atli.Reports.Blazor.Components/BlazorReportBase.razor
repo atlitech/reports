@@ -4,4 +4,10 @@
   /// </summary>
   [Parameter]
   public Dictionary<string, string> GlobalAssets { get; set; } = [];
+
+  /// <summary>
+  /// Dictionary of report-specific assets with their base64 encoded content as the value.
+  /// </summary>
+  [Parameter]
+  public Dictionary<string, string> ReportAssets { get; set; } = [];
 }

@@ -27,9 +27,7 @@ public class HtmlReportTests
     await using var services = TestEngine.CreateServices(configureServices: UseMissingBrowser);
     var report = services
       .GetRequiredService<BlazorReportRegistry>()
-      .AddReport<GreetingReport>(
-        new BlazorReportRegistrationOptions { OutputFormat = ReportOutputFormat.Html }
-      );
+      .AddReport<GreetingReport>(options => options.OutputFormat = ReportOutputFormat.Html);
     using MemoryStream destination = new();
 
     var result = await services

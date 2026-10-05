@@ -1,4 +1,5 @@
 using Atli.Reports.Engine.Tests.Support;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Atli.Reports.Engine.Tests.Integration;
 
@@ -8,8 +9,7 @@ namespace Atli.Reports.Engine.Tests.Integration;
 /// engine's own blank document has an opaque origin that cannot store anything.
 /// </summary>
 [NotInParallel("chrome")]
-[ClassDataSource<SharedChromeEngine>(Shared = SharedType.PerTestSession)]
-public class IsolationTests(SharedChromeEngine engine)
+public class IsolationTests
 {
   private const string Report = """
     document.title = 'cookie=' + document.cookie
@@ -26,6 +26,10 @@ public class IsolationTests(SharedChromeEngine engine)
   [Test]
   public async Task Cookies_and_storage_written_in_one_conversion_are_invisible_to_the_next()
   {
+    await using var provider = TestEngine.Create(options =>
+      options.Network.Mode = ReportsEngineNetworkMode.Unrestricted
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     await using TestHttpServer server = new();
     server
       .Map(
@@ -50,11 +54,8 @@ public class IsolationTests(SharedChromeEngine engine)
         """
       );
 
-    var written = await engine.Converter.ConvertToBytesAsync(
-      Navigate(server, "/write"),
-      WaitForSignal
-    );
-    var read = await engine.Converter.ConvertToBytesAsync(Navigate(server, "/read"), WaitForSignal);
+    var written = await converter.ConvertToBytesAsync(Navigate(server, "/write"), WaitForSignal);
+    var read = await converter.ConvertToBytesAsync(Navigate(server, "/read"), WaitForSignal);
 
     // The first document could store and read back its data, so the second one's view is meaningful.
     await Assert
@@ -66,6 +67,10 @@ public class IsolationTests(SharedChromeEngine engine)
   [Test]
   public async Task Cached_responses_are_not_shared_between_conversions()
   {
+    await using var provider = TestEngine.Create(options =>
+      options.Network.Mode = ReportsEngineNetworkMode.Unrestricted
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     await using TestHttpServer server = new();
     server
       .Map("/style.css", "body { color: black; }", "text/css", cacheControl: "public, max-age=3600")
@@ -78,8 +83,8 @@ public class IsolationTests(SharedChromeEngine engine)
         """
       );
 
-    await engine.Converter.ConvertToBytesAsync(Navigate(server, "/page"), WaitForSignal);
-    await engine.Converter.ConvertToBytesAsync(Navigate(server, "/page"), WaitForSignal);
+    await converter.ConvertToBytesAsync(Navigate(server, "/page"), WaitForSignal);
+    await converter.ConvertToBytesAsync(Navigate(server, "/page"), WaitForSignal);
 
     await Assert.That(server.Requests["/style.css"].Count).IsEqualTo(2);
   }

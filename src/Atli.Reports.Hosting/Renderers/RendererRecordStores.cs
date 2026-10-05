@@ -17,36 +17,14 @@ public static class RendererRecordStores
   public static IRendererRecordStore Create(RendererRecordStoreOptions options)
   {
     ArgumentNullException.ThrowIfNull(options);
-    if (string.Equals(options.Store, "File", StringComparison.OrdinalIgnoreCase))
-    {
-      if (string.IsNullOrWhiteSpace(options.Path))
-      {
-        throw new InvalidOperationException(
-          "The File renderer record store needs Path, the directory of record files."
-        );
-      }
-
-      return new FileRendererRecordStore(options.Path);
-    }
-
-    if (string.Equals(options.Store, "KeyVault", StringComparison.OrdinalIgnoreCase))
-    {
-      if (options.VaultUri is not { IsAbsoluteUri: true } vaultUri)
-      {
-        throw new InvalidOperationException(
-          "The KeyVault renderer record store needs VaultUri, such as https://contoso.vault.azure.net/."
-        );
-      }
-
-      return new KeyVaultRendererRecordStore(
-        new SecretClient(vaultUri, AzureCredentials.Create(options.ManagedIdentityClientId))
+    options.Validate();
+    return options.Store == "File"
+      ? new FileRendererRecordStore(options.Path)
+      : new KeyVaultRendererRecordStore(
+        new SecretClient(
+          options.VaultUri!,
+          AzureCredentials.Create(options.ManagedIdentityClientId)
+        )
       );
-    }
-
-    throw new InvalidOperationException(
-      string.IsNullOrWhiteSpace(options.Store)
-        ? "No renderer record store is configured. Set Store to File or KeyVault."
-        : $"Unknown renderer record store '{options.Store}'. Use File or KeyVault."
-    );
   }
 }

@@ -392,8 +392,8 @@ internal sealed class BrowserManager : IBrowserProvider, IAsyncDisposable, IDisp
         generation,
         _timeProvider,
         _loggerFactory,
-        _stopping.Token,
-        _network
+        _network,
+        _stopping.Token
       );
     }
     catch (Exception exception)

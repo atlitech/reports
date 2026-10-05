@@ -3,8 +3,7 @@
 
 Everything runs in resource groups of its own, rg-atli-reports-prod-shape-<UTC stamp> (and the
 Container Apps environment's infrastructure group, <that>-cae), tagged
-purpose=atli-reports-production-shape, plus one custom role definition whose only assignable scope
-is that group. `cleanup` deletes all of it and checks.
+purpose=atli-reports-production-shape. `cleanup` deletes all of it and checks.
 
   setup     The renderer network (a virtual network whose DNS server is an unused address of its own
             range, a subnet delegated to Microsoft.App/environments, and a network security group
@@ -16,16 +15,14 @@ is that group. `cleanup` deletes all of it and checks.
             Dockerfile (a, and b as the rollout target, for the connected group; a for the control
             group); a Key Vault (RBAC, no purge protection) as the record store; a Basic container
             registry with the server image built by `az acr build`; a user-assigned identity for the
-            gateway with AcrPull, Key Vault Secrets User, and a custom resume-only role on the
-            connected group; a Log Analytics workspace; a workload-profiles Container Apps
-            environment on the gateway subnet; the gateway as a Container App (external HTTPS
-            ingress to 8080, liveness and readiness probes, API-key callers, the Key Vault store and
-            Wake:Mode=Sandboxes through the identity); and the client sandbox (python-3.12 disk,
-            egress allowed only to the gateway's host and the port proxy).
+            gateway with AcrPull and Key Vault Secrets User; a Log Analytics workspace; a workload-profiles
+            Container Apps environment on the gateway subnet; the gateway as a Container App (external HTTPS
+            ingress to 8080, liveness and readiness probes, API-key callers and the Key Vault store); and
+            the client sandbox (python-3.12 disk, egress allowed only to the gateway's host and port proxy).
   tenants   The provisioner (Release build, Records:Store=KeyVault, the ports admitting the NAT
             gateway's /32 and this machine's /32) creates the tenants: vs1, vs2 (S), vm1, vm2 (M),
-            vl1, vl2 (L), vman (M, Manual port), and vauto (S, auto-suspend after 60 s) in the
-            connected group; cm1 (M) in the control group, whose port also admits the client's
+            vl1, vl2 (L), vrestart (M, OnDemand after gateway restart), and vauto (S, auto-suspend after
+            60 s) in the connected group; cm1 (M) in the control group, whose port also admits the client's
             outbound addresses.
   hardening Inside vm1 and cm1: resolv.conf, dns-probe.pl, network-probe.sh, and
             chromium-sandbox-check.sh; conversions through the gateway; the port through the proxy;
@@ -35,18 +32,17 @@ is that group. `cleanup` deletes all of it and checks.
             to /health/ready from this machine; each deleted afterwards.
   wake      Through the gateway, from the client: vm1 and cm1 stopped (data-plane stop, memory
             mode) and woken by an invoice or the 49-page report (OnDemand ports); vauto woken after
-            auto-suspend; then, after a gateway restart, vman (Manual port) woken by the gateway's
-            resume through its identity, with events 60 and 61 from the gateway's log.
+            auto-suspend; then, after a gateway restart, vrestart woken by an OnDemand request.
   warm      Sequential warm conversions through the gateway (S, M, and L in the connected group),
             and cm1 through the gateway and straight to its port, interleaved.
   load      Sustained closed-loop load through the gateway on the six load tenants
             (--duration, --factor times each tenant's admitted concurrency, --replicas gateway
             replicas), with the renderers' VM memory, CPU, and OOM kills sampled, the gateway's CPU
             and memory from Container Apps metrics, and renderer 429s from the gateway's log.
-  rollout   Deletes cm1, vman, and vauto, then load at admitted concurrency with a rollout of the
+  rollout   Deletes cm1, vrestart, and vauto, then load at admitted concurrency with a rollout of the
             connected group to disk b a minute in.
   verify    Searches the logs and the results for every secret, address, and ID of the run.
-  cleanup   Deletes the provisioner's tenants, the role assignments and the role definition, the
+  cleanup   Deletes the provisioner's tenants, role assignments (and any legacy role definition), the
             workspace (permanently), the sandbox groups and their network connection, and the
             resource groups; purges the vault; checks that each is gone.
 
@@ -55,313 +51,60 @@ machine's, the NAT gateway's, the client's outbound ones) stay in --work (mode 0
 mode 0600; nothing prints them, the subscription, tenant, or object IDs. Logs are redacted as
 they are written, and `verify` searches them and the results again.
 
-Requirements: az (logged in, with rights to create resource groups, role definitions, and role
+Requirements: az (logged in, with rights to create resource groups and role
 assignments), aca (https://aka.ms/aca-cli-install; --aca), the .NET SDK, git, openssl, and curl.
 
   benchmarks/azure-sandboxes/production.py setup|tenants|hardening|creates|wake|warm|load|rollout|verify|cleanup \
       --work DIR --output results.json [--location eastus2] [--aca PATH]
 """
 import argparse
-import base64
 import concurrent.futures
-import hashlib
-import http.client
 import json
 import os
 import re
-import secrets as random_secrets
 import shutil
-import ssl
 import subprocess
 import sys
 import tempfile
-import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import run as spike  # noqa: E402  run.py's helpers: write_requests, build_context, ENTRYPOINT
 import followup  # noqa: E402  followup.py's SAMPLER
+import common  # noqa: E402
+from common import SIZES, elapsed, utc, http_get, renderer_environment, check_laptop_ip  # noqa: E402
 
 REPO = spike.REPO
-API_VERSION = spike.API_VERSION
 PURPOSE = "atli-reports-production-shape"
 PREFIX = "rg-atli-reports-prod-shape-"
 CALLER = "prod-shape-app"
 APP = "ca-gateway"
-ARM_APP_API = "2024-03-01"
 # Tenant: (group, size, provisioner overrides). The control tenant's port also admits the client.
 TENANTS = {
     "vs1": ("vnet", "S", {}), "vs2": ("vnet", "S", {}),
     "vm1": ("vnet", "M", {}), "vm2": ("vnet", "M", {}),
     "vl1": ("vnet", "L", {}), "vl2": ("vnet", "L", {}),
-    "vman": ("vnet", "M", {"Provisioner__PortActivation": "Manual"}),
+    "vrestart": ("vnet", "M", {}),
     "vauto": ("vnet", "S", {"Provisioner__AutoSuspendAfter": "00:01:00"}),
     "cm1": ("control", "M", {}),
 }
 LOAD_TENANTS = ["vs1", "vs2", "vm1", "vm2", "vl1", "vl2"]
 ADMITTED = {"S": 2, "M": 2, "L": 4}
-SIZES = {"S": ("500m", "1024Mi", 1), "M": ("1000m", "2048Mi", 1), "L": ("2000m", "4096Mi", 2)}
 BIN = REPO / "artifacts/bin"
 
 
-# ---------------------------------------------------------------------------------------------
-# Redaction, logging, and commands
-# ---------------------------------------------------------------------------------------------
-
-SENSITIVE = {}  # placeholder -> value; every log line, error, and result is redacted against it
-_lock = threading.Lock()
-
-
-def sensitive(name, value):
-    if value and len(str(value)) >= 6:
-        with _lock:
-            SENSITIVE[f"<{name}>"] = str(value)
+# Each runner owns its runtime; importing another scenario never changes its behavior.
+runtime = common.Runtime()
+az, az_json, run = runtime.az, runtime.az_json, runtime.run
+log, sensitive, redact = runtime.log, runtime.sensitive, runtime.redact
+SENSITIVE = runtime.redactor.values
 
 
-def redact(text):
-    text = str(text)
-    with _lock:
-        items = sorted(SENSITIVE.items(), key=lambda item: -len(item[1]))
-    for name, value in items:
-        text = text.replace(value, name)
-    # Tokens and keys that were never registered: bearer tokens, JWTs, renderer credentials.
-    text = re.sub(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "<token>", text)
-    text = re.sub(r"reports-[0-9a-f]{12}\.[0-9a-f]{64}", "<api key>", text)
-    return text
-
-
-def log(message):
-    print(f"[{time.strftime('%H:%M:%S')}] {redact(message)}", flush=True)
-
-
-def run(command, check=True, env=None, timeout=1800, input=None):
-    result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=timeout,
-                            check=False, input=input)
-    if check and result.returncode != 0:
-        raise RuntimeError(redact(f"{' '.join(command[:4])} ... exited {result.returncode}:\n"
-                                  f"{result.stderr[-1500:]}"))
-    return result
-
-
-def az(*args, check=True, timeout=1800):
-    return run(["az", *args], check=check, timeout=timeout)
-
-
-def az_json(*args, check=True, timeout=1800):
-    result = az(*args, "-o", "json", check=check, timeout=timeout)
-    return json.loads(result.stdout or "null") if result.returncode == 0 else None
-
-
-def utc():
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def elapsed(since):
-    return round(time.monotonic() - since, 2)
-
-
-# ---------------------------------------------------------------------------------------------
-# State and context
-# ---------------------------------------------------------------------------------------------
-
-class Store(dict):
-    """A JSON file of mode 0600 in --work."""
-
-    def __init__(self, path):
-        super().__init__(json.loads(path.read_text()) if path.exists() else {})
-        self.path = path
-
-    def save(self, **values):
-        with _lock:
-            self.update(values)
-            self.path.write_text(json.dumps(self, indent=2) + "\n")
-            self.path.chmod(0o600)
-
-
-class Context:
+class Context(common.Context):
     def __init__(self, options):
-        self.options = options
-        self.work = options.work
-        self.work.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.work.chmod(0o700)
-        for name in ["logs", "client"]:
-            (self.work / name).mkdir(mode=0o700, exist_ok=True)
-        # Names and resource IDs; resource IDs hold the subscription, so they never print.
-        self.state = Store(self.work / "state.json")
-        # Addresses, IDs, and secrets: never printed, never in results.
-        self.secret = Store(self.work / "sensitive.json")
-        self.output = options.output
-        self.results = json.loads(self.output.read_text()) if self.output and self.output.exists() else {}
-        self.region = options.location
-        if "subscription" not in self.secret:
-            account = az_json("account", "show")
-            self.secret.save(subscription=account["id"], tenant=account["tenantId"])
-        self.subscription = self.secret["subscription"]
-        sensitive("subscription", self.subscription)
-        sensitive("tenant id", self.secret["tenant"])
-        for key, value in self.secret.items():
-            if key not in ("subscription", "tenant") and isinstance(value, str):
-                sensitive(key, value)
-            elif isinstance(value, list):
-                for index, item in enumerate(value):
-                    sensitive(f"{key} {index}", item)
-
-    def record(self, key, value):
-        self.results[key] = value
-        if self.output:
-            self.output.parent.mkdir(parents=True, exist_ok=True)
-            self.output.write_text(redact(json.dumps(self.results, indent=2)) + "\n")
-            self.output.chmod(0o600)
-
-    @property
-    def rg(self):
-        return self.state["resource_group"]
-
-    def rg_id(self):
-        return f"/subscriptions/{self.subscription}/resourceGroups/{self.rg}"
-
-    def group(self, key):
-        return self.state[f"group_{key}"]
-
-    def group_id(self, key):
-        return f"{self.rg_id()}/providers/Microsoft.App/sandboxGroups/{self.group(key)}"
-
-    def aca(self, key):
-        return Aca(self.subscription, self.rg, self.group(key), self.region)
-
-    def rest(self, key):
-        return Rest(self.subscription, self.rg, self.group(key), self.region)
-
-
-class Aca:
-    def __init__(self, subscription, resource_group, group, region):
-        self.env = dict(os.environ, ACA_SUBSCRIPTION=subscription, ACA_RESOURCE_GROUP=resource_group,
-                        ACA_SANDBOX_GROUP=group, ACA_REGION=region)
-
-    def __call__(self, *args, check=True, timeout=1800):
-        return run(["aca", *args], check=check, env=self.env, timeout=timeout)
-
-    def exec(self, sandbox, command, check=True, timeout=900):
-        return self("sandbox", "exec", "--id", sandbox, "-c", command, check=check, timeout=timeout)
-
-    def write(self, sandbox, path, file):
-        self("sandbox", "fs", "write", "--id", sandbox, "--path", path, "--file", str(file))
-
-
-_tokens = {}
-
-
-def data_plane_token():
-    """One token for https://dynamicsessions.io, renewed after 30 minutes; never printed."""
-    with _lock:
-        cached = _tokens.get("dp")
-        if cached and time.monotonic() - cached[1] < 1800:
-            return cached[0]
-    token = az("account", "get-access-token", "--resource", "https://dynamicsessions.io",
-               "--query", "accessToken", "-o", "tsv").stdout.strip()
-    with _lock:
-        _tokens["dp"] = (token, time.monotonic())
-    sensitive("data-plane token", token)
-    return token
-
-
-class Rest:
-    """The Sandboxes data plane over HTTPS with a cached token: (status, body) per call."""
-
-    def __init__(self, subscription, resource_group, group, region):
-        self.base = (f"https://management.{region}.azuredevcompute.io/subscriptions/{subscription}"
-                     f"/resourceGroups/{resource_group}/sandboxGroups/{group}")
-
-    def request(self, method, path, body=None, timeout=300):
-        url = f"{self.base}/{path}?api-version={API_VERSION}" if path else f"{self.base}?api-version={API_VERSION}"
-        request = urllib.request.Request(url, method=method,
-                                         data=None if body is None else json.dumps(body).encode(),
-                                         headers={"Authorization": f"Bearer {data_plane_token()}",
-                                                  "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                status, data = response.status, response.read()
-        except urllib.error.HTTPError as error:
-            status, data = error.code, error.read()
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
-            return 0, {"error": type(error).__name__}
-        try:
-            return status, json.loads(data or b"{}")
-        except ValueError:
-            return status, {"text": data[:300].decode(errors="replace")}
-
-    def timed(self, method, path, body=None):
-        started = time.monotonic()
-        status, view = self.request(method, path, body)
-        return status, view, time.monotonic() - started
-
-    def sandbox(self, sandbox):
-        for attempt in range(5):
-            status, view = self.request("GET", f"sandboxes/{sandbox}")
-            if status == 200:
-                return view
-            if status == 404:
-                return None
-            time.sleep(2 ** attempt)
-        raise RuntimeError(f"GET sandboxes/{sandbox} answered {status}")
-
-    def state_of(self, sandbox):
-        view = self.sandbox(sandbox)
-        return view.get("state") if view else "missing"
-
-    def wait(self, sandbox, state, limit=600, interval=0.5):
-        started = time.monotonic()
-        while self.state_of(sandbox) != state:
-            if time.monotonic() - started > limit:
-                raise RuntimeError(f"{sandbox} did not reach {state} within {limit} s")
-            time.sleep(interval)
-        return time.monotonic() - started
-
-    def stop(self, sandbox):
-        started = time.monotonic()
-        status, _ = self.request("POST", f"sandboxes/{sandbox}/stop", {})
-        call_s = time.monotonic() - started
-        if status >= 300:
-            raise RuntimeError(f"stop {sandbox}: {status}")
-        self.wait(sandbox, "Stopped", interval=0.5)
-        return {"stop_call_s": round(call_s, 2), "stopped_after_s": elapsed(started)}
-
-    def ensure_running(self, sandbox):
-        if self.state_of(sandbox) != "Running":
-            self.request("POST", f"sandboxes/{sandbox}/resume", {})
-            self.wait(sandbox, "Running")
-
-
-def http_get(url, timeout=10):
-    """A GET from this machine: (status, seconds, body)."""
-    started = time.monotonic()
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout,
-                                    context=ssl.create_default_context()) as response:
-            return response.status, time.monotonic() - started, response.read()[:300]
-    except urllib.error.HTTPError as error:
-        return error.code, time.monotonic() - started, error.read()[:300]
-    except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException):
-        return 0, time.monotonic() - started, b""
-
-
-def laptop_ip():
-    address = run(["curl", "-fsS", "-4", "https://api.ipify.org"]).stdout.strip()
-    if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", address):
-        raise RuntimeError("Could not read this machine's public IPv4 address.")
-    return address
-
-
-def check_laptop_ip(ctx):
-    address = laptop_ip()
-    if ctx.secret.get("laptop_ip") and address != ctx.secret["laptop_ip"]:
-        raise RuntimeError("This machine's public address changed since setup; the ports no longer admit it.")
-    ctx.secret.save(laptop_ip=address)
-    sensitive("laptop ip", address)
+        super().__init__(options, runtime)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -385,8 +128,7 @@ def setup(ctx):
                        group_client=f"reports-ps-client-{stamp}",
                        vault=f"kv-atlips-{stamp}", registry=f"acratlips{stamp}",
                        workspace=f"log-atli-ps-{stamp}", identity=f"id-atli-gateway-{stamp}",
-                       environment=f"cae-atli-ps-{stamp}",
-                       role_name=f"Atli Reports Sandbox Resumer (prod-shape {stamp})")
+                       environment=f"cae-atli-ps-{stamp}")
     check_laptop_ip(ctx)
     me = az("ad", "signed-in-user", "show", "--query", "id", "-o", "tsv").stdout.strip()
     ctx.secret.save(my_object_id=me)
@@ -428,36 +170,7 @@ def setup(ctx):
 
 
 def setup_networks(ctx):
-    rg = ctx.rg
-    if "renderer_subnet_id" not in ctx.state:
-        log("Renderer network: DNS server 10.42.0.4 (unused), subnet 10.42.1.0/24, NSG denying AzurePlatformDNS")
-        az("network", "nsg", "create", "-g", rg, "-n", "nsg-renderers", "-l", ctx.region, *tags(), "-o", "none")
-        az("network", "nsg", "rule", "create", "-g", rg, "--nsg-name", "nsg-renderers", "-n", "deny-azure-platform-dns",
-           "--priority", "100", "--direction", "Outbound", "--access", "Deny", "--protocol", "*",
-           "--source-address-prefixes", "*", "--source-port-ranges", "*",
-           "--destination-address-prefixes", "AzurePlatformDNS", "--destination-port-ranges", "*", "-o", "none")
-        az("network", "vnet", "create", "-g", rg, "-n", "vnet-renderers", "-l", ctx.region, *tags(),
-           "--address-prefixes", "10.42.0.0/16", "--dns-servers", "10.42.0.4", "-o", "none")
-        subnet = az_json("network", "vnet", "subnet", "create", "-g", rg, "--vnet-name", "vnet-renderers",
-                         "-n", "renderers", "--address-prefixes", "10.42.1.0/24",
-                         "--delegations", "Microsoft.App/environments", "--network-security-group", "nsg-renderers")
-        ctx.state.save(renderer_subnet_id=subnet["id"])
-    if "gateway_subnet_id" not in ctx.state:
-        log("Gateway network: subnet 10.60.0.0/27 with a NAT gateway and a static Standard public address")
-        az("network", "public-ip", "create", "-g", rg, "-n", "pip-gateway", "-l", ctx.region, *tags(),
-           "--sku", "Standard", "--allocation-method", "Static", "--version", "IPv4", "-o", "none")
-        az("network", "nat", "gateway", "create", "-g", rg, "-n", "nat-gateway", "-l", ctx.region, *tags(),
-           "--public-ip-addresses", "pip-gateway", "--idle-timeout", "4", "-o", "none")
-        az("network", "vnet", "create", "-g", rg, "-n", "vnet-gateway", "-l", ctx.region, *tags(),
-           "--address-prefixes", "10.60.0.0/16", "-o", "none")
-        subnet = az_json("network", "vnet", "subnet", "create", "-g", rg, "--vnet-name", "vnet-gateway",
-                         "-n", "gateway", "--address-prefixes", "10.60.0.0/27",
-                         "--delegations", "Microsoft.App/environments", "--nat-gateway", "nat-gateway")
-        ctx.state.save(gateway_subnet_id=subnet["id"])
-    nat_ip = az("network", "public-ip", "show", "-g", rg, "-n", "pip-gateway", "--query", "ipAddress",
-                "-o", "tsv").stdout.strip()
-    ctx.secret.save(nat_ip=nat_ip)
-    sensitive("nat ip", nat_ip)
+    common.setup_networks(ctx, PURPOSE)
 
 
 def setup_vault(ctx):
@@ -526,28 +239,12 @@ def setup_registry(ctx, commit):
 
 def setup_sandbox_groups(ctx, networks, commit):
     def create(key):
-        aca = ctx.aca(key)
-        if f"propagation_{key}" not in ctx.state:
-            created = aca("sandboxgroup", "create", "--name", ctx.group(key), "--location", ctx.region, check=False)
-            if created.returncode != 0 and "exist" not in created.stderr.lower():
-                raise RuntimeError(redact(f"sandboxgroup create {key}: {created.stderr[-800:]}"))
-            started = time.monotonic()
-            while aca("sandbox", "list", "-o", "json", check=False).returncode != 0:
-                if time.monotonic() - started > 1200:
-                    raise RuntimeError("The data-plane role did not propagate within 20 minutes.")
-                time.sleep(10)
-            ctx.state.save(**{f"propagation_{key}": elapsed(started)})
-            log(f"Sandbox group {ctx.group(key)}: data plane works after {ctx.state[f'propagation_{key}']} s")
+        common.create_sandbox_group(ctx, key)
 
     with concurrent.futures.ThreadPoolExecutor(3) as pool:
         list(pool.map(create, ["vnet", "control", "client"]))
     networks.result()
-    if "network_connection" not in ctx.state:
-        log("Connecting the renderer group to the renderer network (connection 'renderers')")
-        started = time.monotonic()
-        ctx.aca("vnet")("sandboxgroup", "network", "create", "--group", ctx.group("vnet"),
-                        "--vnet-subnet-id", ctx.state["renderer_subnet_id"], "--name", "renderers", timeout=1800)
-        ctx.state.save(network_connection="renderers", network_connection_s=elapsed(started))
+    common.connect_renderer_network(ctx, "vnet")
 
     def build(spec):
         key, suffix = spec
@@ -555,25 +252,8 @@ def setup_sandbox_groups(ctx, networks, commit):
         state_key = f"disk_{key}_{suffix}"
         if state_key in ctx.state:
             return
-        aca = ctx.aca(key)
-        work = Path(tempfile.mkdtemp(prefix="atli-ps-context-", dir=ctx.work))
-        try:
-            context = spike.build_context(work)
-            started = time.monotonic()
-            for attempt in range(6):
-                result = aca("sandboxgroup", "disk", "create", "--source", str(context), "--name", name,
-                             "--wait-timeout", "3000", check=False, timeout=3600)
-                if result.returncode == 0:
-                    break
-                if "403" not in result.stderr or attempt == 5:
-                    raise RuntimeError(f"Disk image {name} failed:\n{result.stderr[-1500:]}")
-                time.sleep(30)
-            seconds = elapsed(started)
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
-        disks = json.loads(aca("sandboxgroup", "disk", "list", "-o", "json").stdout)
-        disk = next(d for d in disks if d.get("name") == name)
-        ctx.state.save(**{state_key: disk["id"], f"{state_key}_name": name, f"{state_key}_build_s": seconds})
+        disk_id, seconds = common.build_sandbox_disk(ctx, key, name, spike.build_context)
+        ctx.state.save(**{state_key: disk_id, f"{state_key}_name": name, f"{state_key}_build_s": seconds})
         log(f"Disk {name} in {key}: {seconds} s")
 
     with concurrent.futures.ThreadPoolExecutor(3) as pool:
@@ -582,28 +262,12 @@ def setup_sandbox_groups(ctx, networks, commit):
 
 def setup_roles(ctx):
     principal = ctx.secret["identity_principal_id"]
-    if "role_definition_id" not in ctx.state:
-        definition = {
-            "Name": ctx.state["role_name"], "IsCustom": True,
-            "Description": "Temporary test role: read and resume sandboxes only.",
-            "Actions": [], "NotActions": [],
-            "DataActions": ["Microsoft.App/sandboxGroups/sandboxes/read",
-                            "Microsoft.App/sandboxGroups/sandboxes/resume/action"],
-            "NotDataActions": [], "AssignableScopes": [ctx.rg_id()],
-        }
-        path = ctx.work / "role.json"
-        path.write_text(json.dumps(definition))
-        path.chmod(0o600)
-        created = az_json("role", "definition", "create", "--role-definition", f"@{path}")
-        path.unlink()
-        ctx.state.save(role_definition_id=created["id"], role_definition_name=created["name"])
     assignments = ctx.state.get("assignments", {})
     for name, role, scope in [("acr_pull", "AcrPull", ctx.state["registry_id"]),
-                              ("vault_user", "Key Vault Secrets User", ctx.state["vault_id"]),
-                              ("resumer", ctx.state["role_definition_name"], ctx.group_id("vnet"))]:
+                              ("vault_user", "Key Vault Secrets User", ctx.state["vault_id"])]:
         if name in assignments:
             continue
-        for attempt in range(30):  # a new role definition takes a while to be assignable
+        for attempt in range(30):  # a new identity takes a while to be assignable
             result = az("role", "assignment", "create", "--assignee-object-id", principal,
                         "--assignee-principal-type", "ServicePrincipal", "--role", role, "--scope", scope,
                         "--query", "id", "-o", "tsv", check=False)
@@ -614,40 +278,19 @@ def setup_roles(ctx):
             raise RuntimeError(f"Role assignment {name} failed: {redact(result.stderr[-500:])}")
         assignments[name] = result.stdout.strip()
         ctx.state.save(assignments=assignments, **{f"assigned_{name}_utc": utc()})
-    log("Gateway identity: AcrPull, Key Vault Secrets User, and the resume-only role assigned")
-
-
-def arm(method, path, body=None, api=ARM_APP_API, check=True):
-    """An ARM call through az rest; the body travels in a 0600 file that is deleted at once."""
-    args = ["rest", "--method", method, "--url", f"https://management.azure.com{path}?api-version={api}"]
-    handle = None
-    if body is not None:
-        handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", dir=CONTEXT_WORK[0])
-        os.chmod(handle.name, 0o600)
-        handle.write(json.dumps(body))
-        handle.close()
-        args += ["--body", f"@{handle.name}"]
-    try:
-        result = az(*args, "-o", "json", check=check)
-    finally:
-        if handle:
-            os.unlink(handle.name)
-    return json.loads(result.stdout or "null") if result.returncode == 0 else None
-
-
-CONTEXT_WORK = [None]
+    log("Gateway identity: AcrPull and Key Vault Secrets User assigned")
 
 
 def setup_environment(ctx):
     path = f"{ctx.rg_id()}/providers/Microsoft.App/managedEnvironments/{ctx.state['environment']}"
     ctx.state.save(environment_id=path)
-    view = arm("GET", path, check=False)
+    view = ctx.arm("GET", path, check=False)
     if not view:
         log(f"Container Apps environment {ctx.state['environment']} (workload profiles, gateway subnet)")
         key = az("monitor", "log-analytics", "workspace", "get-shared-keys", "-g", ctx.rg, "-n",
                  ctx.state["workspace"], "--query", "primarySharedKey", "-o", "tsv").stdout.strip()
         sensitive("workspace key", key)
-        arm("PUT", path, {
+        ctx.arm("PUT", path, {
             "location": ctx.region, "tags": {"purpose": PURPOSE},
             "properties": {
                 "vnetConfiguration": {"infrastructureSubnetId": ctx.state["gateway_subnet_id"], "internal": False},
@@ -659,7 +302,7 @@ def setup_environment(ctx):
             }})
     started = time.monotonic()
     while True:
-        view = arm("GET", path)
+        view = ctx.arm("GET", path)
         state = view["properties"].get("provisioningState")
         if state == "Succeeded":
             break
@@ -694,8 +337,6 @@ def caller_credentials(ctx):
 
 
 def gateway_env(ctx, log_requests, debug_gateway):
-    sandboxes = {"SubscriptionId": ctx.subscription, "ResourceGroup": ctx.rg, "SandboxGroup": ctx.group("vnet"),
-                 "Region": ctx.region, "ManagedIdentityClientId": ctx.secret["identity_client_id"]}
     env = {
         "ReportsServer__Mode": "Gateway",
         "ReportsServer__Authentication__Mode": "ApiKey",
@@ -707,7 +348,6 @@ def gateway_env(ctx, log_requests, debug_gateway):
         "ReportsServer__Gateway__Records__Store": "KeyVault",
         "ReportsServer__Gateway__Records__VaultUri": ctx.state["vault_uri"],
         "ReportsServer__Gateway__Records__ManagedIdentityClientId": ctx.secret["identity_client_id"],
-        "ReportsServer__Gateway__Wake__Mode": "Sandboxes",
         "Logging__Console__FormatterName": "simple",
         "Logging__Console__FormatterOptions__SingleLine": "true",
         "Logging__Console__FormatterOptions__UseUtcTimestamp": "true",
@@ -715,8 +355,6 @@ def gateway_env(ctx, log_requests, debug_gateway):
     }
     for index, tenant in enumerate(TENANTS):
         env[f"ReportsServer__Gateway__Tenants__0__Tenants__{index}"] = tenant
-    for name, value in sandboxes.items():
-        env[f"ReportsServer__Gateway__Wake__Sandboxes__{name}"] = value
     if log_requests:
         # "Request starting" and "Request finished ... in N ms" for every request.
         env["Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics"] = "Information"
@@ -733,7 +371,8 @@ def app_path(ctx):
 def deploy_gateway(ctx, replicas=1, log_requests=False, debug_gateway=False):
     """Creates or updates the gateway app; returns once its latest revision answers /health/ready."""
     server, _ = caller_credentials(ctx)
-    settings = {"replicas": replicas, "log_requests": log_requests, "debug_gateway": debug_gateway}
+    settings = {"replicas": replicas, "log_requests": log_requests, "debug_gateway": debug_gateway,
+                "activation": "OnDemand"}
     if ctx.state.get("gateway_settings") == settings and ctx.state.get("gateway_fqdn"):
         if http_get(f"https://{ctx.state['gateway_fqdn']}/health/ready")[0] == 200:
             return
@@ -775,10 +414,10 @@ def deploy_gateway(ctx, replicas=1, log_requests=False, debug_gateway=False):
     }
     log(f"Deploying the gateway: {settings}")
     started = time.monotonic()
-    arm("PUT", app_path(ctx), body)
+    ctx.arm("PUT", app_path(ctx), body)
     revision = None
     while True:
-        view = arm("GET", app_path(ctx))
+        view = ctx.arm("GET", app_path(ctx))
         properties = view["properties"]
         if (properties.get("provisioningState") == "Succeeded"
                 and properties.get("latestReadyRevisionName") == properties.get("latestRevisionName")):
@@ -810,7 +449,7 @@ def wait_replicas(ctx, revision, want, limit=600):
     started = time.monotonic()
     count = 0
     while time.monotonic() - started < limit:
-        view = arm("GET", f"{app_path(ctx)}/revisions/{revision}/replicas", check=False) or {}
+        view = ctx.arm("GET", f"{app_path(ctx)}/revisions/{revision}/replicas", check=False) or {}
         running = [r for r in view.get("value", [])
                    if all(c.get("ready") for c in r.get("properties", {}).get("containers", []))]
         count = len(running)
@@ -823,7 +462,7 @@ def wait_replicas(ctx, revision, want, limit=600):
 def restart_gateway(ctx):
     revision = ctx.state["gateway_revision"]
     started = time.monotonic()
-    arm("POST", f"{app_path(ctx)}/revisions/{revision}/restart")
+    ctx.arm("POST", f"{app_path(ctx)}/revisions/{revision}/restart")
     time.sleep(10)
     while http_get(f"https://{ctx.state['gateway_fqdn']}/health/ready")[0] != 200:
         if time.monotonic() - started > 600:
@@ -959,7 +598,6 @@ class Provisioner:
             "Provisioner__Records__VaultUri": ctx.state["vault_uri"],
             "Provisioner__DiskImageId": ctx.state[f"disk_{key}_a"],
             "Provisioner__Size": "M",
-            "Provisioner__PortActivation": "OnDemand",
             "Provisioner__AllowedSourceCidrs__0": f"{ctx.secret['nat_ip']}/32",
             "Provisioner__AllowedSourceCidrs__1": f"{ctx.secret['laptop_ip']}/32",
         })
@@ -1170,28 +808,6 @@ def hardening_verdicts(r):
 # creates
 # ---------------------------------------------------------------------------------------------
 
-def renderer_environment(size):
-    """A renderer environment as RendererServerEnvironment builds it, with a throwaway credential."""
-    key_id = "reports-" + random_secrets.token_hex(6)
-    credential = key_id + "." + random_secrets.token_hex(32)
-    verifier = base64.b64encode(hashlib.sha256(credential.encode()).digest()).decode()
-    conversions = SIZES[size][2]
-    admitted = 2 * conversions
-    return {
-        "ReportsServer__Authentication__Mode": "ApiKey",
-        "ReportsServer__Authentication__ApiKeys__0__Id": key_id,
-        "ReportsServer__Authentication__ApiKeys__0__Hash": verifier,
-        "ReportsServer__Authentication__ApiKeys__0__CallerId": "gateway",
-        "ReportsServer__Authentication__ApiKeys__0__Permissions__0": "reports.convert",
-        "ReportsServer__Limits__MaxConcurrentRequestsPerCaller": str(admitted),
-        "ReportsServer__Limits__MaxRequestBodyBytes": str(3 * 10 * 1024 * 1024),
-        "Kestrel__Limits__MaxRequestBodySize": str(3 * 10 * 1024 * 1024),
-        "ReportsEngine__Concurrency__MaxConcurrentConversions": str(conversions),
-        "ReportsEngine__Concurrency__MaxQueueLength": str(admitted - conversions),
-        "ReportsEngine__Network__Mode": "Disabled",
-    }
-
-
 def creates(ctx):
     check_laptop_ip(ctx)
     results = ctx.results.get("creates", {"samples": []})
@@ -1263,8 +879,8 @@ def wake(ctx):
     results = ctx.results.get("wake", {})
     url = gateway_url(ctx)
     deploy_gateway(ctx, replicas=1, log_requests=True)
-    records = {t: read_record(ctx, t) for t in ["vm1", "cm1", "vauto", "vman"]}
-    groups = {"vm1": "vnet", "cm1": "control", "vauto": "vnet", "vman": "vnet"}
+    records = {t: read_record(ctx, t) for t in ["vm1", "cm1", "vauto", "vrestart"]}
+    groups = {"vm1": "vnet", "cm1": "control", "vauto": "vnet", "vrestart": "vnet"}
     if ctx.options.wake_pair:
         # A second connected renderer against the same control one, invoices only.
         tenant = ctx.options.wake_pair
@@ -1302,28 +918,22 @@ def wake(ctx):
             results["auto_suspend"] = auto.result()
         ctx.record("wake", results)
 
-    # Manual port: the gateway's resume through its identity and the resume-only role.
-    if "manual" not in results or len(results["manual"].get("cycles", [])) < ctx.options.manual_cycles:
-        rest, sandbox = ctx.rest("vnet"), records["vman"]["sandboxId"]
+    # OnDemand activation must also work after the gateway loses all in-memory state.
+    if "after_gateway_restart" not in results or len(results["after_gateway_restart"].get("cycles", [])) < ctx.options.restart_cycles:
+        rest, sandbox = ctx.rest("vnet"), records["vrestart"]["sandboxId"]
         rest.ensure_running(sandbox)
         restart_s = restart_gateway(ctx)
-        since = utc()
-        time.sleep(5)
         cycles = []
-        for index in range(ctx.options.manual_cycles):
+        for index in range(ctx.options.restart_cycles):
             stop = rest.stop(sandbox)
             time.sleep(5)
-            sent_utc = utc()
-            woke = client_once(ctx, url, "vman")
-            after = client_once(ctx, url, "vman")
-            cycles.append(dict(stop, sent_utc=sent_utc, waking_invoice=woke, next_invoice=after,
+            woke = client_once(ctx, url, "vrestart")
+            after = client_once(ctx, url, "vrestart")
+            cycles.append(dict(stop, waking_invoice=woke, next_invoice=after,
                                state_after=rest.state_of(sandbox)))
-            log(f"manual wake {index}: {woke.get('status')} in {woke.get('s')} s")
-            time.sleep(35)  # past the record cache, as between the OnDemand cycles
-        results["manual"] = {"gateway_restart_s": restart_s, "since_utc": since, "cycles": cycles}
-        ctx.record("wake", results)
-    if "log" not in results["manual"]:
-        results["manual"]["log"] = manual_log(ctx, results["manual"])
+            log(f"on-demand wake after gateway restart {index}: {woke.get('status')} in {woke.get('s')} s")
+            time.sleep(35)
+        results["after_gateway_restart"] = {"gateway_restart_s": restart_s, "cycles": cycles}
         ctx.record("wake", results)
     results["summary"] = wake_summary(results)
     ctx.record("wake", results)
@@ -1356,19 +966,6 @@ def on_demand_cycles(ctx, url, records, groups, done, pair=("vm1", "cm1"),
     return cycles
 
 
-def manual_log(ctx, manual):
-    """Events 60 and 61 and the request lines of the Manual cycles, waiting for ingestion."""
-    deadline = time.monotonic() + 900
-    lines = []
-    while time.monotonic() < deadline:
-        lines = gateway_logs(ctx, manual["since_utc"], contains=["[60]", "[61]", "[62]", "[63]", "Request starting HTTP/1.1 POST",
-                                                                 "Request finished HTTP/1.1 POST", "vman"])
-        if sum("[61]" in l["line"] for l in lines) >= len(manual["cycles"]):
-            break
-        time.sleep(30)
-    return lines
-
-
 def wake_summary(results):
     summary = {}
     for tenant in ["vm1", "cm1"]:
@@ -1378,7 +975,8 @@ def wake_summary(results):
             summary[f"{tenant}_{fixture.split('.')[0]}"] = {"n": len(values), "s": sorted(values)}
     summary["vauto_after_auto_suspend"] = sorted(c["waking_invoice"].get("s") for c in results.get("auto_suspend", [])
                                                  if c["waking_invoice"].get("status") == 200)
-    summary["vman_manual"] = [c["waking_invoice"].get("s") for c in results.get("manual", {}).get("cycles", [])]
+    summary["vrestart_on_demand"] = [c["waking_invoice"].get("s")
+                                    for c in results.get("after_gateway_restart", {}).get("cycles", [])]
     return summary
 
 
@@ -1543,7 +1141,7 @@ def load(ctx):
 
 def rollout(ctx):
     check_laptop_ip(ctx)
-    for tenant, group in [("cm1", "control"), ("vman", "vnet"), ("vauto", "vnet")]:
+    for tenant, group in [("cm1", "control"), ("vrestart", "vnet"), ("vauto", "vnet")]:
         if read_record(ctx, tenant):
             Provisioner(ctx, group)("delete", "--tenant", tenant, check=False)
     result = load_phase(ctx, "rollout", ctx.options.duration, 1, ctx.options.replicas, rollout=True)
@@ -1606,7 +1204,7 @@ def cleanup(ctx):
         # The provisioner deletes its tenants (records and sandboxes).
         tenants_left = []
         if ctx.state.get("vault_uri"):
-            for tenant, (group, _, _) in TENANTS.items():
+            for tenant, (group, _, _) in {**TENANTS, "vman": ("vnet", "M", {})}.items():
                 if read_record(ctx, tenant):
                     Provisioner(ctx, group)("delete", "--tenant", tenant, check=False)
                     tenants_left.append(tenant)
@@ -1626,8 +1224,8 @@ def cleanup(ctx):
                "--force", "true", "--yes", check=False)
         # The gateway app and environment, so the platform removes the infrastructure group.
         if ctx.state.get("environment_id"):
-            arm("DELETE", app_path(ctx), check=False)
-            arm("DELETE", ctx.state["environment_id"], check=False)
+            ctx.arm("DELETE", app_path(ctx), check=False)
+            ctx.arm("DELETE", ctx.state["environment_id"], check=False)
         # Sandbox groups: the connected one's network connection first, so the subnet is free.
         for key in ["client", "control", "vnet"]:
             group = ctx.state.get(f"group_{key}")
@@ -1668,7 +1266,7 @@ def cleanup(ctx):
         "infra_resource_group_exists": az("group", "exists", "-n", ctx.state.get("infra_rg", rg)).stdout.strip(),
         "groups_with_prefix": az_json("group", "list", "--query", f"[?starts_with(name, '{PREFIX}')].name"),
         "resources_with_tag": len(az_json("resource", "list", "--tag", f"purpose={PURPOSE}", "--query", "[].name") or []),
-        "role_definition_left": bool(ctx.state.get("role_definition_name") and arm(
+        "role_definition_left": bool(ctx.state.get("role_definition_name") and ctx.arm(
             "GET", f"/subscriptions/{ctx.subscription}/providers/Microsoft.Authorization/roleDefinitions/"
                    f"{ctx.state['role_definition_name']}", api="2022-04-01", check=False)),
         "role_definitions_named": len(az_json("role", "definition", "list", "--custom-role-only", "true", "--query",
@@ -1700,7 +1298,7 @@ def main():
     parser.add_argument("--samples", type=int, default=20, help="creates: rounds; warm: samples per target")
     parser.add_argument("--wake-cycles", type=int, default=5, help="wake: OnDemand cycles per fixture")
     parser.add_argument("--auto-cycles", type=int, default=2)
-    parser.add_argument("--manual-cycles", type=int, default=3)
+    parser.add_argument("--restart-cycles", type=int, default=3)
     parser.add_argument("--wake-pair", help="wake: only OnDemand invoice cycles of this connected tenant and cm1")
     parser.add_argument("--duration", type=int, default=900)
     parser.add_argument("--factor", type=int, default=1, help="load: times each tenant's admitted concurrency")
@@ -1715,7 +1313,6 @@ def main():
         if not shutil.which(tool):
             sys.exit(f"Missing required tool: {tool}")
     ctx = Context(options)
-    CONTEXT_WORK[0] = str(ctx.work)
     if options.command == "gateway":
         deploy_gateway(ctx, options.replicas, options.log_requests, options.debug_gateway)
     elif options.command == "verify":

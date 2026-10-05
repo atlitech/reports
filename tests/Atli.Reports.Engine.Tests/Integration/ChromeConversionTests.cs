@@ -118,6 +118,10 @@ public class ChromeConversionTests(SharedChromeEngine engine)
   [Test]
   public async Task Without_a_signal_the_engine_waits_for_the_load_event()
   {
+    await using var provider = TestEngine.Create(options =>
+      options.Network.Mode = ReportsEngineNetworkMode.Unrestricted
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     await using TestHttpServer server = new();
     server.Map(
       "/slow.svg",
@@ -126,7 +130,7 @@ public class ChromeConversionTests(SharedChromeEngine engine)
       delay: TimeSpan.FromMilliseconds(700)
     );
 
-    var pdf = await engine.Converter.ConvertToBytesAsync(
+    var pdf = await converter.ConvertToBytesAsync(
       $$"""
       <!DOCTYPE html><html><head><title>loading</title></head><body>
       <img src="{{server.BaseUrl}}/slow.svg">
@@ -141,13 +145,17 @@ public class ChromeConversionTests(SharedChromeEngine engine)
   [Test]
   public async Task The_signal_survives_navigation_to_another_document()
   {
+    await using var provider = TestEngine.Create(options =>
+      options.Network.Mode = ReportsEngineNetworkMode.Unrestricted
+    );
+    var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     await using TestHttpServer server = new();
     server.Map(
       "/next",
       "<!DOCTYPE html><html><head><title>next</title></head><body><script>window.pdfReady();</script></body></html>"
     );
 
-    var pdf = await engine.Converter.ConvertToBytesAsync(
+    var pdf = await converter.ConvertToBytesAsync(
       $"<script>location.href = '{server.BaseUrl}/next';</script>",
       new PdfOptions { WaitForSignal = "pdfReady", WaitTimeout = TestEngine.GenerousTimeout }
     );

@@ -447,7 +447,7 @@ internal static class CommandLine
       );
 
   private static RendererSize ParseSize(string value, string usage) =>
-    RendererSizes.TryParse(value, out var size)
+    RendererSize.TryParse(value, out var size)
       ? size
       : throw new UsageException($"--size is '{value}'; use S, M, or L.", usage);
 

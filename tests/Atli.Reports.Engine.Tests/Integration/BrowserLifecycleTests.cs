@@ -134,8 +134,10 @@ public class BrowserLifecycleTests
   public async Task Recycling_lets_running_conversions_finish_on_the_old_browser()
   {
     await using var provider = TestEngine.Create(options =>
-      options.Browser.MaxConversionsPerProcess = 1
-    );
+    {
+      options.Browser.MaxConversionsPerProcess = 1;
+      options.Network.Mode = ReportsEngineNetworkMode.Unrestricted;
+    });
     var converter = provider.GetRequiredService<IHtmlToPdfConverter>();
     var browsers = provider.GetRequiredService<BrowserManager>();
     await browsers.WarmUpAsync(TestToken);
