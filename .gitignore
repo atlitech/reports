@@ -12,6 +12,8 @@
 x64/
 x86/
 build/
+!src/Atli.Reports.Blazor.Tailwind/build/
+!src/Atli.Reports.Blazor.Tailwind.Discovery/build/
 bld/
 [Bb]in/
 [Oo]bj/
@@ -49,7 +51,6 @@ msbuild.wrn
 
 # Javascript
 node_modules/
-base.css
 
 # Test results
 TestResults/

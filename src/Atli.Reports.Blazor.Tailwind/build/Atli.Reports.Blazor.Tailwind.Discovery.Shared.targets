@@ -1,0 +1,253 @@
+<Project>
+  <PropertyGroup>
+    <_AtliTailwindDiscoveryImported>true</_AtliTailwindDiscoveryImported>
+    <AtliTailwindDiscoveryTimeoutSeconds Condition="'$(AtliTailwindDiscoveryTimeoutSeconds)' == ''"
+      >120</AtliTailwindDiscoveryTimeoutSeconds>
+    <AtliTailwindStrict Condition="'$(AtliTailwindStrict)' == ''">false</AtliTailwindStrict>
+    <_AtliTailwindSourceTaskProject>$(MSBuildThisFileDirectory)../../Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj</_AtliTailwindSourceTaskProject>
+    <_AtliTailwindSourceAnalysisProject>$(MSBuildThisFileDirectory)../../Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj</_AtliTailwindSourceAnalysisProject>
+    <_AtliTailwindSourceTools Condition="Exists('$(_AtliTailwindSourceTaskProject)')"
+      >true</_AtliTailwindSourceTools>
+    <AtliTailwindTasksAssembly
+      Condition="'$(AtliTailwindTasksAssembly)' == '' and '$(_AtliTailwindSourceTools)' != 'true'"
+      >$(MSBuildThisFileDirectory)../tasks/net10/Atli.Reports.Blazor.Tailwind.Build.dll</AtliTailwindTasksAssembly>
+    <AtliTailwindTasksAssembly Condition="'$(AtliTailwindTasksAssembly)' == ''"
+      >$(ArtifactsPath)/bin/Atli.Reports.Blazor.Tailwind.Build/$(Configuration.ToLowerInvariant())/Atli.Reports.Blazor.Tailwind.Build.dll</AtliTailwindTasksAssembly>
+    <AtliTailwindAnalysisAssembly
+      Condition="'$(AtliTailwindAnalysisAssembly)' == '' and '$(_AtliTailwindSourceTools)' != 'true'"
+      >$(MSBuildThisFileDirectory)../tasks/analysis/Atli.Reports.Blazor.Tailwind.Analysis.dll</AtliTailwindAnalysisAssembly>
+    <AtliTailwindAnalysisAssembly Condition="'$(AtliTailwindAnalysisAssembly)' == ''"
+      >$(ArtifactsPath)/bin/Atli.Reports.Blazor.Tailwind.Analysis/$(Configuration.ToLowerInvariant())/Atli.Reports.Blazor.Tailwind.Analysis.dll</AtliTailwindAnalysisAssembly>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_AtliPackDiscoveryManifest</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.PrepareTailwindCompilerSnapshot"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.CaptureTailwindCompilerSnapshot"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.GenerateTailwindManifest"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.ResolveTailwindManifests"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.PackTailwindManifest"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <ItemGroup>
+    <Watch Include="@(AtliTailwindSource)" />
+  </ItemGroup>
+
+  <Target Name="_AtliInitializeTailwind" BeforeTargets="AssignTargetPaths">
+    <ItemGroup Condition="'$(AtliTailwindEnabled)' == 'true'">
+      <_AtliTailwindGraphInputs
+        Include="@(AtliTailwind)"
+        Condition="'%(AtliTailwind.RootComponent)' != ''"
+      />
+    </ItemGroup>
+    <PropertyGroup>
+      <AtliTailwindIntermediateDirectory Condition="'$(AtliTailwindIntermediateDirectory)' == ''"
+        >$(IntermediateOutputPath)atli-tailwind/</AtliTailwindIntermediateDirectory>
+      <AtliTailwindIntermediateDirectory>$([MSBuild]::EnsureTrailingSlash('$(AtliTailwindIntermediateDirectory)'))</AtliTailwindIntermediateDirectory>
+      <_AtliTailwindDiscoveryActive
+        Condition="'$(AtliTailwindDiscoveryEnabled)' == 'true' or '@(_AtliTailwindGraphInputs)' != ''"
+        >true</_AtliTailwindDiscoveryActive>
+      <_AtliTailwindManifest>$(AtliTailwindIntermediateDirectory)discovery/manifest.json</_AtliTailwindManifest>
+      <_AtliTailwindSnapshot>$(AtliTailwindIntermediateDirectory)discovery/compiler-arguments.json</_AtliTailwindSnapshot>
+      <_AtliTailwindPackageIndex>$(AtliTailwindIntermediateDirectory)discovery/package-index.json</_AtliTailwindPackageIndex>
+      <ProvideCommandLineArgs Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'"
+        >true</ProvideCommandLineArgs>
+      <_AtliHasReportBundles>false</_AtliHasReportBundles>
+      <_AtliHasReportBundles Condition="'@(AtliTailwind)' != ''">true</_AtliHasReportBundles>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_AtliTailwindDiscoveryActive)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'">
+      <Content
+        Include="$(_AtliTailwindManifest)"
+        Link="$(TargetFileName).atli-tailwind.json"
+        TargetPath="$(TargetFileName).atli-tailwind.json"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="Never"
+        Pack="false"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_AtliResolveTailwindTools" Condition="'$(_AtliTailwindSourceTools)' == 'true'">
+    <!-- Source imports rely on declared project references. These queries do not build. -->
+    <MSBuild
+      Projects="$(_AtliTailwindSourceTaskProject)"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindTaskOutput" />
+    </MSBuild>
+    <MSBuild
+      Projects="$(_AtliTailwindSourceAnalysisProject)"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+      Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindAnalysisOutput" />
+    </MSBuild>
+    <PropertyGroup>
+      <AtliTailwindTasksAssembly>@(_AtliTailwindTaskOutput)</AtliTailwindTasksAssembly>
+      <AtliTailwindAnalysisAssembly Condition="'@(_AtliTailwindAnalysisOutput)' != ''"
+        >@(_AtliTailwindAnalysisOutput)</AtliTailwindAnalysisAssembly>
+    </PropertyGroup>
+  </Target>
+
+  <Target
+    Name="_AtliPrepareCompilerSnapshot"
+    BeforeTargets="CoreCompile"
+    DependsOnTargets="_AtliInitializeTailwind;_AtliResolveTailwindTools"
+    Condition="'$(_AtliTailwindDiscoveryActive)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'"
+  >
+    <!-- Every graph build replaces this only after analysis and CSS compilation succeed. -->
+    <Delete
+      Files="$(AtliTailwindIntermediateDirectory)graph-success.json"
+      Condition="'@(_AtliTailwindGraphInputs)' != ''"
+    />
+    <Atli.Reports.Blazor.Tailwind.Build.PrepareTailwindCompilerSnapshot
+      SnapshotPath="$(_AtliTailwindSnapshot)"
+      AssemblyPath="@(IntermediateAssembly)"
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+    />
+    <ItemGroup>
+      <CustomAdditionalCompileOutputs Include="$(_AtliTailwindSnapshot);$(_AtliTailwindSnapshot).identity.json" />
+      <FileWrites Include="$(_AtliTailwindSnapshot);$(_AtliTailwindSnapshot).identity.json" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="_AtliCaptureCompilerSnapshot"
+    AfterTargets="CoreCompile"
+    DependsOnTargets="_AtliInitializeTailwind;_AtliResolveTailwindTools"
+    Condition="'$(_AtliTailwindDiscoveryActive)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.CaptureTailwindCompilerSnapshot
+      Arguments="@(CscCommandLineArgs)"
+      SnapshotPath="$(_AtliTailwindSnapshot)"
+      AssemblyPath="@(IntermediateAssembly)"
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      Condition="'@(CscCommandLineArgs)' != ''"
+    />
+  </Target>
+
+  <Target
+    Name="_AtliGenerateComponentManifest"
+    AfterTargets="CoreCompile"
+    DependsOnTargets="_AtliCaptureCompilerSnapshot"
+    Condition="'$(_AtliTailwindDiscoveryActive)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.GenerateTailwindManifest
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      AssemblyPath="@(IntermediateAssembly)"
+      CompilerArgumentsPath="$(_AtliTailwindSnapshot)"
+      AnalysisAssembly="$(AtliTailwindAnalysisAssembly)"
+      OutputPath="$(_AtliTailwindManifest)"
+      TargetFramework="$(TargetFramework)"
+      RuntimeIdentifier="$(RuntimeIdentifier)"
+      Components="@(AtliTailwindComponent)"
+      Sources="@(AtliTailwindSource)"
+      TimeoutSeconds="$(AtliTailwindDiscoveryTimeoutSeconds)"
+      HasReportBundles="$(_AtliHasReportBundles)"
+    >
+      <Output TaskParameter="GeneratedFiles" ItemName="FileWrites" />
+    </Atli.Reports.Blazor.Tailwind.Build.GenerateTailwindManifest>
+  </Target>
+
+  <Target
+    Name="_AtliAdvertiseComponentManifest"
+    AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+    DependsOnTargets="_AtliInitializeTailwind"
+  >
+    <ItemGroup Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'">
+      <TargetPathWithTargetPlatformMoniker
+        Update="@(TargetPathWithTargetPlatformMoniker)"
+        AtliTailwindManifestPath="$(TargetPath).atli-tailwind.json"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="GetAtliTailwindManifest"
+    DependsOnTargets="_AtliInitializeTailwind"
+    Returns="@(_AtliTailwindManifestOutput)"
+  >
+    <ItemGroup Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'">
+      <_AtliTailwindManifestOutput
+        Include="$(TargetPath).atli-tailwind.json"
+        ImplementationPath="$(TargetPath)"
+        TargetFramework="$(TargetFramework)"
+        RuntimeIdentifier="$(RuntimeIdentifier)"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="_AtliPackDiscoveryManifest"
+    DependsOnTargets="_AtliInitializeTailwind;_AtliResolveTailwindTools"
+    Condition="'$(IsCrossTargetingBuild)' != 'true'"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.GenerateTailwindManifest
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      AssemblyPath="@(IntermediateAssembly->'%(FullPath)')"
+      CompilerArgumentsPath="$(_AtliTailwindSnapshot)"
+      AnalysisAssembly="$(AtliTailwindAnalysisAssembly)"
+      OutputPath="$(_AtliTailwindManifest)"
+      TargetFramework="$(TargetFramework)"
+      RuntimeIdentifier="$(RuntimeIdentifier)"
+      Components="@(AtliTailwindComponent)"
+      Sources="@(AtliTailwindSource)"
+      TimeoutSeconds="$(AtliTailwindDiscoveryTimeoutSeconds)"
+      HasReportBundles="$(_AtliHasReportBundles)"
+      ValidateOnly="true"
+      Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'"
+    />
+    <Microsoft.NET.Build.Tasks.GetNuGetShortFolderName
+      TargetFrameworkMoniker="$(TargetFrameworkMoniker)"
+      TargetPlatformMoniker="$(TargetPlatformMoniker)"
+      Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'"
+    >
+      <Output TaskParameter="NuGetShortFolderName" PropertyName="_AtliTailwindPackageFramework" />
+    </Microsoft.NET.Build.Tasks.GetNuGetShortFolderName>
+    <Atli.Reports.Blazor.Tailwind.Build.PackTailwindManifest
+      ManifestPath="$(_AtliTailwindManifest)"
+      AssemblyPath="$(TargetPath)"
+      TargetFramework="$(TargetFramework)"
+      PackageFramework="$(_AtliTailwindPackageFramework)"
+      IndexPath="$(_AtliTailwindPackageIndex)"
+      Strict="$(AtliTailwindStrict)"
+      Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'"
+    />
+    <ItemGroup Condition="'$(_AtliTailwindDiscoveryActive)' == 'true'">
+      <TfmSpecificPackageFile
+        Include="$(_AtliTailwindManifest)"
+        PackagePath="atli-tailwind/v1/$(_AtliTailwindPackageFramework)/manifest.json"
+      />
+      <TfmSpecificPackageFile
+        Include="$(_AtliTailwindPackageIndex)"
+        PackagePath="atli-tailwind/v1/$(_AtliTailwindPackageFramework)/index.json"
+      />
+      <FileWrites Include="$(_AtliTailwindPackageIndex)" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="_AtliCleanDiscovery"
+    BeforeTargets="CoreClean"
+    DependsOnTargets="_AtliInitializeTailwind"
+    Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(DesignTimeBuild)' != 'true'"
+  >
+    <!-- Pack runs after the normal FileWrites inventory is saved. Clean its known index too,
+         and remove partial analysis outputs left by a failed first build. -->
+    <Delete Files="$(_AtliTailwindPackageIndex);$(_AtliTailwindManifest);$(_AtliTailwindManifest).raw.json;$(_AtliTailwindManifest).request.json;$(_AtliTailwindManifest).state;$(_AtliTailwindSnapshot);$(_AtliTailwindSnapshot).identity.json" />
+  </Target>
+</Project>

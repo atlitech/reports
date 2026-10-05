@@ -11,8 +11,7 @@ namespace Atli.Reports.AppHost.Tests.Support;
 
 /// <summary>
 /// The examples' AppHost (examples/Atli.Reports.AppHost), started once for the test session with
-/// Aspire.Hosting.Testing: the reports server container, built from its Dockerfile, the example apps,
-/// and the Tailwind build.
+/// Aspire.Hosting.Testing: the reports server container, built from its Dockerfile, and the example apps.
 /// </summary>
 /// <remarks>
 /// <para>

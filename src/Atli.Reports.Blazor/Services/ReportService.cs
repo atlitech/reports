@@ -130,9 +130,10 @@ public sealed class ReportService(
     object? data
   )
   {
-    var baseStyles = !string.IsNullOrEmpty(blazorReport.BaseStyles)
-      ? blazorReport.BaseStyles
-      : reportRegistry.BaseStyles;
+    var reportStyles = blazorReport.ResolveBaseStyles();
+    var baseStyles = !string.IsNullOrEmpty(reportStyles)
+      ? reportStyles
+      : reportRegistry.ResolveBaseStyles();
 
     Dictionary<string, object?> childComponentParameters = [];
     if (

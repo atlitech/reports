@@ -1,4 +1,5 @@
 using Atli.Reports.Blazor.Extensions;
+using Atli.Reports.Blazor.Tailwind;
 using Atli.Reports.Engine;
 using ExampleTemplates.ReportWithTailwind;
 
@@ -9,10 +10,7 @@ builder.AddServiceDefaults();
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-builder.Services.AddBlazorReports(options =>
-{
-  options.BaseStylesPath = "wwwroot/styles/base.css";
-});
+builder.Services.AddBlazorReports();
 
 // Reads ReportsEngine:* from configuration, for example the browser path the AppHost can pass on.
 builder.Services.AddReportsEngine(
@@ -32,6 +30,11 @@ if (app.Environment.IsDevelopment())
 
 var reportsGroup = app.MapGroup("reports");
 
-reportsGroup.MapBlazorReport<ReportWithTailwind>();
+reportsGroup.MapBlazorReport<ReportWithTailwind>(options =>
+  options.UseTailwind("ReportWithTailwind", reloadOnChange: app.Environment.IsDevelopment())
+);
+reportsGroup.MapBlazorReport<SummaryReport>(options =>
+  options.UseTailwind("SummaryReport", reloadOnChange: app.Environment.IsDevelopment())
+);
 
 app.Run();

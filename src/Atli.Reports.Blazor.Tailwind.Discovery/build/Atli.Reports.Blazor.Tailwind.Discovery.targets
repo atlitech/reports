@@ -1,0 +1,10 @@
+<Project>
+  <Import
+    Project="Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets"
+    Condition="Exists('$(MSBuildThisFileDirectory)Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets') and '$(_AtliTailwindDiscoveryImported)' != 'true'"
+  />
+  <Import
+    Project="../../Atli.Reports.Blazor.Tailwind/build/Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets"
+    Condition="!Exists('$(MSBuildThisFileDirectory)Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets') and '$(_AtliTailwindDiscoveryImported)' != 'true'"
+  />
+</Project>

@@ -1,0 +1,16 @@
+@using Microsoft.AspNetCore.Components
+
+<main id="dynamic" data-width="@ExpectedWidth" class="border-r-8">
+  <DynamicComponent Type="StampType" />
+</main>
+<script>
+  const actual = getComputedStyle(document.getElementById("stamp")).borderTopWidth;
+  if (actual === document.getElementById("dynamic").dataset.width) {
+    window.blazorReport?.completed();
+  }
+</script>
+
+@code {
+  private static Type StampType => (Type)AppContext.GetData("stamp")!;
+  private static string ExpectedWidth => StampType.Name == "BlueStamp" ? "19px" : "11px";
+}

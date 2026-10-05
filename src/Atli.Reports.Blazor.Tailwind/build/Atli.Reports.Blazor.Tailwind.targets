@@ -1,0 +1,145 @@
+<Project>
+  <Import
+    Project="Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets"
+    Condition="'$(_AtliTailwindDiscoveryImported)' != 'true'"
+  />
+  <UsingTask
+    TaskName="Atli.Reports.Blazor.Tailwind.Build.BuildTailwindCss"
+    AssemblyFile="$(AtliTailwindTasksAssembly)"
+  />
+  <ItemGroup Condition="'$(AtliTailwindEnabled)' == 'true'">
+    <Watch
+      Include="**/*.css"
+      Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder);bin/**;obj/**;$(BaseIntermediateOutputPath)**;$(BaseOutputPath)**"
+    />
+    <Watch
+      Remove="$([MSBuild]::EnsureTrailingSlash('$(AtliTailwindIntermediateDirectory)'))**"
+      Condition="'$(AtliTailwindIntermediateDirectory)' != ''"
+    />
+  </ItemGroup>
+
+  <Target
+    Name="_AtliDeclareTailwindOutputs"
+    BeforeTargets="AssignTargetPaths"
+    DependsOnTargets="_AtliInitializeTailwind"
+    Condition="'$(AtliTailwindEnabled)' == 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(DesignTimeBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'"
+  >
+    <ItemGroup>
+      <_AtliDeclaredTailwind Include="@(AtliTailwind)">
+        <_BundlePath Condition="'%(AtliTailwind.BundlePath)' != ''"
+          >%(AtliTailwind.BundlePath)</_BundlePath>
+        <_BundlePath Condition="'%(AtliTailwind.BundlePath)' == ''"
+          >$([System.Text.RegularExpressions.Regex]::Replace('$([MSBuild]::MakeRelative($(MSBuildProjectDirectory), %(AtliTailwind.FullPath)))', '(?i)\.tailwind\.css$', ''))</_BundlePath>
+      </_AtliDeclaredTailwind>
+      <Content
+        Include="@(_AtliDeclaredTailwind->'$(AtliTailwindIntermediateDirectory)%(_BundlePath).css')"
+        Link="tailwind/%(_AtliDeclaredTailwind._BundlePath).css"
+        TargetPath="tailwind/%(_AtliDeclaredTailwind._BundlePath).css"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="PreserveNewest"
+        Pack="false"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="_AtliResolveComponentManifests"
+    DependsOnTargets="_AtliGenerateComponentManifest"
+    Condition="'@(_AtliTailwindGraphInputs)' != ''"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.ResolveTailwindManifests
+      LocalManifestPath="$(_AtliTailwindManifest)"
+      AssemblyPath="@(IntermediateAssembly)"
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      ProjectAssetsFile="$(ProjectAssetsFile)"
+      TargetFramework="$(TargetFramework)"
+      RuntimeIdentifier="$(RuntimeIdentifier)"
+      References="@(ReferencePath);@(ReferenceCopyLocalPaths)"
+    >
+      <Output TaskParameter="Manifests" ItemName="_AtliResolvedManifests" />
+    </Atli.Reports.Blazor.Tailwind.Build.ResolveTailwindManifests>
+  </Target>
+
+  <Target
+    Name="AtliCompileTailwind"
+    AfterTargets="CoreCompile"
+    DependsOnTargets="_AtliInitializeTailwind;_AtliResolveTailwindTools;_AtliResolveComponentManifests"
+    Condition="'$(AtliTailwindEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true'"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.BuildTailwindCss
+      Inputs="@(AtliTailwind)"
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      IntermediateDirectory="$(AtliTailwindIntermediateDirectory)"
+      OutputDirectory="$(TargetDir)"
+      Executable="$(AtliTailwindExecutable)"
+      Version="$(AtliTailwindVersion)"
+      CacheDirectory="$(AtliTailwindCacheDirectory)"
+      Minify="$(AtliTailwindMinify)"
+      TimeoutSeconds="$(AtliTailwindTimeoutSeconds)"
+      ManifestFiles="@(_AtliResolvedManifests)"
+      Components="@(AtliTailwindComponent)"
+      Sources="@(AtliTailwindSource)"
+      ExternalPolicies="@(AtliTailwindExternal)"
+      AssemblyName="$(AssemblyName)"
+      AssemblyPath="@(IntermediateAssembly)"
+      ProjectAssetsFile="$(ProjectAssetsFile)"
+      Strict="$(AtliTailwindStrict)"
+    >
+      <Output TaskParameter="GeneratedFiles" ItemName="_AtliTailwindGenerated" />
+    </Atli.Reports.Blazor.Tailwind.Build.BuildTailwindCss>
+    <ItemGroup>
+      <FileWrites Include="@(_AtliTailwindGenerated);$(AtliTailwindIntermediateDirectory)**/*" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="AtliPublishTailwind"
+    AfterTargets="ComputeResolvedFilesToPublishList"
+    DependsOnTargets="_AtliInitializeTailwind;_AtliResolveTailwindTools"
+    Condition="'$(AtliTailwindEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true'"
+  >
+    <Atli.Reports.Blazor.Tailwind.Build.BuildTailwindCss
+      Inputs="@(AtliTailwind)"
+      ProjectDirectory="$(MSBuildProjectDirectory)"
+      IntermediateDirectory="$(AtliTailwindIntermediateDirectory)"
+      OutputDirectory="$(TargetDir)"
+      Compile="false"
+      PublishDirectory="$(PublishDir)"
+      Version="$(AtliTailwindVersion)"
+      Minify="$(AtliTailwindMinify)"
+      AssemblyName="$(AssemblyName)"
+      AssemblyPath="$(TargetPath)"
+      ProjectAssetsFile="$(ProjectAssetsFile)"
+      Strict="$(AtliTailwindStrict)"
+      Components="@(AtliTailwindComponent)"
+      Sources="@(AtliTailwindSource)"
+      ExternalPolicies="@(AtliTailwindExternal)"
+    >
+      <Output TaskParameter="GeneratedFiles" ItemName="_AtliTailwindPublished" />
+    </Atli.Reports.Blazor.Tailwind.Build.BuildTailwindCss>
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(_AtliTailwindPublished)" />
+      <ResolvedFileToPublish
+        Include="@(_AtliTailwindPublished)"
+        RelativePath="%(_AtliTailwindPublished.TargetPath)"
+        CopyToPublishDirectory="PreserveNewest"
+        ExcludeFromSingleFile="true"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="AtliTailwindExplain" DependsOnTargets="_AtliInitializeTailwind">
+    <ItemGroup>
+      <_AtliTailwindExplanation Include="$(AtliTailwindIntermediateDirectory)**/*.explain.json" />
+    </ItemGroup>
+    <Message
+      Importance="high"
+      Text="Tailwind explanation: %(_AtliTailwindExplanation.FullPath)"
+      Condition="'@(_AtliTailwindExplanation)' != ''"
+    />
+    <Warning
+      Text="No Tailwind explanation is available. Build a report with RootComponent configured first."
+      Condition="'@(_AtliTailwindExplanation)' == ''"
+    />
+  </Target>
+</Project>

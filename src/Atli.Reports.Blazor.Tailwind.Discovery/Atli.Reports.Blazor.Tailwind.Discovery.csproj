@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <EnablePackageValidation>false</EnablePackageValidation>
+    <Title>Atli Reports Blazor Tailwind Discovery</Title>
+    <Description>Build-time component and Tailwind candidate manifests for Razor component libraries.</Description>
+    <PackageTags>Blazor;Tailwind;Razor;MSBuild</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NoWarn>$(NoWarn);NU5100;NU5128</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAtliTailwindDiscoveryTools</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference
+      Include="../Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
+    <ProjectReference
+      Include="../Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="build/*.props;build/*.targets" Pack="true" PackagePath="build/" />
+    <None
+      Include="../Atli.Reports.Blazor.Tailwind/build/Atli.Reports.Blazor.Tailwind.Discovery.Shared.targets"
+      Pack="true"
+      PackagePath="build/"
+    />
+  </ItemGroup>
+  <Target Name="PackAtliTailwindDiscoveryTools">
+    <MSBuild
+      Projects="../Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindTaskAssemblyToPack" />
+    </MSBuild>
+    <MSBuild
+      Projects="../Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindAnalysisAssemblyToPack" />
+    </MSBuild>
+    <PropertyGroup>
+      <_AtliTailwindAnalysisDirectory>@(_AtliTailwindAnalysisAssemblyToPack->'%(RootDir)%(Directory)')</_AtliTailwindAnalysisDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindTaskAssemblyToPack)"
+        PackagePath="tasks/net10/"
+      />
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindTaskAssemblyToPack->'%(RootDir)%(Directory)Atli.Reports.Blazor.Tailwind.Contracts.dll')"
+        PackagePath="tasks/net10/"
+      />
+      <_AtliTailwindAnalysisFiles Include="$(_AtliTailwindAnalysisDirectory)/*.dll;$(_AtliTailwindAnalysisDirectory)/*.deps.json;$(_AtliTailwindAnalysisDirectory)/*.runtimeconfig.json" />
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindAnalysisFiles)"
+        PackagePath="tasks/analysis/"
+      />
+    </ItemGroup>
+  </Target>
+</Project>

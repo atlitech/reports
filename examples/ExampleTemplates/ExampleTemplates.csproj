@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
+  <!-- Source imports stand in for the Discovery NuGet package used by library authors. -->
+  <Import Project="../../src/Atli.Reports.Blazor.Tailwind.Discovery/build/Atli.Reports.Blazor.Tailwind.Discovery.props" />
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -6,5 +8,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <ProjectReference
+      Include="../../src/Atli.Reports.Blazor.Tailwind.Discovery/Atli.Reports.Blazor.Tailwind.Discovery.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all"
+    />
   </ItemGroup>
+  <Import Project="../../src/Atli.Reports.Blazor.Tailwind.Discovery/build/Atli.Reports.Blazor.Tailwind.Discovery.targets" />
 </Project>

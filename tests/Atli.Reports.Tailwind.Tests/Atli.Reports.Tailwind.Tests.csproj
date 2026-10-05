@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <Compile Remove="Consumer/**/*;DiscoveryConsumer/**/*;Libraries/**/*" />
+    <Content
+      Include="Consumer/**/*;DiscoveryConsumer/**/*;Libraries/**/*"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Atli.Reports.Blazor.Tailwind.Contracts/Atli.Reports.Blazor.Tailwind.Contracts.csproj" />
+  </ItemGroup>
+</Project>

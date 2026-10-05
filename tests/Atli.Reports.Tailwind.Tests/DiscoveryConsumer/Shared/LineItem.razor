@@ -1,0 +1,7 @@
+@using Microsoft.AspNetCore.Components
+
+<p id="line-item" class="text-right before:content-['hello_world']">@Label</p>
+
+@code {
+  [Parameter] public string Label { get; set; } = "";
+}

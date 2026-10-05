@@ -17,6 +17,11 @@
     <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
     <Project Path="src/Atli.Reports.Blazor.Components/Atli.Reports.Blazor.Components.csproj" />
     <Project Path="src/Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Tailwind/Atli.Reports.Blazor.Tailwind.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Tailwind.Contracts/Atli.Reports.Blazor.Tailwind.Contracts.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj" />
+    <Project Path="src/Atli.Reports.Blazor.Tailwind.Discovery/Atli.Reports.Blazor.Tailwind.Discovery.csproj" />
     <Project Path="src/Atli.Reports.Client/Atli.Reports.Client.csproj" />
     <Project Path="src/Atli.Reports.Hosting/Atli.Reports.Hosting.csproj" />
     <Project Path="src/Atli.Reports.Provisioner/Atli.Reports.Provisioner.csproj" />
@@ -27,6 +32,10 @@
     </Project>
     <Project Path="tests/Atli.Reports.Aspire.Hosting.Tests/Atli.Reports.Aspire.Hosting.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
+    <Project Path="tests/Atli.Reports.Tailwind.Tests/Atli.Reports.Tailwind.Tests.csproj">
+      <Build Project="false" />
+    </Project>
+    <Project Path="tests/Atli.Reports.Tailwind.Analysis.Tests/Atli.Reports.Tailwind.Analysis.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Client.Tests/Atli.Reports.Client.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Engine.Tests/Atli.Reports.Engine.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Hosting.Tests/Atli.Reports.Hosting.Tests.csproj" />
