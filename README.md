@@ -20,6 +20,8 @@ Source integrations upgrading from earlier commits should follow the
 | --- | --- | --- |
 | [`Atli.Reports.Engine`](src/Atli.Reports.Engine) | Converts HTML to PDF inside any .NET 10 app. One long-lived browser serves all conversions, each in a browser context of its own. Concurrency is bounded and the rest wait in a FIFO queue. The PDF streams out as the browser produces it. Also: JavaScript completion signals, crash recovery, metrics, and health checks. NativeAOT compatible. | NuGet package, from 0.26.0 |
 | [`Atli.Reports.Blazor`](src/Atli.Reports.Blazor) and [`Atli.Reports.Blazor.Components`](src/Atli.Reports.Blazor.Components) | Turns Blazor components into PDF (or HTML) reports. Map a component to an HTTP endpoint, or render it from your own code. Runs on the engine. | NuGet packages, from 0.26.0 |
+| [`Atli.Reports.Blazor.Tailwind`](src/Atli.Reports.Blazor.Tailwind) | Compiles a separate Tailwind v4 stylesheet for each report during build and publish. Includes the standalone compiler integration and report registration helpers. | Optional NuGet package, from 0.26.0 |
+| [`Atli.Reports.Blazor.Tailwind.Discovery`](src/Atli.Reports.Blazor.Tailwind.Discovery) | Exports component dependency and class manifests from Razor libraries for automatic nested component discovery. | Optional build-only NuGet package, from 0.26.0 |
 | [`Atli.Reports.Server`](src/Atli.Reports.Server) | A NativeAOT HTTP service over the engine: `POST /convert` with HTML and options, get a PDF back. Ships as a container image with `chrome-headless-shell`. | Build the image from this repository; no published image yet |
 | [`Atli.Reports.Aspire.Hosting`](src/Atli.Reports.Aspire.Hosting) | Runs the server in an [Aspire](https://aspire.dev) AppHost: `builder.AddReportsServer("reports")`, with its health check, telemetry, typed settings, and the connection string the client reads. See [docs/aspire.md](docs/aspire.md). | NuGet package, from 0.26.0 |
 
@@ -339,22 +341,50 @@ builder.Services.AddBlazorReports(options =>
 
 ### Tailwind CSS 4
 
-1. Install Tailwind at the root of your repository:
-   ```bash
-   bun add tailwindcss @tailwindcss/cli
-   ```
-2. Add `wwwroot/tailwindcss/input.css` to your project:
-   ```css
-   @import "tailwindcss";
-   ```
-3. Generate `base.css` once, or on every change:
-   ```bash
-   bunx @tailwindcss/cli -i ./path_to_your_project/wwwroot/tailwindcss/input.css -o ./path_to_your_project/wwwroot/styles/base.css -m
-   bunx @tailwindcss/cli -i ./path_to_your_project/wwwroot/tailwindcss/input.css -o ./path_to_your_project/wwwroot/styles/base.css -m --watch
-   ```
-4. Set `BaseStylesPath` to `wwwroot/styles/base.css` as above.
+The optional package compiles **one stylesheet per report** with the official standalone CLI.
+Node and Bun are not required:
 
-[`examples/TailwindReportServer`](examples/TailwindReportServer) is a working setup.
+```bash
+dotnet add package Atli.Reports.Blazor.Tailwind   # available from 0.26.0
+```
+
+Add `Reports/Invoice.tailwind.css` alongside `Invoice.razor`:
+
+```css
+@import "tailwindcss" source(none);
+```
+
+Declare its root component in the project file to discover nested components automatically:
+
+```xml
+<ItemGroup>
+  <AtliTailwind Update="Reports/Invoice.tailwind.css"
+                RootComponent="MyApp.Reports.Invoice" />
+</ItemGroup>
+```
+
+Register the report with its bundle path (relative to the project, without `.tailwind.css`):
+
+```csharp
+using Atli.Reports.Blazor.Tailwind;
+
+builder.Services.AddBlazorReports();
+// After builder.Build():
+app.MapBlazorReport<Invoice>(options => options.UseTailwind("Reports/Invoice"));
+```
+
+Normal `dotnet build` and `dotnet publish` compile, minify, and copy the CSS. Each report inlines
+its own bundle, including its shared components' classes. The first build downloads the pinned
+compiler; deployments need only the generated CSS. Discovery follows nested components and
+their rendered class expressions, including supported code-behind helpers. Add explicit `@source`
+entries for external class helpers when needed. Referenced Razor libraries opt into the build-only
+`Atli.Reports.Blazor.Tailwind.Discovery` package; applications consume their manifests without
+requiring their Razor source files. Runtime-selected component types need declared alternatives.
+
+See the [package guide](src/Atli.Reports.Blazor.Tailwind/README.md) for themes, development,
+external template projects, and offline builds. The [example](examples/TailwindReportServer)
+contains two reports with separate bundles and a shared header. Existing CSS pipelines can
+continue using `BaseStylesPath` directly.
 
 ### Assets
 
@@ -496,13 +526,15 @@ builder.Services.AddReportsEngine(
 - [Benchmarks](benchmarks/README.md)
 - [Hosted renderer design](docs/hosted-renderers.md)
 - [Isolated renderer experiment](docs/isolated-workers.md)
+- [Tailwind component discovery architecture](docs/tailwind-component-discovery.md): automatic
+  nested component discovery, manifest contracts and the remaining roadmap
 - [`examples/SimpleReportServer`](examples/SimpleReportServer): reports with and without data,
   HTML output, and a report that waits for its JavaScript
 - [`examples/RemoteReportServer`](examples/RemoteReportServer): an app with no browser of its own. It
   renders Blazor reports and converts any HTML on the reports server through `Atli.Reports.Client`;
   the reference consumer for [Aspire](docs/aspire.md)
-- [`examples/TailwindReportServer`](examples/TailwindReportServer): a report styled with Tailwind
-  CSS 4
+- [`examples/TailwindReportServer`](examples/TailwindReportServer): two reports with separate Tailwind
+  CSS 4 bundles and a shared header
 - [`examples/ExampleTemplates`](examples/ExampleTemplates): shared report components, including a
   header that repeats on every page
 
@@ -511,8 +543,8 @@ builder.Services.AddReportsEngine(
 An [Aspire](https://aspire.dev) AppHost, [`examples/Atli.Reports.AppHost`](examples/Atli.Reports.AppHost),
 runs the server and the examples together, with their logs, traces, and metrics (the engine's
 included) in the Aspire dashboard. You need the .NET 10 SDK, the
-[Aspire CLI](https://aspire.dev/get-started/install-cli/), Docker, Chrome or Chromium, and
-[Bun](https://bun.sh) for the Tailwind example. From the repository root:
+[Aspire CLI](https://aspire.dev/get-started/install-cli/), Docker, and Chrome or Chromium.
+The first Tailwind build downloads its standalone compiler. From the repository root:
 
 ```bash
 aspire start   # builds and starts everything in the background, and prints the dashboard URL
@@ -524,8 +556,7 @@ aspire stop
 | `reports-server` | `Atli.Reports.Server` in a container built from its Dockerfile, with a generated development API key wired to the remote example and dashboard test command. Direct conversions require that key; OpenAPI requires a separate diagnostics permission. The first build compiles the NativeAOT server and downloads `chrome-headless-shell`, so it takes a few minutes. |
 | `remote-report-server` | [`examples/RemoteReportServer`](examples/RemoteReportServer), which converts on `reports-server` and starts no browser; `POST /reports/reportwithrepeatingheaderperpage` and `POST /html-to-pdf` with `{"html": "..."}` |
 | `simple-report-server` | [`examples/SimpleReportServer`](examples/SimpleReportServer); `POST /reports/helloreport` and the other requests in its [`ReportServer.http`](examples/SimpleReportServer/ReportServer.http), and the dashboard links its OpenAPI document |
-| `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` |
-| `tailwind-css` | Generates the Tailwind example's stylesheet (`bun install`, then the Tailwind CLI) and exits |
+| `tailwind-report-server` | [`examples/TailwindReportServer`](examples/TailwindReportServer); `POST /reports/reportwithtailwind` and `POST /reports/summaryreport`. Report CSS compiles during the .NET build. |
 
 Ports are assigned when the AppHost starts; the dashboard and `aspire describe` list each
 resource's URLs. The examples run the engine in-process with the Chrome or Chromium installed on
@@ -567,7 +598,8 @@ Issues and pull requests are welcome at
 dotnet tool restore
 dotnet build
 dotnet test                  # integration tests need Chrome or Chromium installed
-dotnet test --project tests/Atli.Reports.AppHost.Tests   # end to end; also needs Docker and Bun
+dotnet test --project tests/Atli.Reports.AppHost.Tests   # end to end; also needs Docker
+dotnet test --project tests/Atli.Reports.Tailwind.Tests  # packed consumer build/publish checks
 dotnet csharpier check .     # the formatting gate CI runs; `dotnet csharpier format .` fixes it
 ```
 

@@ -7,6 +7,10 @@ namespace Atli.Reports.Blazor.Models;
 /// </summary>
 public class BlazorReport
 {
+  private string? _baseStyles;
+
+  internal Func<string>? BaseStylesProvider { get; set; }
+
   /// <summary>
   /// Output format for the report. Defaults to PDF.
   /// </summary>
@@ -28,9 +32,20 @@ public class BlazorReport
   public required Type Component { get; set; }
 
   /// <summary>
-  /// Base styles path to use for the report.
+  /// The loaded base styles for the report. Setting this value overrides file-based styles,
+  /// including styles configured to reload during development.
   /// </summary>
-  public string? BaseStyles { get; set; }
+  public string? BaseStyles
+  {
+    get => _baseStyles;
+    set
+    {
+      _baseStyles = value;
+      BaseStylesProvider = null;
+    }
+  }
+
+  internal string? ResolveBaseStyles() => BaseStylesProvider?.Invoke() ?? BaseStyles;
 
   /// <summary>
   /// Assets path to use for the report.

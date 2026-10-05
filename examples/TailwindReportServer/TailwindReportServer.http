@@ -2,3 +2,6 @@
 
 ### A PDF report styled with Tailwind CSS
 POST {{TailwindReportServer_HostAddress}}/reports/reportwithtailwind
+
+### A second report with a separate stylesheet and the same shared header
+POST {{TailwindReportServer_HostAddress}}/reports/summaryreport

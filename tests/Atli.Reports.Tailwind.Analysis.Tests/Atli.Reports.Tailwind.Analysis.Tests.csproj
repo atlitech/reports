@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <ProjectReference Include="../../src/Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj" />
+    <Reference
+      Include="Microsoft.CodeAnalysis"
+      HintPath="$(MSBuildBinPath)/Roslyn/bincore/Microsoft.CodeAnalysis.dll"
+      Private="true"
+    />
+    <Reference
+      Include="Microsoft.CodeAnalysis.CSharp"
+      HintPath="$(MSBuildBinPath)/Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll"
+      Private="true"
+    />
+    <Compile Remove="Fixtures/**/*" />
+    <Content Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

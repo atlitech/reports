@@ -1,0 +1,22 @@
+@inherits StyledBase
+<main class="text-blue-600 print:break-inside-avoid">
+  <div class="@EscapedClass" data-note="@PrivateSecret"></div>
+  <span class="@ArbitraryClass"></span>
+  <span class="@BaseStyles"></span>
+  <span class="@GetStyle()"></span>
+  <span class="@ClassChoices[DateTime.Now.Ticks > 0 ? "ok" : "bad"]"></span>
+  <span title="class='static-private-must-not-enter-manifest'" class="antialiased">visible-private-must-not-enter-manifest</span>
+  <aside @attributes="SplatAttributes"></aside>
+  <GenericPanel Value="42" Class="tracking-widest">
+    <Leaf />
+  </GenericPanel>
+  @if (DateTime.Now.Ticks > 0)
+  {
+    <StaticChild />
+  }
+  <DynamicComponent Type="@typeof(Leaf)" />
+  <DynamicComponent Type="@(DateTime.Now.Ticks > 0 ? typeof(Leaf) : typeof(StaticChild))" />
+  <DynamicComponent Type="@(DateTime.Now.DayOfWeek switch { DayOfWeek.Monday => typeof(Leaf), _ => typeof(StaticChild) })" />
+  <DynamicComponent Type="@(DateTime.Now.Ticks > 0 ? typeof(Leaf) : SelectedType)" />
+  <DynamicComponent Type="@SelectedType" />
+</main>

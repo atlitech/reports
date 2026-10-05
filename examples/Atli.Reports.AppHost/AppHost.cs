@@ -35,20 +35,14 @@ var simpleReportServer = builder
     _ => new() { Url = "/openapi/v1.json", DisplayText = "OpenAPI document" }
   );
 
-// The Tailwind example inlines wwwroot/styles/base.css, which is generated rather than checked in:
-// build it with the Tailwind CLI (bun install, then the package.json script) before the example starts.
-var tailwindCss = builder
-  .AddJavaScriptApp("tailwind-css", "../..", "build:tailwind-example")
-  .WithBun(installArgs: ["--frozen-lockfile"]);
-
+// The Tailwind package compiles and copies each report's stylesheet during the project build.
 var tailwindReportServer = builder
   .AddProject<Projects.TailwindReportServer>("tailwind-report-server")
   .WithHttpHealthCheck("/health")
   .WithUrlForEndpoint(
     "http",
     _ => new() { Url = "/openapi/v1.json", DisplayText = "OpenAPI document" }
-  )
-  .WaitForCompletion(tailwindCss);
+  );
 
 if (!string.IsNullOrWhiteSpace(browserExecutablePath))
 {

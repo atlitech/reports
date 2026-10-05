@@ -18,5 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atli.Reports.Blazor\Atli.Reports.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Blazor.Tailwind\Atli.Reports.Blazor.Tailwind.csproj" />
   </ItemGroup>
 </Project>

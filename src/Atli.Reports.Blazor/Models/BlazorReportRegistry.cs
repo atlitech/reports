@@ -11,10 +11,13 @@ namespace Atli.Reports.Blazor.Models;
 /// Base styles and assets are read from disk and encoded once, when the registry is created (global ones)
 /// or when a report is registered (per-report ones), and then reused for every render. Each path is read
 /// once per registry: reports that share a styles file or an assets folder share the loaded content. Edits
-/// to those files after registration are not picked up until the application restarts.
+/// to those files after registration are not picked up until the application restarts, unless
+/// <c>BaseStylesReloadOnChange</c> is enabled for the corresponding stylesheet.
 /// </remarks>
 public class BlazorReportRegistry
 {
+  private string _baseStyles = string.Empty;
+  private Func<string>? _baseStylesProvider;
   private readonly Lock _loadLock = new();
   private readonly Dictionary<string, string> _stylesByPath = new(StringComparer.Ordinal);
   private readonly Dictionary<string, Dictionary<string, string>> _assetsByPath = new(
@@ -29,7 +32,12 @@ public class BlazorReportRegistry
   {
     if (!string.IsNullOrWhiteSpace(options.Value.BaseStylesPath))
     {
-      BaseStyles = LoadStyles(options.Value.BaseStylesPath);
+      var path = Path.GetFullPath(options.Value.BaseStylesPath);
+      BaseStyles = options.Value.BaseStylesReloadOnChange ? ReadStyles(path) : LoadStyles(path);
+      if (options.Value.BaseStylesReloadOnChange)
+      {
+        _baseStylesProvider = () => ReadStyles(path);
+      }
     }
 
     if (!string.IsNullOrWhiteSpace(options.Value.AssetsPath))
@@ -47,9 +55,20 @@ public class BlazorReportRegistry
   public PdfOptions DefaultPdfOptions { get; set; }
 
   /// <summary>
-  /// The base styles for the BlazorReportRegistry.
+  /// The loaded global base styles. Setting this value overrides file-based styles,
+  /// including styles configured to reload during development.
   /// </summary>
-  public string BaseStyles { get; set; } = string.Empty;
+  public string BaseStyles
+  {
+    get => _baseStyles;
+    set
+    {
+      _baseStyles = value;
+      _baseStylesProvider = null;
+    }
+  }
+
+  internal string ResolveBaseStyles() => _baseStylesProvider?.Invoke() ?? BaseStyles;
 
   /// <summary>
   /// The global assets for the BlazorReportRegistry, keyed by file name, with base64 data URIs as values.
@@ -96,7 +115,14 @@ public class BlazorReportRegistry
       };
       if (!string.IsNullOrEmpty(options.BaseStylesPath))
       {
-        blazorReport.BaseStyles = LoadStyles(options.BaseStylesPath);
+        var path = Path.GetFullPath(options.BaseStylesPath);
+        blazorReport.BaseStyles = options.BaseStylesReloadOnChange
+          ? ReadStyles(path)
+          : LoadStyles(path);
+        if (options.BaseStylesReloadOnChange)
+        {
+          blazorReport.BaseStylesProvider = () => ReadStyles(path);
+        }
       }
 
       if (!string.IsNullOrEmpty(options.AssetsPath))
@@ -137,11 +163,28 @@ public class BlazorReportRegistry
     {
       if (!_stylesByPath.TryGetValue(fullPath, out var styles))
       {
-        styles = File.ReadAllText(fullPath);
+        styles = ReadStyles(fullPath);
         _stylesByPath.Add(fullPath, styles);
       }
 
       return styles;
+    }
+  }
+
+  private static string ReadStyles(string fullPath)
+  {
+    try
+    {
+      return File.ReadAllText(fullPath);
+    }
+    catch (IOException exception)
+      when (exception is FileNotFoundException or DirectoryNotFoundException)
+    {
+      throw new FileNotFoundException(
+        $"Report stylesheet '{fullPath}' was not found. Ensure the CSS is compiled and included in the application's build or publish output, and check BaseStylesPath.",
+        fullPath,
+        exception
+      );
     }
   }
 

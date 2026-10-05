@@ -49,3 +49,34 @@ jobs:
       # validation failures surface on the pull request instead of on release day.
       - name: Pack
         run: dotnet pack --configuration Release --output artifacts/release-packages
+
+  tailwind-consumer:
+    name: Tailwind consumer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # Packs the actual NuGets, consumes them outside the repo, and invokes the real standalone
+      # Tailwind compiler. Ubuntu also exercises actual computed styles through the PDF engine.
+      - name: Test packed consumer build and publish
+        if: matrix.os != 'ubuntu-latest'
+        run: >-
+          dotnet test --project tests/Atli.Reports.Tailwind.Tests/Atli.Reports.Tailwind.Tests.csproj
+          --treenode-filter "/*/*/*/*[Category!=Browser]"
+
+      - name: Test packed consumer and rendered styles
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet test --project tests/Atli.Reports.Tailwind.Tests/Atli.Reports.Tailwind.Tests.csproj

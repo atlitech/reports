@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Atli.Reports.Blazor.Tailwind.Contracts/Atli.Reports.Blazor.Tailwind.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference
+      Include="Microsoft.Build.Framework"
+      HintPath="$(MSBuildBinPath)/Microsoft.Build.Framework.dll"
+      Private="false"
+    />
+    <Reference
+      Include="Microsoft.Build.Utilities.Core"
+      HintPath="$(MSBuildBinPath)/Microsoft.Build.Utilities.Core.dll"
+      Private="false"
+    />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Project references don't import NuGet build assets; consumers only need the package reference. -->
+  <Import Project="../../src/Atli.Reports.Blazor.Tailwind/build/Atli.Reports.Blazor.Tailwind.props" />
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <!-- Examples are never packed; keeps `dotnet pack` of the solution quiet. -->
@@ -7,11 +9,22 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <AtliTailwind
+      Update="ReportWithTailwind.tailwind.css"
+      RootComponent="ExampleTemplates.ReportWithTailwind.ReportWithTailwind"
+      RootAssembly="ExampleTemplates"
+    />
+    <AtliTailwind
+      Update="SummaryReport.tailwind.css"
+      RootComponent="ExampleTemplates.ReportWithTailwind.SummaryReport"
+      RootAssembly="ExampleTemplates"
+    />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Atli.Reports.Blazor\Atli.Reports.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Atli.Reports.Blazor.Tailwind\Atli.Reports.Blazor.Tailwind.csproj" />
     <ProjectReference Include="..\ExampleTemplates\ExampleTemplates.csproj" />
     <ProjectReference Include="..\Atli.Reports.ServiceDefaults\Atli.Reports.ServiceDefaults.csproj" />
   </ItemGroup>
+  <Import Project="../../src/Atli.Reports.Blazor.Tailwind/build/Atli.Reports.Blazor.Tailwind.targets" />
 </Project>

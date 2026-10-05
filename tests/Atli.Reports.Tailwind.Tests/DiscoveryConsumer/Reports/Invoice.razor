@@ -1,0 +1,25 @@
+@using DiscoveryConsumer.Shared
+@inherits ReportBase
+
+<Header />
+<main id="invoice" class="uppercase w-[123px]">
+  <Grid Items="Items">
+    <ItemTemplate Context="row">
+      <LineItem Label="@row" />
+    </ItemTemplate>
+  </Grid>
+  <p class="@StatusClass">Code-behind class</p>
+  <p class="@BaseClass">Inherited class</p>
+  <span id="print-only-check" class="block print:hidden">Hidden when printing</span>
+</main>
+<section class="print:break-before-page">Second printed page</section>
+<script>
+  const invoice = getComputedStyle(document.getElementById("invoice"));
+  const header = getComputedStyle(document.getElementById("report-header"));
+  const line = getComputedStyle(document.getElementById("line-item"));
+  const pseudo = getComputedStyle(document.getElementById("line-item"), "::before");
+  if (invoice.width === "123px" && header.fontWeight === "700" && line.textAlign === "right"
+      && pseudo.content === '"hello world"') {
+    window.tailwindReportReady?.();
+  }
+</script>

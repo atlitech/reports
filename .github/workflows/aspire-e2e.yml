@@ -3,8 +3,8 @@ name: Aspire end to end
 # Starts examples/Atli.Reports.AppHost with Aspire.Hosting.Testing and converts real documents through
 # its resources (tests/Atli.Reports.AppHost.Tests): the reports server container built from this
 # checkout, the remote example that converts through Atli.Reports.Client, and the examples that run
-# the engine in-process with the runner's Google Chrome. The Tailwind example's stylesheet is built
-# with Bun.
+# the engine in-process with the runner's Google Chrome. Tailwind report stylesheets compile as
+# part of the .NET project build.
 #
 # The orchestrator (DCP) comes from the Aspire CLI bundle: building the AppHost, which sets
 # AspireUseCliBundle, installs the CLI release paired with its SDK through dnx when no Aspire CLI is
@@ -24,8 +24,6 @@ on:
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "global.json"
-      - "package.json"
-      - "bun.lock"
       - ".github/workflows/aspire-e2e.yml"
   push:
     branches: [ "main" ]
@@ -36,8 +34,6 @@ on:
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "global.json"
-      - "package.json"
-      - "bun.lock"
       - ".github/workflows/aspire-e2e.yml"
   workflow_dispatch:
 
@@ -64,17 +60,10 @@ jobs:
         with:
           global-json-file: global.json
 
-      # The tailwind-css resource runs `bun install --frozen-lockfile` and the Tailwind CLI.
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.2
-
       - name: Show the tools the AppHost uses
         run: |
           docker version --format 'Docker {{.Server.Version}}'
           google-chrome --version
-          bun --version
 
       - name: Build
         run: dotnet build tests/Atli.Reports.AppHost.Tests/Atli.Reports.AppHost.Tests.csproj

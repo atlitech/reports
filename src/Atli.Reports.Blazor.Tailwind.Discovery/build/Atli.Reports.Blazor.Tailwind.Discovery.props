@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <AtliTailwindDiscoveryEnabled Condition="'$(AtliTailwindDiscoveryEnabled)' == ''"
+      >true</AtliTailwindDiscoveryEnabled>
+  </PropertyGroup>
+</Project>

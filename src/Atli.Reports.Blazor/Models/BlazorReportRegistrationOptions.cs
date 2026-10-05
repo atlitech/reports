@@ -23,6 +23,12 @@ public class BlazorReportRegistrationOptions
   public string? BaseStylesPath { get; set; }
 
   /// <summary>
+  /// Reads this report's <see cref="BaseStylesPath"/> again for each render. Enable during development
+  /// to pick up compiled stylesheet changes without restarting. Defaults to <see langword="false"/>.
+  /// </summary>
+  public bool BaseStylesReloadOnChange { get; set; }
+
+  /// <summary>
   /// Assets path for the report.
   /// </summary>
   public string? AssetsPath { get; set; }

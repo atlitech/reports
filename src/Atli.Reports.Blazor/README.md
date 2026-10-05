@@ -93,6 +93,23 @@ callback form. Replace `JavaScriptSettings.WaitForCompletedSignal = true` with
 Set `WaitForSignal = null` to disable completion waiting. Components inheriting `BlazorReportBase`
 can remove their own `ReportAssets` parameter because the base now supplies it.
 
+## Tailwind CSS per report
+
+The optional [Atli.Reports.Blazor.Tailwind](https://github.com/atlitech/reports/tree/main/src/Atli.Reports.Blazor.Tailwind)
+package compiles a separate Tailwind v4 stylesheet for each `*.tailwind.css` input during build
+and publish, using the standalone compiler. Configure explicit `@source` paths for the report
+and its shared components, then select its bundle:
+
+```csharp
+using Atli.Reports.Blazor.Tailwind;
+
+app.MapBlazorReport<Invoice>(options => options.UseTailwind("Reports/Invoice"));
+```
+
+For any CSS pipeline, setting `BaseStylesReloadOnChange = true` on global or per-report options
+rereads that file for each render during development. The default remains cached styles until
+restart. This reloads compiled CSS; it does not compile source stylesheets.
+
 ## Wait for a report's JavaScript
 
 ```csharp

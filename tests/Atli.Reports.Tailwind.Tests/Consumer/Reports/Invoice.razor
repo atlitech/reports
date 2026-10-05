@@ -1,0 +1,12 @@
+@using Consumer.Shared
+
+<Header />
+<main id="invoice" class="underline uppercase w-[123px]">Invoice</main>
+<script>
+  // PDF conversion succeeds only when the bundled CSS actually styles the report.
+  const invoice = getComputedStyle(document.getElementById("invoice"));
+  const header = getComputedStyle(document.getElementById("report-header"));
+  if (invoice.width === "123px" && invoice.textDecorationLine === "underline" && header.fontWeight === "700") {
+    window.tailwindReportReady?.();
+  }
+</script>

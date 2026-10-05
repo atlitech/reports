@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Fixture.Leaf</RootNamespace>
+    <AssemblyName>Fixture.Leaf</AssemblyName>
+    <PackageId>Fixture.AtliTailwind.Leaf</PackageId>
+    <Version>0.0.0-tailwindtests</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Atli.Reports.Blazor.Tailwind.Discovery" Version="0.0.0-tailwindtests" PrivateAssets="all" />
+    <AtliTailwindSource Include="heading-candidates.txt" OwnerComponent="Fixture.Leaf.LeafHeading" />
+  </ItemGroup>
+</Project>

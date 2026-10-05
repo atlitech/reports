@@ -39,15 +39,12 @@ public class InProcessExampleTests(ReportsAppHost appHost)
   }
 
   [Test]
-  public async Task The_tailwind_example_renders_a_report_styled_by_the_tailwind_build()
+  [Arguments("/reports/reportwithtailwind")]
+  [Arguments("/reports/summaryreport")]
+  public async Task The_tailwind_example_renders_a_report_styled_by_the_tailwind_build(string path)
   {
-    // The example starts once the tailwind-css resource (bun install, then the Tailwind CLI) has
-    // written the stylesheet it inlines.
-    var pdf = await PostReportAsync(
-      ReportsAppHost.TailwindExample,
-      "/reports/reportwithtailwind",
-      content: null
-    );
+    // The project build compiles the report's own stylesheet before the example starts.
+    var pdf = await PostReportAsync(ReportsAppHost.TailwindExample, path, content: null);
 
     await Assert.That(Pdf.IsComplete(pdf)).IsTrue();
   }

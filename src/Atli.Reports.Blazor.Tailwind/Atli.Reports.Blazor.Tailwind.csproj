@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Title>Atli Reports Blazor Tailwind</Title>
+    <Description>Compile a small Tailwind CSS v4 stylesheet for each Blazor report during build and publish, without Node.js.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageTags>Blazor;Reports;Tailwind;CSS;pdf</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- The MSBuild task assembly is deliberately a build tool, not a runtime reference. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAtliTailwindBuildTasks</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Atli.Reports.Blazor/Atli.Reports.Blazor.csproj" />
+    <ProjectReference
+      Include="../Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
+    <ProjectReference
+      Include="../Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="build/*.props;build/*.targets" Pack="true" PackagePath="build/" />
+  </ItemGroup>
+  <Target Name="PackAtliTailwindBuildTasks">
+    <MSBuild
+      Projects="../Atli.Reports.Blazor.Tailwind.Build/Atli.Reports.Blazor.Tailwind.Build.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindTaskAssemblyToPack" />
+    </MSBuild>
+    <MSBuild
+      Projects="../Atli.Reports.Blazor.Tailwind.Analysis/Atli.Reports.Blazor.Tailwind.Analysis.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_AtliTailwindAnalysisAssemblyToPack" />
+    </MSBuild>
+    <PropertyGroup>
+      <_AtliTailwindAnalysisDirectory>@(_AtliTailwindAnalysisAssemblyToPack->'%(RootDir)%(Directory)')</_AtliTailwindAnalysisDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindTaskAssemblyToPack)"
+        PackagePath="tasks/net10/"
+      />
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindTaskAssemblyToPack->'%(RootDir)%(Directory)Atli.Reports.Blazor.Tailwind.Contracts.dll')"
+        PackagePath="tasks/net10/"
+      />
+      <_AtliTailwindAnalysisFiles Include="$(_AtliTailwindAnalysisDirectory)/*.dll;$(_AtliTailwindAnalysisDirectory)/*.deps.json;$(_AtliTailwindAnalysisDirectory)/*.runtimeconfig.json" />
+      <TfmSpecificPackageFile
+        Include="@(_AtliTailwindAnalysisFiles)"
+        PackagePath="tasks/analysis/"
+      />
+    </ItemGroup>
+  </Target>
+</Project>

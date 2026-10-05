@@ -1,0 +1,9 @@
+@typeparam TValue
+<section class="grid grid-cols-2 @Class">
+  @ChildContent
+</section>
+@code {
+  [Parameter] public TValue? Value { get; set; }
+  [Parameter] public RenderFragment? ChildContent { get; set; }
+  [Parameter] public string? Class { get; set; }
+}
