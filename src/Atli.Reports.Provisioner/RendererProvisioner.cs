@@ -1735,7 +1735,7 @@ internal sealed class RendererProvisioner
     var sandbox = old.SandboxId is null
       ? null
       : await _sandboxes.GetAsync(old.SandboxId, cancellationToken);
-    if (sandbox is not null && RendererSizes.TryParse(RendererLabels.SizeOf(sandbox), out var size))
+    if (sandbox is not null && RendererSize.TryParse(RendererLabels.SizeOf(sandbox), out var size))
     {
       return size;
     }

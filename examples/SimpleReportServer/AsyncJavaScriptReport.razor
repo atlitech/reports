@@ -1,7 +1,7 @@
 @*
   A report that finishes rendering in JavaScript. The script stands in for asynchronous work such as
   fetching data or drawing a chart with a charting library. It calls blazorReport.completed() when it is
-  done; because the report is mapped with JavaScriptSettings.WaitForCompletedSignal = true, the PDF is
+  done; because the report is mapped with PdfOptions.WaitForSignal = "reportReady", the PDF is
   printed only after that call.
 *@
 <h1>@Data.Title</h1>

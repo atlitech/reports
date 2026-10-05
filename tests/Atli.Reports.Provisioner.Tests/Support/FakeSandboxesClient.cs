@@ -213,19 +213,6 @@ internal sealed class FakeSandboxesClient(Journal journal, TimeProvider clock) :
   public Task<SandboxView> AddPortAsync(
     string sandboxId,
     int port,
-    bool anonymous,
-    CancellationToken cancellationToken
-  ) =>
-    AddPortAsync(
-      sandboxId,
-      port,
-      new SandboxPortOptions { Anonymous = anonymous },
-      cancellationToken
-    );
-
-  public Task<SandboxView> AddPortAsync(
-    string sandboxId,
-    int port,
     SandboxPortOptions options,
     CancellationToken cancellationToken
   )

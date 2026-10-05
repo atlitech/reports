@@ -45,20 +45,14 @@ public class BlazorReportRegistry
       GlobalAssets = LoadAssets(options.Value.AssetsPath);
     }
 
-    DefaultPdfOptions = options.Value.PdfOptions;
-    options.Value.JavaScriptSettings.Validate(nameof(options));
-    DefaultJavaScriptSettings = options.Value.JavaScriptSettings;
+    ValidatePdfOptions(options.Value.PdfOptions);
+    DefaultPdfOptions = options.Value.PdfOptions.Clone();
   }
 
   /// <summary>
-  /// The default PDF conversion options for reports registered without their own.
+  /// The PDF options copied when registering a report, before applying its configuration.
   /// </summary>
   public PdfOptions DefaultPdfOptions { get; set; }
-
-  /// <summary>
-  /// The JavaScript settings for reports registered without their own.
-  /// </summary>
-  public BlazorReportJavaScriptOptions DefaultJavaScriptSettings { get; set; }
 
   /// <summary>
   /// The loaded global base styles. Setting this value overrides file-based styles,
@@ -89,19 +83,17 @@ public class BlazorReportRegistry
   /// <summary>
   /// Adds a report to the BlazorReportRegistry.
   /// </summary>
-  /// <param name="options"> The options to use when adding the report. </param>
+  /// <param name="setupAction"> Configures a report after copying the global PDF defaults. </param>
   /// <typeparam name="T"> The type of the report to add. </typeparam>
   /// <returns> The BlazorReport that was added. </returns>
   /// <exception cref="InvalidOperationException"> Thrown when a report with the same name already exists. </exception>
-  public BlazorReport AddReport<T>(BlazorReportRegistrationOptions? options = null)
+  public BlazorReport AddReport<T>(Action<BlazorReportRegistrationOptions>? setupAction = null)
   {
-    return AddReport(typeof(T), options);
-  }
-
-  private BlazorReport AddReport(Type component, BlazorReportRegistrationOptions? options)
-  {
-    options?.JavaScriptSettings.Validate(nameof(options));
-    var reportNameToUse = options?.ReportName ?? component.Name;
+    var component = typeof(T);
+    BlazorReportRegistrationOptions options = new() { PdfOptions = DefaultPdfOptions.Clone() };
+    setupAction?.Invoke(options);
+    ValidatePdfOptions(options.PdfOptions);
+    var reportNameToUse = options.ReportName ?? component.Name;
     var normalizedReportName = reportNameToUse.ToLowerInvariant().Trim();
 
     lock (_loadLock)
@@ -115,14 +107,13 @@ public class BlazorReportRegistry
 
       BlazorReport blazorReport = new()
       {
-        OutputFormat = options?.OutputFormat ?? ReportOutputFormat.Pdf,
+        OutputFormat = options.OutputFormat,
         Name = reportNameToUse,
         NormalizedName = normalizedReportName,
         Component = component,
-        PdfOptions = options?.PdfOptions,
-        JavaScriptSettings = options?.JavaScriptSettings,
+        PdfOptions = options.PdfOptions.Clone(),
       };
-      if (!string.IsNullOrEmpty(options?.BaseStylesPath))
+      if (!string.IsNullOrEmpty(options.BaseStylesPath))
       {
         var path = Path.GetFullPath(options.BaseStylesPath);
         blazorReport.BaseStyles = options.BaseStylesReloadOnChange
@@ -134,13 +125,31 @@ public class BlazorReportRegistry
         }
       }
 
-      if (!string.IsNullOrEmpty(options?.AssetsPath))
+      if (!string.IsNullOrEmpty(options.AssetsPath))
       {
         blazorReport.Assets = LoadAssets(options.AssetsPath);
       }
 
       Reports.Add(normalizedReportName, blazorReport);
       return blazorReport;
+    }
+  }
+
+  private static void ValidatePdfOptions(PdfOptions options)
+  {
+    ArgumentNullException.ThrowIfNull(options);
+    if (options.WaitForSignal is not null && string.IsNullOrWhiteSpace(options.WaitForSignal))
+    {
+      throw new ArgumentException("The signal name must not be blank.", nameof(options));
+    }
+
+    if (options.WaitTimeout < TimeSpan.Zero && options.WaitTimeout != Timeout.InfiniteTimeSpan)
+    {
+      throw new ArgumentOutOfRangeException(
+        nameof(options),
+        options.WaitTimeout,
+        "The signal wait timeout must not be negative, except Timeout.InfiniteTimeSpan."
+      );
     }
   }
 

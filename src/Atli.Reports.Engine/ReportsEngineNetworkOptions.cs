@@ -4,11 +4,11 @@ namespace Atli.Reports.Engine;
 public sealed class ReportsEngineNetworkOptions
 {
   /// <summary>
-  /// Defaults to unrestricted access for compatibility with embedded applications. The standalone
-  /// server defaults to <see cref="ReportsEngineNetworkMode.Disabled"/>. Restricted modes are
+  /// Defaults to <see cref="ReportsEngineNetworkMode.Disabled"/> for both embedded applications
+  /// and the standalone server. Opt in to external assets explicitly. Restricted modes are
   /// defense in depth for controlled documents, not containment of a compromised browser.
   /// </summary>
-  public ReportsEngineNetworkMode Mode { get; set; } = ReportsEngineNetworkMode.Unrestricted;
+  public ReportsEngineNetworkMode Mode { get; set; } = ReportsEngineNetworkMode.Disabled;
 
   /// <summary>
   /// Exact HTTP(S) origins permitted in allowlist mode, for example <c>https://assets.example.com</c>.

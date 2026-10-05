@@ -1,5 +1,4 @@
 using Atli.Reports.Hosting.Renderers;
-using Atli.Reports.Hosting.Sandboxes;
 
 namespace Atli.Reports.Server.Gateway;
 
@@ -46,11 +45,9 @@ internal sealed class GatewayOptions
   /// selector: it is checked against the caller's membership and never names a tenant the caller
   /// does not belong to.
   /// </summary>
-  public string TenantHeader { get; set; } = "X-Reports-Tenant";
+  public const string TenantHeader = "X-Reports-Tenant";
 
   public GatewayRecordsOptions Records { get; set; } = new();
-
-  public GatewayWakeOptions Wake { get; set; } = new();
 
   public GatewayProvisioningOptions Provisioning { get; set; } = new();
 
@@ -110,20 +107,7 @@ internal sealed class GatewayOptions
   {
     ValidateTenants();
 
-    if (
-      TenantHeader.Length is < 1 or > 64
-      || TenantHeader.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
-      || TenantHeader.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-      || TenantHeader.Equals("X-Reports-Api-Key", StringComparison.OrdinalIgnoreCase)
-    )
-    {
-      throw new InvalidOperationException(
-        "ReportsServer:Gateway:TenantHeader must be a header name of letters, digits, hyphens, and underscores, and not a credential header."
-      );
-    }
-
     Records.Validate(AllowHttpRenderers);
-    Wake.Validate();
     Provisioning.Validate(Records, AllowHttpRenderers);
 
     if (RendererTimeout <= TimeSpan.Zero || RendererTimeout > TimeSpan.FromHours(24))
@@ -367,26 +351,25 @@ internal sealed class GatewayRecordsOptions
 
   public void Validate(bool allowHttpRenderers)
   {
-    switch (Store)
+    if (Store == ConfigurationStore)
     {
-      case ConfigurationStore:
-        ValidateRenderers(allowHttpRenderers);
-        break;
-      case "File" when string.IsNullOrWhiteSpace(Path):
+      ValidateRenderers(allowHttpRenderers);
+    }
+    else
+    {
+      var options = ToStoreOptions();
+      try
+      {
+        options.Validate();
+      }
+      catch (InvalidOperationException exception)
+      {
         throw new InvalidOperationException(
-          "ReportsServer:Gateway:Records:Store=File needs Records:Path, the directory of record files."
+          $"ReportsServer:Gateway:Records configuration is invalid: {exception.Message}",
+          exception
         );
-      case "KeyVault"
-        when VaultUri is not { IsAbsoluteUri: true } || VaultUri.Scheme != Uri.UriSchemeHttps:
-        throw new InvalidOperationException(
-          "ReportsServer:Gateway:Records:Store=KeyVault needs Records:VaultUri, the vault's https address."
-        );
-      case "File" or "KeyVault":
-        break;
-      default:
-        throw new InvalidOperationException(
-          "ReportsServer:Gateway:Records:Store must be Configuration, File, or KeyVault."
-        );
+      }
+      Store = options.Store;
     }
 
     if (Store != ConfigurationStore && Renderers.Length > 0)
@@ -492,55 +475,6 @@ internal sealed class GatewayRendererEntry
       SandboxId = SandboxId,
       MaxConcurrentRequests = MaxConcurrentRequests,
     };
-}
-
-/// <summary>Waking suspended renderers before forwarding to them.</summary>
-internal sealed class GatewayWakeOptions
-{
-  public const string SandboxesMode = "Sandboxes";
-
-  /// <summary><c>None</c>, or <c>Sandboxes</c> to resume suspended Azure Container Apps sandboxes.</summary>
-  public string Mode { get; set; } = "None";
-
-  /// <summary>For <c>Sandboxes</c>: the sandbox group the renderers run in.</summary>
-  public SandboxesOptions Sandboxes { get; set; } = new();
-
-  /// <summary>How long one request keeps resuming and retrying a renderer that is not running.</summary>
-  public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
-
-  public bool Enabled => Mode == SandboxesMode;
-
-  public void Validate()
-  {
-    if (Mode is not ("None" or SandboxesMode))
-    {
-      throw new InvalidOperationException(
-        "ReportsServer:Gateway:Wake:Mode must be None (the default) or Sandboxes."
-      );
-    }
-
-    if (Timeout <= TimeSpan.Zero || Timeout > TimeSpan.FromMinutes(10))
-    {
-      throw new InvalidOperationException(
-        "ReportsServer:Gateway:Wake:Timeout must be positive and at most 10 minutes."
-      );
-    }
-
-    if (Enabled)
-    {
-      try
-      {
-        Sandboxes.Validate();
-      }
-      catch (InvalidOperationException exception)
-      {
-        throw new InvalidOperationException(
-          $"ReportsServer:Gateway:Wake:Sandboxes is incomplete. {exception.Message}",
-          exception
-        );
-      }
-    }
-  }
 }
 
 /// <summary>

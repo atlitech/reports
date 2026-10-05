@@ -17,6 +17,9 @@ public class ReportServiceTests
   [Arguments(ConversionErrorKind.Timeout)]
   [Arguments(ConversionErrorKind.SignalTimeout)]
   [Arguments(ConversionErrorKind.RenderFailed)]
+  [Arguments(ConversionErrorKind.Unauthorized)]
+  [Arguments(ConversionErrorKind.Forbidden)]
+  [Arguments(ConversionErrorKind.PolicyDenied)]
   public async Task Conversion_errors_keep_their_kind_and_message(ConversionErrorKind kind)
   {
     await using var services = TestEngine.CreateServices(configureServices: collection =>
@@ -36,14 +39,14 @@ public class ReportServiceTests
   }
 
   [Test]
-  public async Task Registered_reports_use_the_template_and_global_JavaScript_settings()
+  public async Task Registered_reports_use_the_template_and_global_signal_settings()
   {
     var converter = FakeHtmlToPdfConverter.Succeeding();
     await using var services = TestEngine.CreateServices(
       options =>
       {
-        options.JavaScriptSettings.WaitForCompletedSignal = true;
-        options.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromSeconds(12);
+        options.PdfOptions.WaitForSignal = "reportReady";
+        options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(12);
       },
       collection => collection.AddSingleton<IHtmlToPdfConverter>(converter)
     );
@@ -64,9 +67,7 @@ public class ReportServiceTests
     await Assert.That(converter.LastHtml).StartsWith("<!DOCTYPE html>");
     await Assert.That(converter.LastHtml).Contains("<h1>Hello, registered</h1>");
     await Assert.That(converter.LastHtml).Contains("window.blazorReport=");
-    await Assert
-      .That(converter.LastOptions!.WaitForSignal)
-      .IsEqualTo(ReportService.CompletedSignalName);
+    await Assert.That(converter.LastOptions!.WaitForSignal).IsEqualTo("reportReady");
     await Assert.That(converter.LastOptions.WaitTimeout).IsEqualTo(TimeSpan.FromSeconds(12));
     await Assert.That(destination.CanWrite).IsTrue();
   }

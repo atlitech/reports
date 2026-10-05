@@ -342,7 +342,9 @@ public class ConvertEndpointTests
   }
 
   [Test]
-  public async Task Omitted_tagging_leaves_the_choice_to_the_browser()
+  [Arguments("""{"orientation":"Portrait","paperSize":"Legal"}""")]
+  [Arguments("""{"orientation":"Portrait","paperSize":"Legal","generateTaggedPdf":null}""")]
+  public async Task Omitted_or_null_tagging_uses_the_explicit_tagged_default(string options)
   {
     PdfOptions? received = null;
     await using var server = await RunningServer.StartAsync(
@@ -352,14 +354,12 @@ public class ConvertEndpointTests
       )
     );
 
-    using var response = await server.PostAsync(
-      """{"html":"<p>x</p>","options":{"orientation":"Portrait","paperSize":"Legal"}}"""
-    );
+    using var response = await server.PostAsync($$"""{"html":"<p>x</p>","options":{{options}}}""");
 
     await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
     await Assert.That(received!.Orientation).IsEqualTo(PageOrientation.Portrait);
     await Assert.That(received.PaperSize).IsEqualTo(PaperSize.Legal);
-    await Assert.That(received.GenerateTaggedPdf).IsNull();
+    await Assert.That(received.GenerateTaggedPdf).IsTrue();
   }
 
   [Test]

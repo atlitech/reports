@@ -27,7 +27,9 @@ public class AssetCachingTests
       options.BaseStylesPath = stylesPath;
       options.AssetsPath = Path.GetDirectoryName(logoPath);
     });
-    var report = services.GetRequiredService<BlazorReportRegistry>().AddReport<AssetReport>(Html());
+    var report = services
+      .GetRequiredService<BlazorReportRegistry>()
+      .AddReport<AssetReport>(options => options.OutputFormat = ReportOutputFormat.Html);
 
     var first = await RenderHtmlAsync(services, report);
     await File.WriteAllTextAsync(stylesPath, "h1 { color: red; }");
@@ -47,13 +49,13 @@ public class AssetCachingTests
     var stampPath = folder.Write("stamps/stamp.png", [4, 5, 6]);
     await using var services = TestEngine.CreateServices();
     var registry = services.GetRequiredService<BlazorReportRegistry>();
-    BlazorReportRegistrationOptions Options(string name) =>
-      new()
+    Action<BlazorReportRegistrationOptions> Options(string name) =>
+      options =>
       {
-        ReportName = name,
-        OutputFormat = ReportOutputFormat.Html,
-        BaseStylesPath = stylesPath,
-        AssetsPath = Path.GetDirectoryName(stampPath),
+        options.ReportName = name;
+        options.OutputFormat = ReportOutputFormat.Html;
+        options.BaseStylesPath = stylesPath;
+        options.AssetsPath = Path.GetDirectoryName(stampPath);
       };
 
     var first = registry.AddReport<ReportAssetReport>(Options("first"));
@@ -69,8 +71,28 @@ public class AssetCachingTests
     await Assert.That(html).Contains("data:image/png;base64,BAUG");
   }
 
-  private static BlazorReportRegistrationOptions Html() =>
-    new() { OutputFormat = ReportOutputFormat.Html };
+  [Test]
+  public async Task Reports_with_an_intermediate_base_receive_global_and_report_assets()
+  {
+    using var folder = new TemporaryFolder();
+    var logoPath = folder.Write("global/logo.png", [1, 2, 3]);
+    var stampPath = folder.Write("report/stamp.png", [4, 5, 6]);
+    await using var services = TestEngine.CreateServices(options =>
+      options.AssetsPath = Path.GetDirectoryName(logoPath)
+    );
+    var report = services
+      .GetRequiredService<BlazorReportRegistry>()
+      .AddReport<ReportAssetReport>(options =>
+      {
+        options.OutputFormat = ReportOutputFormat.Html;
+        options.AssetsPath = Path.GetDirectoryName(stampPath);
+      });
+
+    var html = await RenderHtmlAsync(services, report);
+
+    await Assert.That(html).Contains("data:image/png;base64,AQID");
+    await Assert.That(html).Contains("data:image/png;base64,BAUG");
+  }
 
   private static async Task<string> RenderHtmlAsync(IServiceProvider services, BlazorReport report)
   {

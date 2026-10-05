@@ -7,6 +7,6 @@
   const invoice = getComputedStyle(document.getElementById("invoice"));
   const header = getComputedStyle(document.getElementById("report-header"));
   if (invoice.width === "123px" && invoice.textDecorationLine === "underline" && header.fontWeight === "700") {
-    window.blazorReport?.completed();
+    window.tailwindReportReady?.();
   }
 </script>

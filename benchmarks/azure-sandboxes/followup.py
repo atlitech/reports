@@ -43,6 +43,8 @@ The 2026-10-04 run (benchmarks/results/2026-10-04-5d557b4-azure-sandboxes-follow
 the latest aca, 1.0.0-preview.4. The virtual-network DNS test there was run by hand; the results
 file lists its commands.
 """
+# The Manual activation and resume-role probes below preserve the original Azure platform
+# experiments. The current gateway uses OnDemand ports and does not need a sandbox resume role.
 import argparse
 import base64
 import json

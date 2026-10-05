@@ -14,4 +14,38 @@ public sealed class RendererRecordStoreOptions
 
   /// <summary>For <c>KeyVault</c>: a user-assigned managed identity's client ID; empty for the default chain.</summary>
   public string ManagedIdentityClientId { get; set; } = "";
+
+  /// <summary>Checks the store and its address, and normalizes the case-insensitive store name.</summary>
+  public void Validate()
+  {
+    if (string.Equals(Store, "File", StringComparison.OrdinalIgnoreCase))
+    {
+      Store = "File";
+      if (string.IsNullOrWhiteSpace(Path))
+      {
+        throw new InvalidOperationException(
+          "The File renderer record store needs Path, the directory of record files."
+        );
+      }
+      return;
+    }
+
+    if (string.Equals(Store, "KeyVault", StringComparison.OrdinalIgnoreCase))
+    {
+      Store = "KeyVault";
+      if (VaultUri is not { IsAbsoluteUri: true } || VaultUri.Scheme != Uri.UriSchemeHttps)
+      {
+        throw new InvalidOperationException(
+          "The KeyVault renderer record store needs VaultUri, an absolute HTTPS address such as https://contoso.vault.azure.net/."
+        );
+      }
+      return;
+    }
+
+    throw new InvalidOperationException(
+      string.IsNullOrWhiteSpace(Store)
+        ? "No renderer record store is configured. Set Store to File or KeyVault."
+        : $"Unknown renderer record store '{Store}'. Use File or KeyVault."
+    );
+  }
 }

@@ -30,6 +30,9 @@ jobs:
       - name: Validate formatting
         run: dotnet csharpier check .
 
+      - name: Test benchmark tooling
+        run: python3 -m unittest discover -s benchmarks/azure-sandboxes -p 'test_*.py' -v
+
       - name: Build
         run: dotnet build
 

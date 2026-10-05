@@ -10,7 +10,7 @@ ports' address allow-list, a rollout under load without a failed request, the ki
 deletion. A
 [production-shaped run](../benchmarks/results/2026-10-04-6cdce25-hosted-renderers-production-amd64.md)
 then ran the gateway as an Azure Container App behind a NAT gateway, with records in Key Vault and
-a managed identity that may only read and resume sandboxes, and the renderers in a virtual network
+a managed identity that then had only read/resume rights over sandboxes, and the renderers in a virtual network
 without DNS: 15 minutes of mixed load and a rollout under load, again without a failed request.
 The [production acceptance gates](#production-acceptance-gates) are not met yet, so no hosted
 service runs on them. The default server remains the integrated engine for self-hosted,
@@ -95,8 +95,9 @@ it, including from zero, belong to the platform (Azure Container Apps scale rule
 Knative on Kubernetes) or to a separate provisioning service off the request path with narrowly
 scoped rights. Any activator or proxy that holds a first request while a renderer scales from zero,
 and can reach every renderer, is part of the trusted control plane and falls under the same
-separation tests. On Azure Container Apps Sandboxes, waking a suspended renderer needs only a
-narrow resume permission; see [Azure Container Apps Sandboxes](#azure-container-apps-sandboxes).
+separation tests. On Azure Container Apps Sandboxes, the port proxy activates a suspended renderer
+on demand; the gateway holds no sandbox-group role. See
+[Azure Container Apps Sandboxes](#azure-container-apps-sandboxes).
 
 ## Separation requirements
 
@@ -253,7 +254,8 @@ ran the gateway and renderers as production would, in one region. What they esta
   stop, exec, files, egress, ports, snapshots, create, and delete among them, were refused. Reading
   a sandbox does not return its environment. The gateway's own managed identity, holding only that
   role, resumed renderers with `Manual` ports in 0.4 to 1.4 s; its first data-plane token cost
-  about 0.4 to 0.6 s more.
+  about 0.4 to 0.6 s more. This is historical evidence: the current gateway uses on-demand
+  activation and has no sandbox-group role.
 - **The renderers, not the gateway, set the throughput.** Six renderers in a virtual network
   (two each of S, M, and L) converted about 39 PDFs a second through one gateway replica for
   15 minutes, mostly invoices and every 20th request the 49-page report: 35,062 requests, all
@@ -288,8 +290,9 @@ On Sandboxes the design becomes:
   exposes port 8080 with `OnDemand` activation, so the gateway needs no rights over sandboxes at
   all, and limits it to the gateway's outbound addresses (for a Container Apps gateway, the NAT
   gateway's on its subnet), so nobody else can wake a renderer.
-  The gateway's `Wake:Mode=Sandboxes` remains for `Manual` ports; its identity then needs only the
-  tested resume-only role.
+  Manual waking through the gateway has been removed. Existing Manual ports must be
+  [migrated before upgrading](../src/Atli.Reports.Provisioner/README.md#migrating-manual-renderer-ports);
+  after the old gateways retire, their sandbox read/resume role assignments can be removed.
 - **`disable` answers a compromised renderer.** The provisioning service disables it at once, then
   replaces it and its credential.
 - **Every image release replaces every renderer.** A suspended renderer keeps the browser it was

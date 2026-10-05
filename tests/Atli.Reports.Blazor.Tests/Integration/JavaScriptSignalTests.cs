@@ -23,8 +23,8 @@ public class JavaScriptSignalTests
     await using var server = await TestReportServer.StartAsync(app =>
       app.MapBlazorReport<DelayedScriptReport>(options =>
       {
-        options.JavaScriptSettings.WaitForCompletedSignal = true;
-        options.JavaScriptSettings.CompletedSignalTimeout = TestEngine.GenerousTimeout;
+        options.PdfOptions.WaitForSignal = "reportReady";
+        options.PdfOptions.WaitTimeout = TestEngine.GenerousTimeout;
       })
     );
 
@@ -40,24 +40,18 @@ public class JavaScriptSignalTests
   }
 
   [Test]
-  [Arguments(false)]
-  [Arguments(true)]
-  public async Task A_report_that_signals_while_loading_succeeds(bool useNativeSignal)
+  [Arguments("reportReady")]
+  [Arguments("customReady")]
+  public async Task A_report_that_signals_while_loading_succeeds(string signalName)
   {
     await using var services = TestEngine.CreateServices();
-    var options = useNativeSignal
-      ? new BlazorReportRegistrationOptions
-      {
-        PdfOptions = new PdfOptions
-        {
-          WaitForSignal = "customReady",
-          WaitTimeout = TestEngine.GenerousTimeout,
-        },
-      }
-      : WaitingFor(TestEngine.GenerousTimeout);
     var report = services
       .GetRequiredService<BlazorReportRegistry>()
-      .AddReport<ImmediateScriptReport>(options);
+      .AddReport<ImmediateScriptReport>(options =>
+      {
+        options.PdfOptions.WaitForSignal = signalName;
+        options.PdfOptions.WaitTimeout = TestEngine.GenerousTimeout;
+      });
     using MemoryStream destination = new();
 
     var result = await services
@@ -112,8 +106,8 @@ public class JavaScriptSignalTests
       app => app.MapBlazorReport<SilentScriptReport>(),
       options =>
       {
-        options.JavaScriptSettings.WaitForCompletedSignal = true;
-        options.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromMilliseconds(500);
+        options.PdfOptions.WaitForSignal = "reportReady";
+        options.PdfOptions.WaitTimeout = TimeSpan.FromMilliseconds(500);
       }
     );
 
@@ -142,13 +136,10 @@ public class JavaScriptSignalTests
       );
   }
 
-  private static BlazorReportRegistrationOptions WaitingFor(TimeSpan timeout) =>
-    new()
+  private static Action<BlazorReportRegistrationOptions> WaitingFor(TimeSpan timeout) =>
+    options =>
     {
-      JavaScriptSettings = new BlazorReportJavaScriptOptions
-      {
-        WaitForCompletedSignal = true,
-        CompletedSignalTimeout = timeout,
-      },
+      options.PdfOptions.WaitForSignal = "reportReady";
+      options.PdfOptions.WaitTimeout = timeout;
     };
 }

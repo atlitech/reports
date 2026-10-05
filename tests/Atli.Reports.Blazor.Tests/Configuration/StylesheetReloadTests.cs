@@ -164,17 +164,17 @@ public class StylesheetReloadTests
     await Assert.That(exception!.FileName).IsEqualTo(path);
   }
 
-  private static BlazorReportRegistrationOptions Html(
+  private static Action<BlazorReportRegistrationOptions> Html(
     string name,
     string? path = null,
     bool reload = false
   ) =>
-    new()
+    options =>
     {
-      ReportName = name,
-      OutputFormat = ReportOutputFormat.Html,
-      BaseStylesPath = path,
-      BaseStylesReloadOnChange = reload,
+      options.ReportName = name;
+      options.OutputFormat = ReportOutputFormat.Html;
+      options.BaseStylesPath = path;
+      options.BaseStylesReloadOnChange = reload;
     };
 
   private static async Task<string> RenderHtmlAsync(IServiceProvider services, BlazorReport report)

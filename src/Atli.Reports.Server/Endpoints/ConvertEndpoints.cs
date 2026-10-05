@@ -271,7 +271,7 @@ public static partial class ConvertEndpoints
       options.PreferCssPageSize = request.PreferCSSPageSize.Value;
     }
 
-    options.GenerateTaggedPdf = request.GenerateTaggedPdf;
+    options.GenerateTaggedPdf = request.GenerateTaggedPdf ?? true;
 
     if (request.WaitForSignal is not null)
     {

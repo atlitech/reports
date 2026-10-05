@@ -20,6 +20,6 @@
   const pseudo = getComputedStyle(document.getElementById("line-item"), "::before");
   if (invoice.width === "123px" && header.fontWeight === "700" && line.textAlign === "right"
       && pseudo.content === '"hello world"') {
-    window.blazorReport?.completed();
+    window.tailwindReportReady?.();
   }
 </script>

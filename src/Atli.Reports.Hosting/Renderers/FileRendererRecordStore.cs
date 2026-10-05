@@ -47,10 +47,6 @@ public sealed class FileRendererRecordStore : IRendererRecordStore
   }
 
   /// <inheritdoc />
-  public async Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-    (await ListWithUnreadableAsync(cancellationToken)).Records;
-
-  /// <inheritdoc />
   /// <remarks>From the file names alone; files that are not records are skipped.</remarks>
   public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken)
   {

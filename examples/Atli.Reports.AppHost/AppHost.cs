@@ -52,14 +52,4 @@ if (!string.IsNullOrWhiteSpace(browserExecutablePath))
   }
 }
 
-// Gotenberg, for side-by-side comparisons with the reports server. Off by default; turn it on with
-// Gotenberg:Enabled=true in the AppHost's configuration.
-if (builder.Configuration.GetValue<bool>("Gotenberg:Enabled"))
-{
-  builder
-    .AddContainer("gotenberg", "gotenberg/gotenberg", "8.37.0-chromium")
-    .WithHttpEndpoint(targetPort: 3000)
-    .WithHttpHealthCheck("/health");
-}
-
 builder.Build().Run();

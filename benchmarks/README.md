@@ -55,6 +55,27 @@ flood of new tenant IDs, steady use, deletes, the kill switch, retirement, a rol
 stopped renderers, and leftover cleanup, with [`workspaces.py`](azure-sandboxes/workspaces.py) and
 [`workspace-client.py`](azure-sandboxes/workspace-client.py).
 
+The current `e2e.py`, `production.py`, and `workspaces.py` runners use OnDemand renderer ports.
+The gateway identity needs no sandbox read/resume role, and the runners omit the removed
+`Gateway:Wake` and `Provisioner:PortActivation` settings. E2E checks concurrent requests waking
+one tenant; production measures OnDemand wake after a gateway restart (`vrestart`,
+`--restart-cycles`). Use a fresh work directory and results file for these scenarios. Existing
+Manual-port renderers must be recreated before using the current gateway; cleanup still
+recognizes old run state, role assignments, and custom role definitions.
+
+The linked result files remain historical measurements at their recorded commits. The Manual
+activation and resume-role probes in `followup.py` are historical Azure platform experiments,
+not configuration required by the current hosted service. Check out the recorded commit when
+reproducing an old comparison exactly.
+
+Production and workspaces share [`common.py`](azure-sandboxes/common.py) for private state,
+redaction, token caching by actual expiry, networking, and sandbox image setup. Their runtimes
+remain independent. Validate these helpers without an Azure account, CLI calls, or network:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s benchmarks/azure-sandboxes -p 'test_*.py' -v
+```
+
 ## What runs
 
 | Suite | Project | Measures |

@@ -62,9 +62,6 @@ internal sealed class FakeRecordStore(Journal journal) : IRendererRecordStore
       : Task.FromResult(this[tenantId]);
   }
 
-  public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-    Task.FromResult<IReadOnlyList<RendererRecord>>([.. _records.Values]);
-
   /// <summary>Every tenant with a record, unreadable ones included, as the real stores list them.</summary>
   public Task<IReadOnlyList<string>> ListTenantIdsAsync(CancellationToken cancellationToken) =>
     Task.FromResult<IReadOnlyList<string>>([

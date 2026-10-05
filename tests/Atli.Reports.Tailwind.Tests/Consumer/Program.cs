@@ -25,22 +25,18 @@ services.AddReportsEngine(options =>
 });
 await using var provider = services.BuildServiceProvider();
 var registry = provider.GetRequiredService<BlazorReportRegistry>();
-var invoice = registry.AddReport<Invoice>(
-  new BlazorReportRegistrationOptions
-  {
-    OutputFormat = pdf ? ReportOutputFormat.Pdf : ReportOutputFormat.Html,
-    JavaScriptSettings = new BlazorReportJavaScriptOptions
-    {
-      WaitForCompletedSignal = pdf,
-      CompletedSignalTimeout = TimeSpan.FromSeconds(10),
-    },
-  }.UseTailwind("Reports/Invoice")
-);
-var receipt = registry.AddReport<Receipt>(
-  new BlazorReportRegistrationOptions { OutputFormat = ReportOutputFormat.Html }.UseTailwind(
-    "Reports/Receipt"
-  )
-);
+var invoice = registry.AddReport<Invoice>(options =>
+{
+  options.OutputFormat = pdf ? ReportOutputFormat.Pdf : ReportOutputFormat.Html;
+  options.PdfOptions.WaitForSignal = pdf ? "tailwindReportReady" : null;
+  options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(10);
+  options.UseTailwind("Reports/Invoice");
+});
+var receipt = registry.AddReport<Receipt>(options =>
+{
+  options.OutputFormat = ReportOutputFormat.Html;
+  options.UseTailwind("Reports/Receipt");
+});
 
 foreach (var report in new[] { invoice, receipt })
 {

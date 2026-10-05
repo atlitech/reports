@@ -113,8 +113,8 @@ internal sealed class BrowserInstance : IAsyncDisposable
     int generation,
     TimeProvider timeProvider,
     ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken,
-    ReportsEngineNetworkOptions? network = null
+    ReportsEngineNetworkOptions network,
+    CancellationToken cancellationToken
   )
   {
     var logger = loggerFactory.CreateLogger<BrowserInstance>();
@@ -122,7 +122,7 @@ internal sealed class BrowserInstance : IAsyncDisposable
       options,
       loggerFactory.CreateLogger<BrowserProcess>(),
       cancellationToken,
-      network is { Mode: not ReportsEngineNetworkMode.Unrestricted }
+      network.Mode != ReportsEngineNetworkMode.Unrestricted
     );
 
     DevToolsConnection connection;
@@ -161,7 +161,7 @@ internal sealed class BrowserInstance : IAsyncDisposable
         timeProvider.GetTimestamp(),
         options,
         logger,
-        network ?? new ReportsEngineNetworkOptions()
+        network
       );
     }
     catch

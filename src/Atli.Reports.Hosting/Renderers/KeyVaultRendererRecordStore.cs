@@ -91,10 +91,6 @@ public sealed class KeyVaultRendererRecordStore : IRendererRecordStore
   }
 
   /// <inheritdoc />
-  public async Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-    (await ListWithUnreadableAsync(cancellationToken)).Records;
-
-  /// <inheritdoc />
   /// <remarks>
   /// From the secrets' names and properties alone: the enabled secrets named for a valid tenant.
   /// </remarks>

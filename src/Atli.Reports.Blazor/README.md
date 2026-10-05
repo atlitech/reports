@@ -52,7 +52,9 @@ curl -X POST http://localhost:5000/helloreport \
 ```
 
 Failures before any of the report was sent answer with problem details: 503 when the engine is
-busy or the browser is unavailable, 504 for timeouts, and 500 for rendering failures.
+busy or the browser is unavailable, 504 for timeouts, 422 for policy denial, and 500 for rendering
+failures or upstream authentication/authorization errors. The `kind` field identifies the conversion
+error.
 
 ## Options
 
@@ -69,11 +71,27 @@ builder.Services.AddBlazorReports(options =>
 ```
 
 `MapBlazorReport` takes per-report options too: `ReportName` (the route), `OutputFormat` (`Pdf`
-or `Html`), `BaseStylesPath`, `AssetsPath`, `PdfOptions`, and `JavaScriptSettings`.
+or `Html`), `BaseStylesPath`, `AssetsPath`, and `PdfOptions`.
 
 `PdfOptions` is the engine's type, including scale, header/footer templates, page ranges, CSS page
 sizing, and PDF tagging. Each mapped or registered report starts with its own copy of the global
-PDF options, so per-report changes do not affect other reports.
+PDF options, so per-report changes do not affect other reports. Direct registration uses the same
+callback as the mapping helpers:
+
+```csharp
+var report = registry.AddReport<HelloReport>(options => options.ReportName = "custom");
+```
+
+The callback starts with the global defaults, and registration snapshots the result. Changing
+shared options later does not change existing reports. Reports inheriting `BlazorReportBase`,
+including through an intermediate base class, receive `GlobalAssets` and `ReportAssets` as
+separate dictionaries of cached data URIs.
+
+When migrating, replace `AddReport<T>(new BlazorReportRegistrationOptions { ... })` with the
+callback form. Replace `JavaScriptSettings.WaitForCompletedSignal = true` with
+`PdfOptions.WaitForSignal = "reportReady"`, and `CompletedSignalTimeout` with `PdfOptions.WaitTimeout`.
+Set `WaitForSignal = null` to disable completion waiting. Components inheriting `BlazorReportBase`
+can remove their own `ReportAssets` parameter because the base now supplies it.
 
 ## Tailwind CSS per report
 
@@ -97,17 +115,17 @@ restart. This reloads compiled CSS; it does not compile source stylesheets.
 ```csharp
 app.MapBlazorReport<SalesChart, SalesData>(options =>
 {
-  options.JavaScriptSettings.WaitForCompletedSignal = true;
-  options.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromSeconds(10);
+  options.PdfOptions.WaitForSignal = "reportReady";
+  options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(10);
 });
 ```
 
 The report calls `blazorReport.completed()` from its script when its charts or data are ready,
 and the PDF is printed at that moment.
 
-Enabling `WaitForCompletedSignal` overrides `PdfOptions.WaitForSignal` and `WaitTimeout` for that
-conversion. Otherwise those engine options apply directly; when `WaitForSignal` is set, the
-template also forwards `blazorReport.completed()` to that function.
+`PdfOptions.WaitForSignal` and `WaitTimeout` configure completion for every registration path.
+The template forwards `blazorReport.completed()` to the named function. The default signal is
+`null`, which prints after the document and its fonts load; no completion call is required.
 
 ## Configure the engine
 

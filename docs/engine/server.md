@@ -15,8 +15,8 @@ The body is JSON: `{"html": "...", "options": {...}}`. The options mirror `PdfOp
   `paperWidth` and `paperHeight` in inches instead; together they override `paperSize`. An unknown
   `paperSize` name, only one of the two dimensions, or a dimension that is not greater than zero
   is a `400`.
-- `generateTaggedPdf` asks for (`true`) or against (`false`) a tagged, accessible PDF. Omitted, the
-  browser decides; current Chromium tags by default.
+- `generateTaggedPdf` asks for (`true`) or against (`false`) a tagged, accessible PDF. Omitted or
+  null uses the explicit `true` default; the browser always receives the resolved choice.
 - `waitTimeoutSeconds` defaults to 30 and is at most 4294967 (about 49 days, the longest wait .NET
   timers support). With `waitForSignal` set, `-0.001` (`Timeout.InfiniteTimeSpan`) waits until the
   request is canceled, and other negative values are a `400`. A value beyond ±4294967, or one that
@@ -173,18 +173,18 @@ other mode fails at startup. Gateway mode also fails at startup under `Authentic
 which makes every caller `anonymous`, unless `AllowAnonymousCallers` is set for development.
 
 The settings bind once from `ReportsServer:Gateway` and are validated at startup, like the
-security settings:
+security settings. The tenant selector is always `X-Reports-Tenant`. The old `TenantHeader`
+setting and the whole `Wake` section are rejected; see the provisioner's
+[Manual-port migration](../../src/Atli.Reports.Provisioner/README.md#migrating-manual-renderer-ports)
+before upgrading a gateway that resumes sandboxes. `File` and `KeyVault` store names are
+case-insensitive, and Key Vault addresses must use HTTPS.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `Tenants:<n>:CallerId`, `Tenants:<n>:Tenants:<m>`, `Tenants:<n>:TenantPrefixes:<m>` | Required | Each authenticated caller ID (an API key's `CallerId`, the JWT caller claim, or `anonymous` under `Authentication:Mode=None` with `AllowAnonymousCallers`) and its product tenants: those it lists in `Tenants`, 1 to 63 lowercase letters, digits, and hyphens, and every valid tenant ID under one of its `TenantPrefixes`, such as `myapp-3f2504e0-4f89-11d3-9a0c-0305e82c3301` under `myapp-`. A prefix is 2 to 27 lowercase letters, digits, and hyphens, starting with a letter or digit and ending with a hyphen, so `acme-` does not own `acmecorp-1`. Each caller needs a tenant or a prefix. Callers may share listed tenants, but not the tenants under a prefix: no two callers' prefixes may overlap (one starting with the other). No caller may list a tenant under any prefix, its own included: the provisioning service retires and deletes the renderers of a prefix's tenants, and the gateway never has it create a listed tenant's, so such a tenant would lose its renderer for good. Renderer records do not name the caller whose prefix a tenant is under, so a prefix moved to another caller gives that caller every renderer under it, with its memory snapshot. Do not assign a prefix to another caller while tenants remain under it; delete them first. `readiness-probe` is reserved for readiness (below), here and in `Records:Renderers`, and no prefix may own it |
-| `TenantHeader` | `X-Reports-Tenant` | The header a caller names its tenant in; only a caller with one listed tenant and no prefix may leave it out |
 | `Records:Store` | Required | Where renderer records come from: `Configuration` (the `Renderers` below, read-only), `File` (`Records:Path`), or `KeyVault` (`Records:VaultUri`, and `Records:ManagedIdentityClientId` for a user-assigned identity) |
 | `Records:Renderers:<n>:TenantId`, `Url`, `ApiKey`, `SandboxId`, `MaxConcurrentRequests` | | `Configuration` only: each tenant's renderer, the credential the gateway presents to it, its sandbox ID if it is a sandbox, and how many requests it admits at once |
 | `Records:CacheDuration` | `00:00:30` | How long a record lookup is reused; a missing record is reused for 5 seconds at most, and a record is dropped sooner when its renderer rejects the gateway's credential, cannot be reached, or names a sandbox that no longer exists |
-| `Wake:Mode` | `None` | `Sandboxes` resumes suspended Azure Container Apps sandboxes whose port does not wake them on request; the provisioner's ports do (`OnDemand`), so they need `None` |
-| `Wake:Sandboxes:SubscriptionId`, `ResourceGroup`, `SandboxGroup`, `Region`, `ManagedIdentityClientId` | | The renderers' sandbox group, for `Sandboxes` |
-| `Wake:Timeout` | `00:00:30` | How long one request keeps resuming and resending to a renderer that is not running |
 | `Provisioning:Mode` | `None` | `OnDemand` has the provisioning service create the renderer of a tenant under a caller's prefix on first use, and maps `DELETE /tenants/{tenantId}` (below). It needs a record store the service writes, `File` or `KeyVault` |
 | `Provisioning:Url` | | For `OnDemand`: the provisioning service's `https` address, on internal ingress. `http` needs `AllowHttpRenderers`, and sends the gateway's key for the service in clear |
 | `Provisioning:ApiKey` | | For `OnDemand`: the gateway's credential for the service, `<id>.<secret>` |
@@ -204,17 +204,12 @@ ReportsServer__Gateway__Tenants__0__CallerId=billing-app
 ReportsServer__Gateway__Tenants__0__Tenants__0=contoso
 ReportsServer__Gateway__Records__Store=KeyVault
 ReportsServer__Gateway__Records__VaultUri=https://reports-renderers.vault.azure.net/
-ReportsServer__Gateway__Wake__Mode=Sandboxes
-ReportsServer__Gateway__Wake__Sandboxes__SubscriptionId=<subscription-id>
-ReportsServer__Gateway__Wake__Sandboxes__ResourceGroup=reports
-ReportsServer__Gateway__Wake__Sandboxes__SandboxGroup=renderers
-ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
 ```
 
 - **The tenant comes from the caller's identity, never from the body.** A caller with no tenant
   gets the authorization `403` (`Forbidden`). A caller with one listed tenant and no prefix needs
   no header, and a header that names another tenant is a `403`. Any other caller, with several
-  tenants or a prefix, must name one in `TenantHeader`: a missing header (or the header sent
+  tenants or a prefix, must name one in `X-Reports-Tenant`: a missing header (or the header sent
   twice) is a `400` (`InvalidRequest`), and a tenant it does not belong to is a `403`. The header
   names one of the caller's tenants when the caller lists it, or when one of its prefixes owns it:
   a valid tenant ID that starts with the prefix and continues past it. The prefix alone, a tenant
@@ -291,31 +286,17 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   `IpAccessDenied`, a port whose allow-list does not admit the gateway's address, which the gateway
   logs as an error. Other answers are `Busy` for `429`, `BrowserUnavailable` for `5xx`, and
   `RenderFailed` otherwise.
-- **Waking renderers.** A renderer port with on-demand activation, which the
-  [provisioner](../../src/Atli.Reports.Provisioner/README.md) creates by default, wakes its
-  suspended sandbox on the conversion request itself, so the gateway needs no wake settings and no
-  rights over sandboxes. For ports without it: with `Wake:Mode=Sandboxes` and a record with a
-  `SandboxId`, the platform's
-  `403 {"error":"Sandbox is not running"}` (not the renderer's own problem details) makes the
-  gateway wake the sandbox and send the conversion again. That answer reaches the gateway through
-  the renderer's port, so a compromised renderer can send it too: before resuming, the gateway
-  reads the sandbox's state from the Sandboxes data plane. A sandbox reported `Running` means the
-  answer did not come from the platform, which the caller gets as `503` `BrowserUnavailable` with
-  no resume and no resend; a sandbox that no longer exists is `503` `BrowserUnavailable` too, and
-  so, at once and with no resume, is a sandbox the data plane reports stopped because it was
-  disabled (the provisioner's kill switch), which the platform would not resume until it is
-  enabled.
-  Concurrent requests share one state read and one resume per sandbox, a state read is reused for
-  2 seconds, and a sandbox is resumed at most once every 5 seconds. Within `Wake:Timeout` the
-  gateway also resends after `502`, `503` (other than `Busy`), a renderer it cannot reach, a
-  failed state read or resume, and not-running answers while the sandbox is still not running,
-  waiting 250 ms and up to 1 s between them; after it the caller gets `503` `BrowserUnavailable`.
-  The gateway's identity needs only `sandboxes/read` and `sandboxes/resume/action` on the group.
+- **Waking renderers.** Renderer ports activate on demand: the platform resumes the sandbox
+  within the conversion request. The gateway needs no sandbox permissions or wake settings.
+  `RendererTimeout` and caller cancellation cover activation and the whole PDF. The proxy's
+  `403 {"error":"Sandbox is not running"}` fails at once as `503 BrowserUnavailable`, without a
+  resend or a replacement: disabled renderers must stay stopped. Existing Manual ports must be
+  migrated before upgrading the gateway. Other than the bounded busy retry above, failed
+  conversions are not resent.
 - **Creating renderers on demand.** With `Provisioning:Mode=OnDemand`, a tenant under one of its
   caller's prefixes gets its renderer from the
   [provisioning service](../hosted-renderers.md#applications-with-many-tenants). When the tenant
-  has no record, the port proxy's `404 {"error":"Not found"}` says its renderer is gone, or (with
-  `Wake:Mode=Sandboxes`) the data plane no longer knows the record's sandbox, the gateway asks the
+  has no record or the port proxy's `404 {"error":"Not found"}` says its renderer is gone, the gateway asks the
   service to ensure one (`PUT /tenants/{tenantId}/renderer`), reads the record
   again, and sends the conversion to it. That happens at most once per conversion; a conversion
   that still cannot be sent gets the answer described above. The concurrent conversions of a
@@ -362,19 +343,17 @@ ReportsServer__Gateway__Wake__Sandboxes__Region=eastus2
   unhealthy. No tenant's record is read, so one damaged record never makes a replica unready.
   `/health/live` is unchanged.
 - **Logs and traces.** The gateway logs tenant and sandbox IDs, never HTML, PDFs, credentials, or
-  tokens: events 40 to 51 for forwarding (44, an error, is a rejected credential), 52 and 53 for
-  refused tenants and full tenants (a line per refused request: about 16 a second for six tenants
-  at twice their limits), 54 for a not-running answer from a running sandbox, 55 for a
-  record that names a sandbox that does not exist, 56 (at `Debug`) for a resend to a busy
-  renderer, 57 for a renderer the port proxy does not find, 58 (an error) for a port that refuses
-  the gateway's address, 59 for a disabled sandbox, 60 to 63 for state reads and resumes, 64 to
+  tokens: events 40 to 50 for forwarding (44, an error, is a rejected credential; 50 is a
+  not-running renderer), 52 and 53 for refused tenants and full tenants, 56 (at `Debug`) for a
+  resend to a busy renderer, 57 for a renderer the port proxy does not find, 58 (an error) for a
+  port that refuses the gateway's address, and 64 to
   67 for the provisioning service (64 when the gateway asks for a renderer, 65 when the service
   created or found it, with the time it took, 66 for a refusal, at `Error` for `NotAllowed` and
   `Warning` otherwise, and 67, an error, for a failure), 68 and 69 for a deleted tenant and a
   refused deletion, and 70 for a caller over its budget of new tenants. The request span carries
-  the tenant as `atli.reports.tenant`. Record lookups, sandbox checks, and renderer creations are
+  the tenant as `atli.reports.tenant`. Record lookups and renderer creations are
   shared by the requests waiting for them, so they run without any request's trace context, and
-  neither the renderer client, the Sandboxes client, nor the provisioning client sends trace
+  neither the renderer client nor the provisioning client sends trace
   headers or baggage.
 
 ## Telemetry

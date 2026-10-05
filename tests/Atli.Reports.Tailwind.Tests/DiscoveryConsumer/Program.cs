@@ -52,13 +52,11 @@ foreach (var report in reports)
   }
 }
 
-static BlazorReportRegistrationOptions Options(string bundle, bool pdf) =>
-  new BlazorReportRegistrationOptions
+static Action<BlazorReportRegistrationOptions> Options(string bundle, bool pdf) =>
+  options =>
   {
-    OutputFormat = pdf ? ReportOutputFormat.Pdf : ReportOutputFormat.Html,
-    JavaScriptSettings = new BlazorReportJavaScriptOptions
-    {
-      WaitForCompletedSignal = pdf,
-      CompletedSignalTimeout = TimeSpan.FromSeconds(10),
-    },
-  }.UseTailwind(bundle);
+    options.OutputFormat = pdf ? ReportOutputFormat.Pdf : ReportOutputFormat.Html;
+    options.PdfOptions.WaitForSignal = pdf ? "tailwindReportReady" : null;
+    options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(10);
+    options.UseTailwind(bundle);
+  };

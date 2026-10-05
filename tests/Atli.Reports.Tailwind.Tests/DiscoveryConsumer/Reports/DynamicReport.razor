@@ -6,7 +6,7 @@
 <script>
   const actual = getComputedStyle(document.getElementById("stamp")).borderTopWidth;
   if (actual === document.getElementById("dynamic").dataset.width) {
-    window.blazorReport?.completed();
+    window.tailwindReportReady?.();
   }
 </script>
 

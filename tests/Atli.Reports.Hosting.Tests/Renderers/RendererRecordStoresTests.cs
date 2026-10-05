@@ -78,6 +78,22 @@ public class RendererRecordStoresTests
   }
 
   [Test]
+  public async Task KeyVault_refuses_http_before_creating_the_store()
+  {
+    await Assert
+      .That(() =>
+        RendererRecordStores.Create(
+          new RendererRecordStoreOptions
+          {
+            Store = "keyvault",
+            VaultUri = new Uri("http://contoso.vault.azure.net/"),
+          }
+        )
+      )
+      .Throws<InvalidOperationException>();
+  }
+
+  [Test]
   [Arguments("", "No renderer record store is configured. Set Store to File or KeyVault.")]
   [Arguments("Redis", "Unknown renderer record store 'Redis'. Use File or KeyVault.")]
   public async Task Any_other_store_is_refused(string store, string message)
@@ -123,25 +139,6 @@ public class RendererRecordStoresTests
       .IsEqualTo(
         "https://management.eastus2.azuredevcompute.io/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg/sandboxGroups/group/"
       );
-  }
-
-  [Test]
-  public async Task A_store_written_before_tenant_listing_lists_the_tenants_of_its_records()
-  {
-    IRendererRecordStore store = new RecordsOnly(
-      Records.Acme() with
-      {
-        TenantId = "zeta",
-      },
-      Records.Acme()
-    );
-
-    await Assert
-      .That(await store.ListTenantIdsAsync(CancellationToken.None))
-      .IsEquivalentTo(["acme", "zeta"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-    var listing = await store.ListWithUnreadableAsync(CancellationToken.None);
-    await Assert.That(listing.Records.Count).IsEqualTo(2);
-    await Assert.That(listing.Unreadable).IsEmpty();
   }
 
   [Test]
@@ -214,21 +211,5 @@ public class RendererRecordStoresTests
     await Assert
       .That(() => new SandboxesClient(http, new FakeCredential(TimeProvider.System), options))
       .Throws<InvalidOperationException>();
-  }
-
-  /// <summary>A store as written before tenant listing: it implements only the first four members.</summary>
-  private sealed class RecordsOnly(params RendererRecord[] records) : IRendererRecordStore
-  {
-    public Task<RendererRecord?> GetAsync(string tenantId, CancellationToken cancellationToken) =>
-      Task.FromResult(records.FirstOrDefault(record => record.TenantId == tenantId));
-
-    public Task<IReadOnlyList<RendererRecord>> ListAsync(CancellationToken cancellationToken) =>
-      Task.FromResult<IReadOnlyList<RendererRecord>>(records);
-
-    public Task PutAsync(RendererRecord record, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task DeleteAsync(string tenantId, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
   }
 }

@@ -34,15 +34,9 @@ public class BlazorReportRegistrationOptions
   public string? AssetsPath { get; set; }
 
   /// <summary>
-  /// PDF conversion options from Atli.Reports.Engine. <c>MapBlazorReport</c> and
-  /// <c>RegisterBlazorReport</c> copy <see cref="BlazorReportOptions.PdfOptions"/> before applying
-  /// per-report configuration, so overrides do not change other reports.
+  /// PDF conversion options from Atli.Reports.Engine. Registration starts with a copy of
+  /// <see cref="BlazorReportOptions.PdfOptions"/> before applying per-report configuration,
+  /// so overrides do not change other reports.
   /// </summary>
   public PdfOptions PdfOptions { get; set; } = new();
-
-  /// <summary>
-  /// Settings for reports whose JavaScript must finish before the PDF is printed. Reports mapped with
-  /// <c>MapBlazorReport</c> start from <see cref="BlazorReportOptions.JavaScriptSettings"/>.
-  /// </summary>
-  public BlazorReportJavaScriptOptions JavaScriptSettings { get; set; } = new();
 }

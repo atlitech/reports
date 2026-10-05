@@ -53,14 +53,7 @@ public class BlazorReport
   public Dictionary<string, string> Assets { get; set; } = [];
 
   /// <summary>
-  /// The PDF conversion options to use for the report. <see langword="null"/> uses
-  /// <see cref="BlazorReportRegistry.DefaultPdfOptions"/>.
+  /// The resolved PDF options for this report, copied from the defaults at registration time.
   /// </summary>
-  public PdfOptions? PdfOptions { get; set; }
-
-  /// <summary>
-  /// The JavaScript settings to use for the report. <see langword="null"/> uses
-  /// <see cref="BlazorReportRegistry.DefaultJavaScriptSettings"/>.
-  /// </summary>
-  public BlazorReportJavaScriptOptions? JavaScriptSettings { get; set; }
+  public PdfOptions PdfOptions { get; set; } = new();
 }

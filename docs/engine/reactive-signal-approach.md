@@ -41,14 +41,14 @@ The page must finish all required work, including loading any assets it needs, b
 
 ## Using Blazor reports
 
-Enable the signal globally through `AddBlazorReports(options => options.JavaScriptSettings...)`
+Enable the signal globally through `AddBlazorReports(options => options.PdfOptions...)`
 or for a particular report:
 
 ```csharp
 app.MapBlazorReport<SalesChart, SalesData>(options =>
 {
-  options.JavaScriptSettings.WaitForCompletedSignal = true;
-  options.JavaScriptSettings.CompletedSignalTimeout = TimeSpan.FromSeconds(10);
+  options.PdfOptions.WaitForSignal = "reportReady";
+  options.PdfOptions.WaitTimeout = TimeSpan.FromSeconds(10);
 });
 ```
 
@@ -57,10 +57,9 @@ forwards that call to the engine. The same template and settings apply when gene
 registered report through `IReportService`. In HTML output, the completion call does nothing
 and no browser is started.
 
-Reports can also set the engine's `PdfOptions.WaitForSignal` and `WaitTimeout` directly. The
-template forwards `blazorReport.completed()` to the configured signal function. Enabling
-`JavaScriptSettings.WaitForCompletedSignal` takes precedence over those two PDF options for that
-conversion; it does not modify the report's configured options.
+`PdfOptions.WaitForSignal` and `WaitTimeout` are the sole completion settings. The default signal
+is `null`, so reports that do not need asynchronous readiness require no completion call. Global
+PDF settings are copied at registration before applying the report's overrides.
 
 See [the asynchronous JavaScript example](../../examples/SimpleReportServer/AsyncJavaScriptReport.razor).
 The [server API](server.md) exposes the engine options as `waitForSignal` and `waitTimeoutSeconds`.

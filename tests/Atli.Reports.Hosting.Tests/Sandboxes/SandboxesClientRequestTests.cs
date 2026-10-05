@@ -678,7 +678,12 @@ public class SandboxesClientRequestTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var add = sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    var add = sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
     sandboxes.Clock.Advance(await sandboxes.Clock.NextTimerAsync(TestToken));
     var sandbox = await add;
 
@@ -754,7 +759,7 @@ public class SandboxesClientRequestTests
     await sandboxes.Client.AddPortAsync(
       Id,
       8080,
-      new SandboxPortOptions { Anonymous = true },
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
       TestToken
     );
 
@@ -1046,40 +1051,6 @@ public class SandboxesClientRequestTests
   }
 
   [Test]
-  public async Task A_client_written_before_port_options_exposes_only_plain_manual_ports()
-  {
-    ISandboxesClient client = new ManualPortsOnly();
-
-    var manual = await client.AddPortAsync(
-      Id,
-      8080,
-      new SandboxPortOptions { Anonymous = true },
-      TestToken
-    );
-
-    await Assert.That(manual.Id).IsEqualTo(Id);
-    await Assert
-      .That(async () => await client.AddPortAsync(Id, 8080, OnDemand(), TestToken))
-      .Throws<NotSupportedException>();
-    await Assert
-      .That(async () =>
-        await client.AddPortAsync(
-          Id,
-          8080,
-          new SandboxPortOptions { Anonymous = true, AllowedSourceCidrs = ["203.0.113.7/32"] },
-          TestToken
-        )
-      )
-      .Throws<NotSupportedException>();
-    await Assert
-      .That(async () => await client.DisableAsync(Id, TestToken))
-      .Throws<NotSupportedException>();
-    await Assert
-      .That(async () => await client.EnableAsync(Id, TestToken))
-      .Throws<NotSupportedException>();
-  }
-
-  [Test]
   public async Task Get_reads_when_the_sandbox_was_created_and_leaves_an_unreadable_time_unknown()
   {
     using TestSandboxes sandboxes = new(
@@ -1109,12 +1080,20 @@ public class SandboxesClientRequestTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var sandbox = await sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    var sandbox = await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
 
     var requests = sandboxes.Plane.Requests;
     await Assert.That(requests[0].Method).IsEqualTo(HttpMethod.Post);
     await Assert.That(requests[0].PathInGroup).IsEqualTo($"sandboxes/{Id}/ports/add");
-    await AssertJson(requests[0].Body, """{ "port": 8080, "auth": { "anonymous": true } }""");
+    await AssertJson(
+      requests[0].Body,
+      """{ "port": 8080, "auth": { "anonymous": true }, "activationMode": "Manual" }"""
+    );
     await Assert.That(requests[1].Method).IsEqualTo(HttpMethod.Get);
     await Assert.That(sandbox.Id).IsEqualTo(Id);
     await Assert
@@ -1129,11 +1108,16 @@ public class SandboxesClientRequestTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var sandbox = await sandboxes.Client.AddPortAsync(Id, 8080, anonymous: false, TestToken);
+    var sandbox = await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = false, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
 
     await AssertJson(
       sandboxes.Plane.Requests.Single().Body,
-      """{ "port": 8080, "auth": { "anonymous": false } }"""
+      """{ "port": 8080, "auth": { "anonymous": false }, "activationMode": "Manual" }"""
     );
     await Assert.That(sandbox.Ports.Single().Port).IsEqualTo(8080);
   }
@@ -1150,7 +1134,12 @@ public class SandboxesClientRequestTests
       FakeDataPlane.Ok(FakeDataPlane.Sandbox(Id, "Running", $"[{FakeDataPlane.Port(Id, 8080)}]"))
     );
 
-    var sandbox = await sandboxes.Client.AddPortAsync(Id, 8080, anonymous: true, TestToken);
+    var sandbox = await sandboxes.Client.AddPortAsync(
+      Id,
+      8080,
+      new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+      TestToken
+    );
 
     await Assert.That(sandbox.Ports.Single().Port).IsEqualTo(8080);
   }
@@ -1168,7 +1157,14 @@ public class SandboxesClientRequestTests
     );
 
     var exception = await Assert
-      .That(async () => await sandboxes.Client.AddPortAsync(Id, 8080, anonymous: false, TestToken))
+      .That(async () =>
+        await sandboxes.Client.AddPortAsync(
+          Id,
+          8080,
+          new SandboxPortOptions { Anonymous = false, Activation = SandboxPortActivation.Manual },
+          TestToken
+        )
+      )
       .Throws<SandboxesException>();
 
     await Assert.That(exception!.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
@@ -1182,7 +1178,14 @@ public class SandboxesClientRequestTests
     using TestSandboxes sandboxes = new(FakeDataPlane.Ok("{}"));
 
     await Assert
-      .That(async () => await sandboxes.Client.AddPortAsync(Id, port, anonymous: true, TestToken))
+      .That(async () =>
+        await sandboxes.Client.AddPortAsync(
+          Id,
+          port,
+          new SandboxPortOptions { Anonymous = true, Activation = SandboxPortActivation.Manual },
+          TestToken
+        )
+      )
       .Throws<ArgumentOutOfRangeException>();
   }
 
@@ -1284,34 +1287,5 @@ public class SandboxesClientRequestTests
     await Assert.That(actual).IsNotNull();
     var equal = JsonNode.DeepEquals(JsonNode.Parse(actual!), JsonNode.Parse(expected));
     await Assert.That(equal).IsTrue().Because($"the body was {actual}");
-  }
-
-  /// <summary>A client as written before activation modes: it implements only the first overload.</summary>
-  private sealed class ManualPortsOnly : ISandboxesClient
-  {
-    public Task<SandboxView> AddPortAsync(
-      string sandboxId,
-      int port,
-      bool anonymous,
-      CancellationToken cancellationToken
-    ) => Task.FromResult(new SandboxView { Id = sandboxId, State = SandboxStates.Running });
-
-    public Task<SandboxView> CreateAsync(SandboxSpec spec, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task<SandboxView?> GetAsync(string sandboxId, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task<IReadOnlyList<SandboxView>> ListAsync(CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task DeleteAsync(string sandboxId, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task<SandboxView> StopAsync(string sandboxId, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
-
-    public Task<SandboxView> ResumeAsync(string sandboxId, CancellationToken cancellationToken) =>
-      throw new NotSupportedException();
   }
 }
