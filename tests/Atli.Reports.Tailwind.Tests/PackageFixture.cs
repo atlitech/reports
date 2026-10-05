@@ -27,7 +27,10 @@ public sealed class PackageFixture : IAsyncInitializer, IAsyncDisposable
       directory = directory.Parent
     )
     {
-      if (directory.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+      if (
+        (directory.Attributes & FileAttributes.ReparsePoint) != 0
+        && directory.ResolveLinkTarget(returnFinalTarget: true) is { } target
+      )
       {
         return Path.Combine(target.FullName, Path.GetRelativePath(directory.FullName, temporary));
       }
