@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>Aspire.Hosting</RootNamespace>
+    <Title>Atli Reports Aspire Azure Hosting</Title>
+    <Description>Aspire deployment of the hosted Reports gateway, provisioning service and isolated Azure Container Apps Sandbox renderers.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Atli.Reports.Aspire.Hosting/Atli.Reports.Aspire.Hosting.csproj" />
+    <PackageReference Include="Aspire.Hosting.Azure.AppContainers" />
+    <EmbeddedResource
+      Include="Infrastructure/reports.bicep"
+      LogicalName="Atli.Reports.Aspire.Hosting.Azure.reports.bicep"
+    />
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

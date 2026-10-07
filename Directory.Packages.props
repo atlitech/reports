@@ -46,6 +46,7 @@
   </ItemGroup>
   <ItemGroup Label="Aspire AppHost and service defaults (examples)">
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.0" />
+    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="13.6.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.10.0" />
     <!-- Starts the AppHost in tests/Atli.Reports.AppHost.Tests; keep it on the AppHost's Aspire version. -->
     <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.0" />

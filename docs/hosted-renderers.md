@@ -4,6 +4,9 @@ Status: agreed design, partly built. The shared API is the server's
 [gateway mode](engine/server.md#gateway-mode); the
 [provisioner](../src/Atli.Reports.Provisioner/README.md) creates, rolls out, and deletes renderers
 on Azure Container Apps Sandboxes; both share [`Atli.Reports.Hosting`](../src/Atli.Reports.Hosting).
+The [Aspire deployment guide](azure-hosted-reports.md) and
+[`Atli.Reports.Azure.AppHost`](../examples/Atli.Reports.Azure.AppHost) package the infrastructure,
+service wiring, and renderer-image preparation for deployment through Aspire.
 An [end-to-end run](../benchmarks/results/2026-10-04-b9c51da-hosted-renderers-e2e-amd64.md) on
 Azure Container Apps Sandboxes exercised them together: routing, on-demand and resumed wakes, the
 ports' address allow-list, a rollout under load without a failed request, the kill switch, and

@@ -252,6 +252,11 @@ runs the server this way.
 
 ## Deploy
 
+For the tested gateway, provisioner, and per-tenant Azure Sandbox architecture, use the
+[hosted Azure deployment AppHost](azure-hosted-reports.md). It provisions the surrounding
+networks, identities, record vault, and renderer image through Aspire. The target configuration
+below concerns the single integrated rendering container.
+
 Replace development credentials with production secret parameters first. The server is an ordinary container resource, so Aspire's deployment targets publish it like any
 other. Add the target's environment to the AppHost and run `aspire publish` (artifacts only) or
 `aspire deploy`:
