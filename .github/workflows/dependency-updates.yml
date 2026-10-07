@@ -1,0 +1,77 @@
+name: Custom dependency updates
+
+on:
+  schedule:
+    - cron: "37 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Check upstream releases without opening pull requests.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-dependency-updates
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        dependency: [tailwind, kind, seccomp, gotenberg]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check automation credentials
+        if: inputs.dry-run != true
+        env:
+          CLIENT_ID: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          HAS_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error::Set AUTOMATION_APP_CLIENT_ID and AUTOMATION_APP_PRIVATE_KEY to enable update PRs."
+            exit 1
+          fi
+
+      - name: Check and verify upstream releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPENDENCY: ${{ matrix.dependency }}
+          DRY_RUN: ${{ inputs.dry-run == true }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" != true ]; then args+=(--write); fi
+          python3 .github/scripts/dependency-updates.py "$DEPENDENCY" "${args[@]}"
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git diff --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT";
+          else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Create automation token
+        if: steps.changes.outputs.changed == 'true'
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open update PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          DEPENDENCY: ${{ matrix.dependency }}
+        run: bash .github/scripts/open-dependency-pr.sh

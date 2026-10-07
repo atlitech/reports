@@ -16,7 +16,7 @@ name: chrome-headless-shell update
 #   3. In atlitech/reports, under Settings > Secrets and variables > Actions, set the variable
 #      AUTOMATION_APP_CLIENT_ID to the Client ID and the secret AUTOMATION_APP_PRIVATE_KEY to the
 #      private key (the whole .pem file).
-# Until both are set, a run that finds a newer version only reports it with a warning.
+# Until both are set, a run that finds a newer version fails with setup instructions.
 
 on:
   schedule:
@@ -89,8 +89,8 @@ jobs:
           if [ -n "$CLIENT_ID" ] && [ "$HAS_PRIVATE_KEY" = true ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::chrome-headless-shell $TO is available (the server image pins $FROM), but no pull request was opened: set the AUTOMATION_APP_CLIENT_ID variable and the AUTOMATION_APP_PRIVATE_KEY secret for the automation GitHub App, as the comment at the top of .github/workflows/chrome-headless-shell-bump.yml describes."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::chrome-headless-shell $TO is available (the server image pins $FROM), but no pull request was opened: set the AUTOMATION_APP_CLIENT_ID variable and the AUTOMATION_APP_PRIVATE_KEY secret for the automation GitHub App, as the comment at the top of .github/workflows/chrome-headless-shell-bump.yml describes."
+            exit 1
           fi
 
       # Without owner or repositories, the token covers this repository only.

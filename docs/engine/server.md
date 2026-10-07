@@ -444,7 +444,7 @@ checks, and releases all use it, so an image built from a given commit always ha
   the `AUTOMATION_APP_CLIENT_ID` variable, and the `AUTOMATION_APP_PRIVATE_KEY` secret).
 - **Merging a new pin refreshes the published image.**
   [`server-image-refresh.yml`](../../.github/workflows/server-image-refresh.yml) rebuilds the most
-  recently published release from its own commit with the new browser, smoke-tests both
+  recently published release from its own commit with the approved browser and base-image digests, smoke-tests both
   architectures, and moves that release's tags to it (see [Published image](#published-image)).
   Older releases are not rebuilt; it can also be run by hand for a given release.
 
@@ -456,15 +456,18 @@ architecture is smoke-tested and checked for that Chrome version before any tag 
 
 | Tag | Points at |
 | --- | --- |
-| `<version>-chrome<chrome>`, for example `0.26.0-chrome154.0.8037.92` | That release with that Chrome version. It never moves. |
-| `<version>`, for example `0.26.0` | That release, with the newest Chrome it was built with. It moves when a Chrome refresh rebuilds the release. |
+| `<version>-chrome<chrome>-image<hash>` | That exact build, including its base images and OS packages. It never moves. |
+| `<version>`, for example `0.26.0` | That release, with the newest Chrome it was built with. It moves when a browser or base-image refresh rebuilds the release. |
 | `<major>.<minor>`, for example `0.26` | The most recently published release of that line. A version with a pre-release suffix, such as `0.26.0-preview.1`, does not move it. |
 | `latest` | The most recently published release that is not a pre-release, by version or by its GitHub release. |
 
-A refresh moves `<version>`, adds `<version>-chrome<new chrome>`, and moves `<major>.<minor>` and
+A refresh moves `<version>`, adds `<version>-chrome<chrome>-image<hash>`, and moves `<major>.<minor>` and
 `latest` only if they still point at that release's image. It never moves a tag to an older Chrome.
-Pin `<version>-chrome<chrome>` (or a digest) when the image must not change at all; pin `<version>`
-to get browser security fixes for that release on the next pull.
+Existing `<version>-chrome<chrome>` tags remain untouched. Pin the new `-image<hash>` tag (or a digest) when the image must not change at all; pin `<version>`
+to get browser and base-image security fixes for that release on the next pull.
+A refresh changes only digests for matching base-image names and tags; framework or OS migrations
+require a new application release. The base-image fingerprint is recorded in
+`io.github.atlitech.reports.base-images-sha256`. See [dependency maintenance](../dependencies.md).
 
 Each image carries OCI labels (`source`, `version`, `revision`, `licenses`, and
 `io.github.atlitech.reports.chrome-version`), an SBOM, and a BuildKit provenance attestation that

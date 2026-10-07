@@ -1,18 +1,6 @@
-name: Publish the server image
+name: Provisioner image
 
-# Builds ghcr.io/atlitech/reports-server from a commit of this repository and publishes it, for
-# release.yml (a new release) and server-image-refresh.yml (the newest release rebuilt with a newer
-# pinned chrome-headless-shell).
-#
-# Jobs: build (one native build per architecture, pushed by digest without a tag, then pulled back,
-# checked for the requested Chrome version and smoke-tested) -> manifest (the multi-arch index,
-# tagged only once both architectures pass, with an SBOM and BuildKit provenance per image and a
-# GitHub artifact attestation for the index). Tagging and its guards live in
-# .github/scripts/server-image.sh push-manifest: a tag containing the artifact hash is added and
-# never moves to a different image.
-#
-# The calling job grants the permissions: contents: read, packages: write, id-token: write,
-# attestations: write, artifact-metadata: write.
+# Called by PR validation, releases, and base-image refreshes. No version means build/test only.
 
 on:
   workflow_call:
@@ -20,19 +8,15 @@ on:
       ref:
         description: The full SHA of the commit to build.
         type: string
-        required: true
+        default: ""
       version:
         description: The release version the image carries, such as 0.26.0.
         type: string
-        required: true
-      chrome-version:
-        description: The chrome-headless-shell version to build with (the CHROME_VERSION build argument).
-        type: string
-        required: true
+        default: ""
       tags:
         description: Space-separated tags to point at the image, such as "0.26.0 0.26 latest".
         type: string
-        required: true
+        default: ""
       only-move-from:
         description: An index digest. When set, a tag in `tags` moves only if it points at that index now.
         type: string
@@ -53,9 +37,9 @@ on:
 # No workflow-level permissions: each job declares what it needs, within what the caller grants.
 
 env:
-  IMAGE: ghcr.io/atlitech/reports-server
-  IMAGE_TITLE: Atli Reports Server
-  IMAGE_DESCRIPTION: HTML to PDF over HTTP. A NativeAOT server over chrome-headless-shell.
+  IMAGE: ghcr.io/atlitech/reports-provisioner
+  IMAGE_TITLE: Atli Reports Provisioner
+  IMAGE_DESCRIPTION: Tenant renderer provisioning service.
   IMAGE_LICENSES: Apache-2.0
 
 jobs:
@@ -78,21 +62,16 @@ jobs:
       - name: Check the inputs
         env:
           REF: ${{ inputs.ref }}
-          CHROME_VERSION: ${{ inputs.chrome-version }}
         run: |
-          if [[ ! "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+          if [ -n "$REF" ] && [[ ! "$REF" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::ref '$REF' is not a full commit SHA."
-            exit 1
-          fi
-          if [[ ! "$CHROME_VERSION" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
-            echo "::error::chrome-version '$CHROME_VERSION' is not a version such as 154.0.8037.92."
             exit 1
           fi
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout publishing tools
@@ -108,31 +87,27 @@ jobs:
         env:
           BASE_IMAGES: ${{ inputs.base-images }}
         run: |
-          fingerprint="$(python3 .publish-tools/.github/scripts/image-inputs.py apply src/Atli.Reports.Server/Dockerfile --pins "$BASE_IMAGES")"
+          fingerprint="$(python3 .publish-tools/.github/scripts/image-inputs.py apply src/Atli.Reports.Provisioner/Dockerfile --pins "$BASE_IMAGES")"
           echo "sha=$fingerprint" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to ghcr.io
+        if: inputs.version != ''
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pushed untagged; the manifest job tags the multi-arch index once both architectures pass.
-      # CHROME_VERSION is passed even when it equals the Dockerfile's pin, so the provenance records
-      # it. No build cache: the image picks up the current Ubuntu security updates, and never reuses
-      # layers another workflow wrote.
-      - name: Build and push by digest
+      - name: Build
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: src/Atli.Reports.Server/Dockerfile
+          file: src/Atli.Reports.Provisioner/Dockerfile
           platforms: linux/${{ matrix.arch }}
-          build-args: CHROME_VERSION=${{ inputs.chrome-version }}
           labels: |
             org.opencontainers.image.title=${{ env.IMAGE_TITLE }}
             org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
@@ -141,43 +116,27 @@ jobs:
             org.opencontainers.image.version=${{ inputs.version }}
             org.opencontainers.image.revision=${{ inputs.ref }}
             org.opencontainers.image.licenses=${{ env.IMAGE_LICENSES }}
-            io.github.atlitech.reports.chrome-version=${{ inputs.chrome-version }}
             io.github.atlitech.reports.base-images-sha256=${{ steps.bases.outputs.sha }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          tags: ${{ inputs.version == '' && 'reports-provisioner:test' || '' }}
+          outputs: ${{ inputs.version != '' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=docker' }}
           no-cache: true
-          sbom: true
-          provenance: mode=max
+          sbom: ${{ inputs.version != '' }}
+          provenance: ${{ inputs.version != '' && 'mode=max' || 'false' }}
 
       # The checks below test exactly what was pushed.
       - name: Pull the pushed image
+        if: inputs.version != ''
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: docker pull "$IMAGE@$DIGEST"
 
-      - name: Check the browser version
+      - name: Smoke test
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          CHROME_VERSION: ${{ inputs.chrome-version }}
-        run: |
-          actual="$(docker run --rm --entrypoint /opt/chrome-headless-shell/chrome-headless-shell "$IMAGE@$DIGEST" --version)"
-          echo "$actual"
-          if [ "${actual##* }" != "$CHROME_VERSION" ]; then
-            echo "::error::The image has '$actual', not chrome-headless-shell $CHROME_VERSION."
-            exit 1
-          fi
-
-      # The smoke test of the commit being built, so it checks what that version of the server does.
-      - name: Smoke test the pushed image
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: .github/scripts/smoke-test-server-image.sh "$IMAGE@$DIGEST"
-
-      - name: Verify JWT authentication in the NativeAOT image
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: python3 .github/scripts/smoke-test-server-jwt.py "$IMAGE@$DIGEST"
+          REFERENCE: ${{ inputs.version != '' && format('{0}@{1}', env.IMAGE, steps.build.outputs.digest) || 'reports-provisioner:test' }}
+        run: python3 .publish-tools/.github/scripts/smoke-test-provisioner-image.py "$REFERENCE"
 
       - name: Record the digest
+        if: inputs.version != ''
         env:
           BASE_IMAGES_SHA: ${{ steps.bases.outputs.sha }}
           ARCH: ${{ matrix.arch }}
@@ -188,14 +147,16 @@ jobs:
           echo "$BASE_IMAGES_SHA" > "$RUNNER_TEMP/digests/$ARCH.bases"
 
       - name: Upload the digest
+        if: inputs.version != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-digest-${{ matrix.arch }}
+          name: provisioner-digest-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/${{ matrix.arch }}*
           if-no-files-found: error
           retention-days: 1
 
   manifest:
+    if: inputs.version != ''
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -220,7 +181,7 @@ jobs:
       - name: Download the digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: image-digest-*
+          pattern: provisioner-digest-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
 
@@ -228,6 +189,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to ghcr.io
+        if: inputs.version != ''
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -237,8 +199,8 @@ jobs:
       - name: Create and push the multi-arch index
         id: manifest
         env:
+          CHROME_VERSION: ""
           VERSION: ${{ inputs.version }}
-          CHROME_VERSION: ${{ inputs.chrome-version }}
           TAGS: ${{ inputs.tags }}
           ONLY_MOVE_FROM: ${{ inputs.only-move-from }}
           REVISION: ${{ inputs.ref }}

@@ -1,27 +1,15 @@
-name: Refresh the server image
+name: Refresh released images
 
-# Rebuilds the newest release's server image with the chrome-headless-shell version main pins, so a
-# published image gets the browser's security fixes without waiting for the next release. Runs when
-# a push to main changes src/Atli.Reports.Server/Dockerfile (usually the pull request that
-# chrome-headless-shell-bump.yml opens), or by hand.
-#
-# plan picks the most recently published GitHub release whose tag follows release.yml's convention
-# and that has an image (or the release given by hand), and goes on only if main pins a newer Chrome
-# than that image records; a Dockerfile change that keeps the pin, or an older pin, publishes
-# nothing. publish (server-image-publish.yml) rebuilds that release's commit with only
-# CHROME_VERSION changed, smoke-tests both architectures, then moves <version>, adds
-# <version>-chrome<new version>, and moves <major>.<minor> and latest where release.yml's rules give
-# them to this release and they still point at its image, so a newer release keeps them.
-#
-# The `release` environment only accepts tags, so these jobs run without an environment, with
-# job-level permissions. The GitHub attestation of a refreshed image names this workflow on main;
-# its labels and BuildKit provenance name the release commit it was built from.
+# Rebuild released source with approved Chrome/base-image pins; never copy main's application code.
+# image-inputs.py rejects framework/OS tag changes across a release boundary.
+# Only tags still pointing at the selected image move; every build gets a new immutable tag.
 
 on:
   push:
     branches: [ "main" ]
     paths:
       - "src/Atli.Reports.Server/Dockerfile"
+      - "src/Atli.Reports.Provisioner/Dockerfile"
   workflow_dispatch:
     inputs:
       release:
@@ -52,6 +40,7 @@ jobs:
       only-move-from: ${{ steps.plan.outputs.only-move-from }}
       chrome-version: ${{ steps.chrome.outputs.version }}
       ref: ${{ steps.ref.outputs.sha }}
+      base-images: ${{ steps.bases.outputs.pins }}
     steps:
       # Without an environment's branch policy, this check keeps unmerged pins out of the registry.
       - name: Check the branch
@@ -64,6 +53,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Read approved base-image pins
+        id: bases
+        run: |
+          echo "pins=$(python3 .github/scripts/image-inputs.py capture src/Atli.Reports.Server/Dockerfile)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(python3 .github/scripts/image-inputs.py fingerprint src/Atli.Reports.Server/Dockerfile)" >> "$GITHUB_OUTPUT"
 
       - name: Read the pinned chrome-headless-shell version
         id: chrome
@@ -88,6 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           IMAGE: ghcr.io/atlitech/reports-server
+          BASE_IMAGES_SHA: ${{ steps.bases.outputs.sha }}
           CHROME_VERSION: ${{ steps.chrome.outputs.version }}
           REQUESTED: ${{ inputs.release }}
         run: |
@@ -127,5 +123,97 @@ jobs:
       ref: ${{ needs.plan.outputs.ref }}
       version: ${{ needs.plan.outputs.version }}
       chrome-version: ${{ needs.plan.outputs.chrome-version }}
+      base-images: ${{ needs.plan.outputs.base-images }}
       tags: ${{ needs.plan.outputs.tags }}
       only-move-from: ${{ needs.plan.outputs.only-move-from }}
+
+  provisioner-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      refresh: ${{ steps.plan.outputs.refresh }}
+      version: ${{ steps.plan.outputs.version }}
+      tags: ${{ steps.plan.outputs.tags }}
+      only-move-from: ${{ steps.plan.outputs.only-move-from }}
+      ref: ${{ steps.ref.outputs.sha }}
+      base-images: ${{ steps.bases.outputs.pins }}
+    steps:
+      # Without an environment's branch policy, this check keeps unmerged pins out of the registry.
+      - name: Check the branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Refreshes run from main only, not $GITHUB_REF."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read approved base-image pins
+        id: bases
+        run: |
+          echo "pins=$(python3 .github/scripts/image-inputs.py capture src/Atli.Reports.Provisioner/Dockerfile)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(python3 .github/scripts/image-inputs.py fingerprint src/Atli.Reports.Provisioner/Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Releases newest first by publication, as release.yml's latest tag follows publication order.
+      - name: Choose the release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/atlitech/reports-provisioner
+          BASE_IMAGES_SHA: ${{ steps.bases.outputs.sha }}
+          CHROME_VERSION: ""
+          REQUESTED: ${{ inputs.release }}
+        run: |
+          set -o pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq '.[] | select(.draft | not) | [.published_at, .tag_name, (.prerelease | tostring)] | @tsv' |
+            sort -r |
+            cut -f 2- |
+            .github/scripts/server-image.sh refresh-plan
+
+      - name: Resolve the release commit
+        id: ref
+        if: steps.plan.outputs.refresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$VERSION" --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve release $VERSION to a commit."
+            exit 1
+          fi
+          echo "Release $VERSION is commit $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  provisioner-publish:
+    needs: provisioner-plan
+    if: needs.provisioner-plan.outputs.refresh == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/provisioner-image.yml
+    with:
+      ref: ${{ needs.provisioner-plan.outputs.ref }}
+      version: ${{ needs.provisioner-plan.outputs.version }}
+      base-images: ${{ needs.provisioner-plan.outputs.base-images }}
+      tags: ${{ needs.provisioner-plan.outputs.tags }}
+      only-move-from: ${{ needs.provisioner-plan.outputs.only-move-from }}

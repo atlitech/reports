@@ -10,21 +10,12 @@ name: Aspire end to end
 # AspireUseCliBundle, installs the CLI release paired with its SDK through dnx when no Aspire CLI is
 # installed, and writes the bundle's paths into the AppHost assembly for Aspire.Hosting.Testing.
 #
-# This is not a required check: it needs Docker and builds the server image (three to four minutes),
+# Required through Dependency validation when relevant: it needs Docker and builds the server image (three to four minutes),
 # so the solution's `dotnet test` in build-on-pull-request.yml leaves the project out (Atli.Reports.slnx
 # does not build it).
 
 on:
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - "src/**"
-      - "examples/**"
-      - "tests/Atli.Reports.AppHost.Tests/**"
-      - "Directory.Build.props"
-      - "Directory.Packages.props"
-      - "global.json"
-      - ".github/workflows/aspire-e2e.yml"
+  workflow_call:
   push:
     branches: [ "main" ]
     paths:

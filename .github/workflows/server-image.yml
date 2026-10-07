@@ -12,29 +12,10 @@ name: Server image
 # its pinned moby/profiles commit plus Chromium's rules. Nothing is pushed; release.yml publishes
 # the image.
 #
-# This is not a required check: it only runs when something that goes into the image changes.
+# Required through Dependency validation when relevant: it only runs when something that goes into the image changes.
 
 on:
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - "src/Atli.Reports.Engine/**"
-      - "src/Atli.Reports.Client/**"
-      - "src/Atli.Reports.Hosting/**"
-      - "src/Atli.Reports.Server/**"
-      - "Directory.Build.props"
-      - "Directory.Packages.props"
-      - "global.json"
-      - ".github/workflows/server-image.yml"
-      - ".github/scripts/smoke-test-server-image.sh"
-      - ".github/scripts/seccomp-probe.pl"
-      - ".github/scripts/smoke-test-server-jwt.py"
-      - ".github/scripts/validate-kubernetes-security.sh"
-      - "scripts/create-reports-api-key.sh"
-      - "deploy/kubernetes/**"
-      - "deploy/seccomp/**"
-      - ".github/scripts/chromium-seccomp-profile.py"
-      - ".github/scripts/chrome-headless-shell.sh"
+  workflow_call:
   push:
     branches: [ "main" ]
     paths:
@@ -46,6 +27,7 @@ on:
       - "Directory.Packages.props"
       - "global.json"
       - ".github/workflows/server-image.yml"
+      - ".github/dependency-pins.json"
       - ".github/scripts/smoke-test-server-image.sh"
       - ".github/scripts/seccomp-probe.pl"
       - ".github/scripts/smoke-test-server-jwt.py"
@@ -140,11 +122,13 @@ jobs:
           if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
+          kind_version="$(jq -r .kind.version .github/dependency-pins.json)"
+          kind_sha256="$(jq -r .kind.sha256 .github/dependency-pins.json)"
           curl --fail --silent --show-error --location \
-            https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 \
+            "https://github.com/kubernetes-sigs/kind/releases/download/$kind_version/kind-linux-amd64" \
             --output "$RUNNER_TEMP/kind-linux-amd64"
           printf '%s  %s\n' \
-            aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d \
+            "$kind_sha256" \
             "$RUNNER_TEMP/kind-linux-amd64" | sha256sum --check
           chmod 700 "$RUNNER_TEMP/kind-linux-amd64"
           KIND_BIN="$RUNNER_TEMP/kind-linux-amd64" \

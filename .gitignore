@@ -60,3 +60,7 @@ artifacts/
 
 # Locally generated reports service credentials.
 .reports-secrets/
+
+# Python dependency/benchmark tooling
+__pycache__/
+*.pyc

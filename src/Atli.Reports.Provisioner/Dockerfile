@@ -9,7 +9,7 @@
 # overridden, such as `docker run --entrypoint dotnet ... atli-reports-provisioner.dll list`.
 #
 # The base images are pinned by the digest of their multi-arch index; update the tag and digest
-# together. CI does not build this image.
+# together. CI builds and smoke-tests this image on amd64 and arm64.
 
 # Stage 1: build. Framework-dependent: the runtime stage brings ASP.NET Core.
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317 AS build

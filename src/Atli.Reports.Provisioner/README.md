@@ -567,3 +567,12 @@ saw both. So each renderer starts from the disk image with its own credential, a
 renderer is only ever resumed as itself. See
 [Azure Container Apps Sandboxes](../../docs/hosted-renderers.md#azure-container-apps-sandboxes) in
 the design.
+
+### Published provisioner image
+
+Releases also publish `ghcr.io/atlitech/reports-provisioner` for amd64 and arm64 after native
+builds and smoke tests (readiness, authentication, tenant boundary, non-root execution, shutdown).
+Use a release version, its major/minor line, or `latest`; pin a digest or `<version>-image<hash>`
+for an immutable build. Approved base-image digest updates rebuild the newest published release
+from its own source. Framework/OS tag changes require a new release. Previously published releases
+without a provisioner image are skipped; the first release with this workflow establishes it.

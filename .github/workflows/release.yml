@@ -140,8 +140,23 @@ jobs:
       tags: ${{ needs.image-metadata.outputs.tags }}
       environment: release
 
+  provisioner-image:
+    needs: image-metadata
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/provisioner-image.yml
+    with:
+      ref: ${{ github.sha }}
+      version: ${{ needs.image-metadata.outputs.version }}
+      tags: ${{ needs.image-metadata.outputs.tags }}
+      environment: release
+
   publish:
-    needs: [ pack, image ]
+    needs: [ pack, image, provisioner-image ]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
