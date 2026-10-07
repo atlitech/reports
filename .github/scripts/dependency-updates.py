@@ -86,7 +86,7 @@ def tailwind_edits(source, props, target, digests):
     # All occurrences in this file are the default, its checksum selector, or documentation.
     source = source.replace(current, target)
     for asset in assets:
-        pattern = r'(\["' + re.escape(asset) + r'"\]\s*=\s*")[0-9a-f]{64}(",)' 
+        pattern = r'(\["' + re.escape(asset) + r'"\]\s*=\s*")[0-9a-f]{64}(",)'
         source, count = re.subn(pattern, lambda m: m[1] + digests[asset] + m[2], source)
         if count != 1:
             raise ValueError(f"Expected one pinned digest for {asset}")
