@@ -30,6 +30,9 @@ jobs:
       - name: Validate formatting
         run: dotnet csharpier check .
 
+      - name: Test dependency automation
+        run: python3 -m unittest discover -s .github/tests -p 'test_*.py' -v
+
       - name: Test benchmark tooling
         run: python3 -m unittest discover -s benchmarks/azure-sandboxes -p 'test_*.py' -v
 
@@ -80,3 +83,89 @@ jobs:
       - name: Test packed consumer and rendered styles
         if: matrix.os == 'ubuntu-latest'
         run: dotnet test --project tests/Atli.Reports.Tailwind.Tests/Atli.Reports.Tailwind.Tests.csproj
+
+  dependency-paths:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runtime: ${{ steps.paths.outputs.runtime }}
+      devcontainer: ${{ steps.paths.outputs.devcontainer }}
+      benchmark: ${{ steps.paths.outputs.benchmark }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select dependency checks
+        id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 .github/scripts/dependency-paths.py "$BASE" >> "$GITHUB_OUTPUT"
+
+  server-dependencies:
+    needs: dependency-paths
+    if: github.event_name == 'pull_request' && needs.dependency-paths.outputs.runtime == 'true'
+    uses: ./.github/workflows/server-image.yml
+
+  aspire-dependencies:
+    needs: dependency-paths
+    if: github.event_name == 'pull_request' && needs.dependency-paths.outputs.runtime == 'true'
+    uses: ./.github/workflows/aspire-e2e.yml
+
+  provisioner-dependencies:
+    needs: dependency-paths
+    if: needs.dependency-paths.outputs.runtime == 'true'
+    # Publishing jobs are skipped without a version. Fork/Dependabot tokens remain read-only.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/provisioner-image.yml
+
+  devcontainer-dependencies:
+    needs: dependency-paths
+    if: needs.dependency-paths.outputs.devcontainer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build development container
+        run: docker build -f .devcontainer/Atli.Reports.Dev.Dockerfile -t reports-dev:test .
+
+  benchmark-dependencies:
+    needs: dependency-paths
+    if: needs.dependency-paths.outputs.benchmark == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate benchmark image
+        run: |
+          docker compose -f benchmarks/load/compose.yaml config --quiet
+          docker compose -f benchmarks/load/compose.yaml pull gotenberg
+
+  dependency-validation:
+    name: Dependency validation
+    if: always()
+    needs: [format-and-build-and-test, tailwind-consumer, dependency-paths, server-dependencies, aspire-dependencies, provisioner-dependencies, devcontainer-dependencies, benchmark-dependencies]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require successful dependency checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          jobs = json.loads(os.environ['RESULTS'])
+          for name, job in jobs.items():
+              allowed = ('success',) if name in ('format-and-build-and-test', 'tailwind-consumer', 'dependency-paths') else ('success', 'skipped')
+              if job['result'] not in allowed:
+                  raise SystemExit(f"{name}: {job['result']}")
+          PYTHON

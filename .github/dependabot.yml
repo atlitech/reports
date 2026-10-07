@@ -18,7 +18,7 @@ updates:
   - package-ecosystem: docker
     directory: /src/Atli.Reports.Server
     schedule:
-      interval: weekly
+      interval: daily
     groups:
       server-base-images:
         patterns: [ "*" ]
@@ -28,7 +28,59 @@ updates:
   - package-ecosystem: docker
     directory: /src/Atli.Reports.Provisioner
     schedule:
-      interval: weekly
+      interval: daily
     groups:
       provisioner-base-images:
         patterns: [ "*" ]
+
+  # The root solution includes application, examples, tests, and .config/dotnet-tools.json.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      aspire-examples:
+        patterns: [ "Aspire.AppHost.Sdk", "Aspire.Hosting.AppHost", "Aspire.Hosting.Testing" ]
+        update-types: [ "minor", "patch" ]
+      microsoft:
+        patterns: [ "Microsoft.*", "System.*" ]
+        update-types: [ "minor", "patch" ]
+      azure:
+        patterns: [ "Azure.*" ]
+        update-types: [ "minor", "patch" ]
+      telemetry:
+        patterns: [ "OpenTelemetry.*" ]
+        update-types: [ "minor", "patch" ]
+      security:
+        applies-to: security-updates
+        patterns: [ "*" ]
+    ignore:
+      # These are the integration's tested compatibility floor, not the example AppHost version.
+      # Security alerts remain enabled; changing the floor needs a compatibility review.
+      - dependency-name: Aspire.Hosting
+        update-types: [ "version-update:semver-major", "version-update:semver-minor" ]
+      - dependency-name: Aspire.Hosting.Kubernetes
+        versions: [ "*" ]
+      # MessagePack 2.x fixes vulnerabilities in the older Aspire dependency graph.
+      - dependency-name: MessagePack
+        update-types: [ "version-update:semver-major" ]
+      # Raising framework dependencies requires a coordinated target-framework migration.
+      - dependency-name: Microsoft.*
+        update-types: [ "version-update:semver-major" ]
+
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: [ "version-update:semver-major" ]
+
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: [ "version-update:semver-major" ]
