@@ -31,7 +31,7 @@
       13.0), so AppHosts on any Aspire 13 release can take the package without upgrading. AppHosts
       on a newer release resolve their own, higher version; this repository's AppHost does (13.6).
     -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.0.0" />
+    <PackageVersion Include="Aspire.Hosting" Version="13.0.2" />
     <!--
       Aspire.Hosting before 13.6 brings MessagePack 2.5.192 (through StreamJsonRpc), which has known
       vulnerabilities; the integration references the patched release Aspire 13.6 itself depends on,
