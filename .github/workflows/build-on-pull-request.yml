@@ -53,6 +53,35 @@ jobs:
       - name: Pack
         run: dotnet pack --configuration Release --output artifacts/release-packages
 
+  azure-publish:
+    name: Publish hosted Azure infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      # No Azure login, credentials, ACA CLI or cloud resources: publish must not contact Azure.
+      - name: Publish the hosted reports AppHost
+        run: >-
+          dnx Aspire.Cli@13.6.0 -y -- publish
+          --apphost examples/Atli.Reports.Azure.AppHost/Atli.Reports.Azure.AppHost.csproj
+          -o artifacts/hosted-azure --non-interactive
+      - name: Compile every generated Bicep module
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import subprocess
+          templates = sorted(Path('artifacts/hosted-azure').rglob('*.bicep'))
+          if not templates:
+              raise SystemExit('Aspire published no Azure templates')
+          for template in templates:
+              subprocess.run(['az', 'bicep', 'build', '--file', str(template)], check=True)
+          PYTHON
+
   tailwind-consumer:
     name: Tailwind consumer (${{ matrix.os }})
     strategy:
@@ -153,7 +182,7 @@ jobs:
   dependency-validation:
     name: Dependency validation
     if: always()
-    needs: [format-and-build-and-test, tailwind-consumer, dependency-paths, server-dependencies, aspire-dependencies, provisioner-dependencies, devcontainer-dependencies, benchmark-dependencies]
+    needs: [format-and-build-and-test, azure-publish, tailwind-consumer, dependency-paths, server-dependencies, aspire-dependencies, provisioner-dependencies, devcontainer-dependencies, benchmark-dependencies]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -165,7 +194,7 @@ jobs:
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           for name, job in jobs.items():
-              allowed = ('success',) if name in ('format-and-build-and-test', 'tailwind-consumer', 'dependency-paths') else ('success', 'skipped')
+              allowed = ('success',) if name in ('format-and-build-and-test', 'azure-publish', 'tailwind-consumer', 'dependency-paths') else ('success', 'skipped')
               if job['result'] not in allowed:
                   raise SystemExit(f"{name}: {job['result']}")
           PYTHON

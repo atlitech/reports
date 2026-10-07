@@ -152,9 +152,8 @@ public static partial class ReportsServerBuilderExtensions
   /// <see cref="KubernetesEnvironmentTypes"/>). <c>WithHttpProbe</c> replaces a probe of the same
   /// type.
   /// </summary>
-  private static IResourceBuilder<ReportsServerResource> WithHealthProbes(
-    this IResourceBuilder<ReportsServerResource> builder
-  )
+  internal static IResourceBuilder<T> WithHealthProbes<T>(this IResourceBuilder<T> builder)
+    where T : ContainerResource
   {
     var endpoint = builder.GetEndpoint(ReportsServerResource.HttpEndpointName);
 

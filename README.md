@@ -24,6 +24,7 @@ Source integrations upgrading from earlier commits should follow the
 | [`Atli.Reports.Blazor.Tailwind.Discovery`](src/Atli.Reports.Blazor.Tailwind.Discovery) | Exports component dependency and class manifests from Razor libraries for automatic nested component discovery. | Optional build-only NuGet package, from 0.26.0 |
 | [`Atli.Reports.Server`](src/Atli.Reports.Server) | A NativeAOT HTTP service over the engine: `POST /convert` with HTML and options, get a PDF back. Ships as a container image with `chrome-headless-shell`. | Build the image from this repository; no published image yet |
 | [`Atli.Reports.Aspire.Hosting`](src/Atli.Reports.Aspire.Hosting) | Runs the server in an [Aspire](https://aspire.dev) AppHost: `builder.AddReportsServer("reports")`, with its health check, telemetry, typed settings, and the connection string the client reads. See [docs/aspire.md](docs/aspire.md). | NuGet package, from 0.26.0 |
+| [`Atli.Reports.Aspire.Hosting.Azure`](src/Atli.Reports.Aspire.Hosting.Azure) | Deploys the hosted gateway, provisioning service, and isolated Azure Sandbox renderers through Aspire, including networking, identities, Key Vault records, and renderer-image preparation. See the [Azure deployment guide](docs/azure-hosted-reports.md). | NuGet package, from 0.26.0; source AppHost available now |
 
 The packages target .NET 10, so an AppHost that uses `Atli.Reports.Aspire.Hosting` targets .NET 10
 too. Every component needs a Chromium-based browser; see

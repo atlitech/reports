@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/examples/">
     <Project Path="examples/Atli.Reports.AppHost/Atli.Reports.AppHost.csproj" />
+    <Project Path="examples/Atli.Reports.Azure.AppHost/Atli.Reports.Azure.AppHost.csproj" />
     <Project Path="examples/Atli.Reports.ServiceDefaults/Atli.Reports.ServiceDefaults.csproj" />
     <Project Path="examples/ExampleTemplates/ExampleTemplates.csproj" />
     <Project Path="examples/RemoteReportServer/RemoteReportServer.csproj" />
@@ -13,6 +14,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Atli.Reports.Aspire.Hosting/Atli.Reports.Aspire.Hosting.csproj" />
+    <Project Path="src/Atli.Reports.Aspire.Hosting.Azure/Atli.Reports.Aspire.Hosting.Azure.csproj" />
     <Project Path="src/Atli.Reports.Engine/Atli.Reports.Engine.csproj" />
     <Project Path="src/Atli.Reports.Server/Atli.Reports.Server.csproj" />
     <Project Path="src/Atli.Reports.Blazor.Components/Atli.Reports.Blazor.Components.csproj" />
@@ -31,6 +33,7 @@
       <Build Project="false" />
     </Project>
     <Project Path="tests/Atli.Reports.Aspire.Hosting.Tests/Atli.Reports.Aspire.Hosting.Tests.csproj" />
+    <Project Path="tests/Atli.Reports.Aspire.Hosting.Azure.Tests/Atli.Reports.Aspire.Hosting.Azure.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Blazor.Tests/Atli.Reports.Blazor.Tests.csproj" />
     <Project Path="tests/Atli.Reports.Tailwind.Tests/Atli.Reports.Tailwind.Tests.csproj">
       <Build Project="false" />

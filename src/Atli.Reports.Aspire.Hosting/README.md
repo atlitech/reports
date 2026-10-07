@@ -115,6 +115,43 @@ builder
 the AppHost project, the Dockerfile path to the context) and runs it in place of the released
 image, locally and when you deploy.
 
+## Hosted tenant renderers
+
+`AddReportsGateway` adds the shared API in gateway mode, without a browser or Chromium container
+options. `AddReportsProvisioner` adds the internal on-demand provisioning service. Both expose
+readiness and liveness probes; the gateway exports OTLP telemetry. For the complete Azure
+infrastructure, use `Atli.Reports.Aspire.Hosting.Azure` and the
+[hosted deployment example](https://github.com/atlitech/reports/tree/main/examples/Atli.Reports.Azure.AppHost).
+
+The lower-level resources can also be configured directly:
+
+```csharp
+var clientKey = builder.AddParameter("reports-client-key", secret: true);
+var clientHash = builder.AddParameter("reports-client-hash", secret: true);
+var serviceKey = builder.AddParameter("reports-service-key", secret: true);
+var serviceHash = builder.AddParameter("reports-service-hash", secret: true);
+
+var provisioner = builder.AddReportsProvisioner("reports-provisioner")
+  .WithApiKeyAuthentication("gateway", serviceHash)
+  .WithTenantPrefix("myapp-", maxTenants: 1000, maxCreatesPerMinute: 20);
+
+var reports = builder.AddReportsGateway("reports")
+  .WithApiKeyAuthentication("client", clientKey, clientHash, callerId: "myapp")
+  .WithTenantPrefix("myapp", "myapp-")
+  .WithProvisioner(provisioner, serviceKey);
+```
+
+These resources still require the renderer record store and Azure sandbox, disk image, networking,
+and managed identity settings. Configure those through the Azure integration or `WithEnvironment`.
+Use one provisioning replica. Publishing requires TLS on provisioning ingress; local run mode
+allows HTTP. Keep provisioning ingress internal.
+
+Each key parameter contains the full `id.secret` credential; its matching hash parameter contains
+the base64 SHA-256 of that complete credential. Services receive only their inbound verifier;
+`WithReference(reports)` supplies the client credential and gateway endpoint to consuming apps.
+Callers must send `X-Reports-Tenant` with a tenant ID under their configured prefix. Grant tenant
+deletion separately with `allowTenantManagement: true` on gateway API-key authentication.
+
 ## Learn more
 
 - [Aspire guide](https://github.com/atlitech/reports/blob/main/docs/aspire.md): the AppHost, the
