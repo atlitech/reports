@@ -9,8 +9,11 @@ through the platform's OnDemand port proxy.
 This is distinct from `deploy/azure/reports.bicep`, which deploys one integrated rendering
 container. The hosted AppHost preserves the separate gateway, provisioner, and renderer roles
 from the [Azure workspace tests](../benchmarks/results/2026-10-04-f03e90e-hosted-renderers-workspaces-amd64.md).
-Those tests validate the architecture; they do not constitute a live test of this new Aspire
-deployment path or close the [hosted-service production acceptance gates](hosted-renderers.md#production-acceptance-gates).
+The [Aspire Azure live test](../benchmarks/results/2026-10-07-9702b35-aspire-azure-live.md)
+also validates this deployment path in a temporary resource group: on-demand tenant provisioning,
+authenticated PDF conversion, concurrent requests, network restrictions, and wake-up after idle
+suspension. This smoke test does not close the
+[hosted-service production acceptance gates](hosted-renderers.md#production-acceptance-gates).
 
 ## Resources and access
 
@@ -130,3 +133,9 @@ delete a disk while an active or suspended renderer still uses it.
 For local development, use the original `examples/Atli.Reports.AppHost`; the Azure AppHost accepts
 publish and deploy operations only. Deleting the Azure environment destroys renderer and record
 state. The record vault enables purge protection and retains deleted secrets for 90 days.
+
+For a temporary deployment, run `aspire destroy` with the same AppHost and environment after
+testing. Its successful return can mean Azure has accepted deletion and is still removing the
+resource group. Verify the deployment group and the Container Apps environment's managed
+infrastructure group are gone before considering cleanup complete. The purge-protected vault
+remains soft-deleted until its retention period expires.

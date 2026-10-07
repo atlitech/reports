@@ -1,0 +1,237 @@
+{
+  "date": "2026-10-07",
+  "region": "eastus2",
+  "tested_commit": "9702b35",
+  "deployment": "Aspire CLI 13.6.0, Azure AppHost, temporary resource group",
+  "sandbox_cli": "1.0.0-preview.4",
+  "initial_defect": "Sandbox-group ARM preflight required properties: {}.",
+  "deployment_succeeded": true,
+  "provisioning_seconds": {
+    "infrastructure": 38.3,
+    "renderer_disk": 166.5,
+    "container_apps_environment": 1105.4,
+    "gateway": 39.8,
+    "provisioner": 39.5
+  },
+  "requests": [
+    {
+      "test": "liveness",
+      "status": 200,
+      "seconds": 0.27,
+      "bytes": 20,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "readiness",
+      "status": 200,
+      "seconds": 0.17,
+      "bytes": 20,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "unauthenticated",
+      "status": 401,
+      "seconds": 0.17,
+      "bytes": 249,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "invalid-key",
+      "status": 401,
+      "seconds": 0.17,
+      "bytes": 249,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "foreign-prefix",
+      "status": 403,
+      "seconds": 0.18,
+      "bytes": 252,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "missing-tenant",
+      "status": 400,
+      "seconds": 0.17,
+      "bytes": 278,
+      "pdf": false,
+      "passed": true
+    },
+    {
+      "test": "first-tenant-first-conversion",
+      "status": 200,
+      "seconds": 6.25,
+      "bytes": 15417,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "first-tenant-warm-conversion",
+      "status": 200,
+      "seconds": 0.23,
+      "bytes": 15958,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "second-tenant-first-conversion",
+      "status": 200,
+      "seconds": 4.0,
+      "bytes": 15790,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-0",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15233,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-1",
+      "status": 200,
+      "seconds": 0.23,
+      "bytes": 15458,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-2",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15282,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-3",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15590,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-4",
+      "status": 200,
+      "seconds": 0.21,
+      "bytes": 15255,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-5",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15529,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-6",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15329,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-7",
+      "status": 200,
+      "seconds": 0.23,
+      "bytes": 15457,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-8",
+      "status": 200,
+      "seconds": 0.21,
+      "bytes": 15338,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "concurrent-9",
+      "status": 200,
+      "seconds": 0.22,
+      "bytes": 15548,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    },
+    {
+      "test": "resume-after-idle",
+      "status": 200,
+      "seconds": 2.47,
+      "bytes": 15991,
+      "pdf": true,
+      "passed": true,
+      "correct_content": true
+    }
+  ],
+  "infrastructure_checks": {
+    "sandbox_group_no_workload_identity": true,
+    "renderer_custom_dns": true,
+    "renderer_no_peering": true,
+    "application_no_peering": true,
+    "application_nat_attached": true,
+    "platform_dns_denied": true,
+    "vault_rbac": true,
+    "vault_purge_protection": true,
+    "gateway_records_read_only": true,
+    "gateway_no_sandbox_role": true,
+    "provisioner_sandbox_owner": true,
+    "provisioner_records_officer": true
+  },
+  "renderer_checks": {
+    "distinct_tenant_renderers": true,
+    "deny_all_egress": true,
+    "isolated_renderer_network": true,
+    "nat_only_ingress": true,
+    "auto_suspend_60s": true,
+    "on_demand_activation": true,
+    "direct_renderer_denied": true
+  },
+  "internal_provisioner": {
+    "status": 404,
+    "passed": true
+  },
+  "resume": {
+    "before": "Stopped",
+    "after": "Running",
+    "same_renderer": true,
+    "passed": true
+  },
+  "cleanup": {
+    "aspire_destroy_succeeded": true,
+    "native_cleanup_followup": "Retried the scheduled environment deletion and removed detached test VNets, NAT, public IP and NSG after the asynchronous resource-group teardown stalled; retried deletion of the empty resource group after the environment disappeared.",
+    "temporary_resource_group_deleted": true,
+    "managed_infrastructure_resource_group_deleted": true,
+    "verified_utc": "2026-10-07T15:33:14.019955+00:00",
+    "key_vault_soft_delete": {
+      "purge_protection": true,
+      "retention_days": 90,
+      "scheduled_purge_utc": "2027-01-05T15:02:53Z"
+    }
+  }
+}
