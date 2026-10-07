@@ -29,6 +29,8 @@ public class InfrastructureTests
     await Assert.That(template).Contains("addressPrefixes: ['10.60.0.0/16']");
     await Assert.That(template).DoesNotContain("virtualNetworkPeerings");
     await Assert.That(template).DoesNotContain("identity:");
+    // Azure ARM validation requires the object even when the sandbox uses service defaults.
+    await Assert.That(ResourceBlock(template, "sandboxGroup")).Contains("properties: {}");
     await Assert.That(template).Contains("subnetId: rendererNetwork.properties.subnets[0].id");
   }
 

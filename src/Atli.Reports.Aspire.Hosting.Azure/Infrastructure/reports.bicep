@@ -87,6 +87,8 @@ resource applicationNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 resource sandboxGroup 'Microsoft.App/sandboxGroups@2026-02-01-preview' = {
   name: '${name}-renderers-${suffix}'
   location: location
+  // ARM preflight rejects an omitted properties object, even when using service defaults.
+  properties: {}
 }
 // ARM child resource is equivalent to aca sandboxgroup network create.
 resource rendererConnection 'Microsoft.App/sandboxGroups/vnetConnections@2026-02-01-preview' = {
