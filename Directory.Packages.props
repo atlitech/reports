@@ -37,7 +37,7 @@
       vulnerabilities; the integration references the patched release Aspire 13.6 itself depends on,
       so AppHosts on older Aspire 13 releases get it too.
     -->
-    <PackageVersion Include="MessagePack" Version="2.5.302" />
+    <PackageVersion Include="MessagePack" Version="2.5.307" />
     <!--
       Tests only: adds a Kubernetes environment, on which the integration leaves the probes out. On
       the integration's Aspire.Hosting floor; the package has no stable release.
