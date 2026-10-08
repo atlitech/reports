@@ -18,7 +18,7 @@
       Include="Microsoft.Extensions.Options.ConfigurationExtensions"
       Version="10.0.12"
     />
-    <PackageVersion Include="TUnit" Version="1.72.16" />
+    <PackageVersion Include="TUnit" Version="1.73.5" />
   </ItemGroup>
   <ItemGroup Label="Atli.Reports.Client">
     <!-- Also used by the examples' service defaults. -->
