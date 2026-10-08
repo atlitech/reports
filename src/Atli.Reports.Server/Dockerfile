@@ -51,7 +51,7 @@ ARG TARGETARCH
 # The pinned chrome-headless-shell version: the single source of truth for the image's browser.
 # .github/scripts/chrome-headless-shell.sh reads and rewrites this line, so keep it a plain
 # ARG CHROME_VERSION=<version>.
-ARG CHROME_VERSION=154.0.8037.92
+ARG CHROME_VERSION=155.0.8059.39
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
