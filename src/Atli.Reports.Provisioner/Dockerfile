@@ -12,7 +12,7 @@
 # together. CI builds and smoke-tests this image on amd64 and arm64.
 
 # Stage 1: build. Framework-dependent: the runtime stage brings ASP.NET Core.
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
 WORKDIR /src
 # Restore from the project files alone, so a source change reuses the restored packages.
 COPY global.json Directory.Build.props Directory.Packages.props ./
@@ -28,7 +28,7 @@ RUN dotnet publish src/Atli.Reports.Provisioner -c Release --no-restore -p:UseAp
 
 # Stage 2: runtime. Chiseled: no shell, no package manager, and only the libraries .NET needs. The
 # provisioner runs with invariant globalization, so it needs no ICU.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled@sha256:48e51f2f6798897be7ac4e775c049ed8fe60d3190f637e1f9c9dc7513efa659c
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled@sha256:84def277556c2843a44fdeefbd3145d0a2e32d8f736d0c1a7b0a96b2880b0187
 WORKDIR /app
 COPY --from=build /app .
 # The non-root user the .NET images provide, app (UID 1654), by number so that Kubernetes'
