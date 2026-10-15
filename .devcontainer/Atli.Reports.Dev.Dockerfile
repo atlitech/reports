@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/dotnet:10.0@sha256:9eb314432a5fa67773a53ab754cdc381cae614906162f9fc44cdb7f7837b91c7
+FROM mcr.microsoft.com/devcontainers/dotnet:10.0@sha256:694076b55f447d4b9f5b49bc6616c2e904d63e1a61e43680b2bbea46011b6783
 
 # The build context is the repository root (see devcontainer.json);
 # Atli.Reports.Dev.Dockerfile.dockerignore sends only the files below.
