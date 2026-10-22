@@ -247,7 +247,7 @@ internal sealed class ConsumerProject(string directory, string root)
     var output = Path.Combine(root, "rendered " + Guid.NewGuid().ToString("N"));
     var compilerCache = Path.Combine(root, "compiler");
     var hiddenCache = compilerCache + ".unavailable";
-    Directory.Move(compilerCache, hiddenCache);
+    await MoveCompilerCacheAsync(compilerCache, hiddenCache);
     try
     {
       var result = await PackageFixture.RunProcessAsync(
@@ -269,10 +269,28 @@ internal sealed class ConsumerProject(string directory, string root)
     }
     finally
     {
-      Directory.Move(hiddenCache, compilerCache);
+      await MoveCompilerCacheAsync(hiddenCache, compilerCache);
     }
 
     return output;
+  }
+
+  private static async Task MoveCompilerCacheAsync(string source, string destination)
+  {
+    // Windows can briefly retain a lock on the standalone compiler after the build exits.
+    // Still require the cache to be moved before rendering, and surface persistent failures.
+    for (var attempt = 0; ; attempt++)
+    {
+      try
+      {
+        Directory.Move(source, destination);
+        return;
+      }
+      catch (IOException) when (OperatingSystem.IsWindows() && attempt < 20)
+      {
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+      }
+    }
   }
 
   public string ReadCss(string report, bool published = false) =>

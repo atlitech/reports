@@ -67,7 +67,7 @@ jobs:
       # No Azure login, credentials, ACA CLI or cloud resources: publish must not contact Azure.
       - name: Publish the hosted reports AppHost
         run: >-
-          dnx Aspire.Cli@13.6.0 -y -- publish
+          dnx Aspire.Cli@13.6.3 -y -- publish
           --apphost examples/Atli.Reports.Azure.AppHost/Atli.Reports.Azure.AppHost.csproj
           -o artifacts/hosted-azure --non-interactive
       - name: Compile every generated Bicep module
