@@ -9,6 +9,8 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <ProjectReference Include="../Atli.Reports.Aspire.Hosting/Atli.Reports.Aspire.Hosting.csproj" />
     <PackageReference Include="Aspire.Hosting.Azure.AppContainers" />
     <EmbeddedResource
