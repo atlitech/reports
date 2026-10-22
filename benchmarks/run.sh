@@ -46,7 +46,7 @@ Output and build:
 Environment:
   ATLI_IMAGE              Atli image tag (default atli-reports-server:bench, built from
                           src/Atli.Reports.Server/Dockerfile)
-  GOTENBERG_IMAGE         Gotenberg image (default: the pinned 8.37.0-chromium digest)
+  GOTENBERG_IMAGE         Gotenberg image (default: the pinned 8.38.1-chromium digest)
   GOTENBERG_ARGS          Extra Gotenberg flags, e.g. "--chromium-restart-after=0"
   benchmarks/load/atli.env  Optional ReportsEngine__* settings for the Atli container
 EOF
@@ -73,7 +73,7 @@ note=""
 name=""
 out="$script_dir/results"
 atli_image="${ATLI_IMAGE:-atli-reports-server:bench}"
-gotenberg_image="${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c}"
+gotenberg_image="${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.38.1-chromium@sha256:5da4ab7b8fe7326537369e17b661be765d9a2887f77722faacdbe6d55812fb96}"
 
 need_value() {
   if [ $# -lt 2 ] || [ -z "$2" ]; then

@@ -28,7 +28,7 @@ internal sealed record RunOptions
   public string Memory { get; init; } = "2g";
   public string AtliImage { get; init; } = "atli-reports-server:bench";
   public string GotenbergImage { get; init; } =
-    "gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c";
+    "gotenberg/gotenberg:8.38.1-chromium@sha256:5da4ab7b8fe7326537369e17b661be765d9a2887f77722faacdbe6d55812fb96";
   public int AtliPort { get; init; } = 18080;
   public int GotenbergPort { get; init; } = 13000;
   public string? ComposeFile { get; init; }

@@ -60,10 +60,10 @@ services:
     profiles: [gotenberg]
     # Gotenberg 8, Chromium-only variant (no LibreOffice), pinned by tag and multi-arch index digest
     # (linux/amd64 and linux/arm64).
-    image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.37.0-chromium@sha256:0d28ae9a96441588ef739623726bd500ad0720b77266c6f1351a13e333fbd61c}
+    image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8.38.1-chromium@sha256:5da4ab7b8fe7326537369e17b661be765d9a2887f77722faacdbe6d55812fb96}
     ports:
       - "127.0.0.1:${GOTENBERG_PORT:-13000}:3000"
-    # Defaults in 8.37.0: --chromium-max-concurrency=6, --chromium-max-queue-size=0 (unbounded),
+    # Defaults in 8.38.1: --chromium-max-concurrency=6, --chromium-max-queue-size=0 (unbounded),
     # --chromium-restart-after=100, --chromium-auto-start=false, --api-timeout=30s. None are changed;
     # pass extra flags through GOTENBERG_ARGS, for example "--chromium-restart-after=0".
     command: gotenberg ${GOTENBERG_ARGS:-}

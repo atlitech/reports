@@ -431,7 +431,7 @@ docker run --rm -p 127.0.0.1:8080:8080 --env-file .reports-secrets/server.env \
 
 The `CHROME_VERSION` build argument's default in
 [`src/Atli.Reports.Server/Dockerfile`](../../src/Atli.Reports.Server/Dockerfile), such as
-`ARG CHROME_VERSION=154.0.8037.92`, is the one place the version is set: local builds, pull request
+`ARG CHROME_VERSION=156.0.8078.47`, is the one place the version is set: local builds, pull request
 checks, and releases all use it, so an image built from a given commit always has the same browser.
 
 - **Updates come as pull requests.** A daily workflow
