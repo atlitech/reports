@@ -19,7 +19,7 @@
 # Stage 1: build (NativeAOT). The -aot SDK image carries the native toolchain NativeAOT links with
 # (clang, zlib). The build and runtime stages share Ubuntu 24.04, so the binary runs against the
 # glibc it was linked with.
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot@sha256:9e172d8230f2bcd756a478b796bdf6fc79096bb6f05496b3c5382de82f94cda7 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot@sha256:c45158dabdcffc8409ef46c9431c16b36d9419405b51fd29261fa8a6af3f516f AS build
 WORKDIR /src
 # Restore from the project files alone, so a source change reuses the restored packages (the
 # NativeAOT compiler among them). The compiler and runtime packs are per architecture, so restore
@@ -46,7 +46,7 @@ RUN rm -f /app/*.dbg /app/*.pdb /app/*.xml && chmod -R u=rwX,go=rX /app
 # Stage 2: download chrome-headless-shell, Chromium's dedicated headless build. Compared with the full
 # browser it starts faster, prints faster, and creates the per-conversion browser contexts the engine
 # isolates documents with several times faster.
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:1c20bc9ebda297198be069d82b6c5d1716faeeec8b8dca53ef963f9c92d3e2e3 AS browser
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:62028293921f5bd6db3d9f9119cd29cd926dfd3c2336da23b09f425e40c3c832 AS browser
 ARG TARGETARCH
 # The pinned chrome-headless-shell version: the single source of truth for the image's browser.
 # .github/scripts/chrome-headless-shell.sh reads and rewrites this line, so keep it a plain
@@ -74,7 +74,7 @@ RUN set -eux; \
     rm /tmp/chrome-headless-shell.zip
 
 # Stage 3: runtime. No .NET runtime is needed: the server is a native binary.
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:1c20bc9ebda297198be069d82b6c5d1716faeeec8b8dca53ef963f9c92d3e2e3
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble@sha256:62028293921f5bd6db3d9f9119cd29cd926dfd3c2336da23b09f425e40c3c832
 # tini runs as PID 1: it forwards SIGTERM to the server (whose shutdown closes the browser cleanly)
 # and reaps the browser's exited child processes, so none linger as zombies.
 # The lib* packages are the browser's shared libraries that the base image lacks: the NEEDED entries
