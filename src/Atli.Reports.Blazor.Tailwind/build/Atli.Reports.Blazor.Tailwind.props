@@ -3,7 +3,7 @@
     <AtliTailwindEnabled Condition="'$(AtliTailwindEnabled)' == ''">true</AtliTailwindEnabled>
     <EnableDefaultAtliTailwindItems Condition="'$(EnableDefaultAtliTailwindItems)' == ''"
       >true</EnableDefaultAtliTailwindItems>
-    <AtliTailwindVersion Condition="'$(AtliTailwindVersion)' == ''">4.3.3</AtliTailwindVersion>
+    <AtliTailwindVersion Condition="'$(AtliTailwindVersion)' == ''">4.3.5</AtliTailwindVersion>
     <AtliTailwindMinify Condition="'$(AtliTailwindMinify)' == ''">true</AtliTailwindMinify>
     <AtliTailwindTimeoutSeconds Condition="'$(AtliTailwindTimeoutSeconds)' == ''"
       >120</AtliTailwindTimeoutSeconds>
