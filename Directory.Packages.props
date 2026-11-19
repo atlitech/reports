@@ -42,7 +42,7 @@
       Tests only: adds a Kubernetes environment, on which the integration leaves the probes out. On
       the integration's Aspire.Hosting floor; the package has no stable release.
     -->
-    <PackageVersion Include="Aspire.Hosting.Kubernetes" Version="13.0.0-preview.1.25560.3" />
+    <PackageVersion Include="Aspire.Hosting.Kubernetes" Version="17.0.0" />
   </ItemGroup>
   <ItemGroup Label="Aspire AppHost and service defaults (examples)">
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.3" />
