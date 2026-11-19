@@ -45,7 +45,7 @@
     <PackageVersion Include="Aspire.Hosting.Kubernetes" Version="13.0.0-preview.1.25560.3" />
   </ItemGroup>
   <ItemGroup Label="Aspire AppHost and service defaults (examples)">
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.3" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="17.0.0" />
     <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="13.6.3" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.11.0" />
     <!-- Starts the AppHost in tests/Atli.Reports.AppHost.Tests; keep it on the AppHost's Aspire version. -->
