@@ -31,7 +31,7 @@ public sealed partial class BuildTailwindCss
   public string OutputDirectory { get; set; } = "";
   public string PublishDirectory { get; set; } = "";
   public string Executable { get; set; } = "";
-  public string Version { get; set; } = "4.3.3";
+  public string Version { get; set; } = "4.3.5";
   public string CacheDirectory { get; set; } = "";
   public bool Minify { get; set; } = true;
   public bool Compile { get; set; } = true;
@@ -228,7 +228,7 @@ public sealed partial class BuildTailwindCss
     var version = Version.StartsWith('v') ? Version[1..] : Version;
     if (!StableV4Version().IsMatch(version))
       throw new InvalidOperationException(
-        "AtliTailwindVersion must be a pinned Tailwind v4 version (for example 4.3.3); floating versions are not supported."
+        "AtliTailwindVersion must be a pinned Tailwind v4 version (for example 4.3.5); floating versions are not supported."
       );
     var asset = GetAssetName();
     var cacheRoot = string.IsNullOrWhiteSpace(CacheDirectory)
@@ -272,7 +272,7 @@ public sealed partial class BuildTailwindCss
         await response.Content.CopyToAsync(stream, timeout.Token).ConfigureAwait(false);
 
       var expected =
-        version == "4.3.3"
+        version == "4.3.5"
           ? PinnedChecksums[asset]
           : await GetReleaseChecksumAsync(release, asset, timeout.Token).ConfigureAwait(false);
       await using (var stream = File.OpenRead(temporary))
@@ -471,21 +471,21 @@ public sealed partial class BuildTailwindCss
   )]
   private static partial Regex ReservedDevice();
 
-  // SHA-256 digests published with https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.3.3.
+  // SHA-256 digests published with https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.3.5.
   // Keep the default version and every platform digest together when upgrading the compiler.
   private static readonly Dictionary<string, string> PinnedChecksums = new(StringComparer.Ordinal)
   {
     ["tailwindcss-linux-arm64"] =
-      "55fd0b241214eff3de1e8ee4f22796662f2d2e7a49bcfca7477cfd0bac398195",
+      "ffcd0d21dbd7c605dc12743ff0c0b47debc963c86b399674084c1c8f2c96ecad",
     ["tailwindcss-linux-arm64-musl"] =
-      "71ea4be79c9de9827545682df3e040053fb535d37c71ed2cfdedf9385a0868e0",
-    ["tailwindcss-linux-x64"] = "dc61b3ac6b8c9ca874c0cc4c57b2409791a64c5540404ca5f5367360babc313a",
+      "564dad3028c029b0c69042c66a7a79873ed7289b73fcb7b37973fbf79cb9a32f",
+    ["tailwindcss-linux-x64"] = "e47695cee3f0d90623a91f3939b08bdee610eb5ad99340adff9d4145b284d6cc",
     ["tailwindcss-linux-x64-musl"] =
-      "a04d34ceacc8f52cbe8920ad846cdeb61d3d0021dba32db0d1f77c9d9fad7a6c",
+      "bb050edd13f15006d872a9bb1772b908618a8df6806d30bf095cba26a09e640b",
     ["tailwindcss-macos-arm64"] =
-      "cdf646702987a743464dff4d9c60fd4480d1c1e73dd819a9a67f1078815dce9d",
-    ["tailwindcss-macos-x64"] = "7922e0953f2110c05976e3bf58f14e643d90427575e766b7d433f5f80cbee7e1",
+      "f3f4f5d1727e2b693b8f1c9a1492b5dd87008c86ea286bee1589cb458e6235fc",
+    ["tailwindcss-macos-x64"] = "a63702686a3ed048b3135d84a73be49ea9d47f880c9b20e54b3ef60934ad8cdf",
     ["tailwindcss-windows-x64.exe"] =
-      "e0e260ce048014e9268f6237ff18f8ccf02cef521cbd0ae04e82c2cdf7aa3955",
+      "2803583268c53f4713e89943e211081fddb186c0a4a7d07b5c342c6ae853ec95",
   };
 }
