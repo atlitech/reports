@@ -37,12 +37,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PROFILE = REPO / "deploy" / "seccomp" / "chromium.json"
 
-# moby/profiles tag seccomp/v0.2.4, the version moby's go.mod requires as of 2026-10-02.
-UPSTREAM_COMMIT = "245180c51918481c0525424b3ee025d2b435d46c"
+# moby/profiles tag seccomp/v0.3.0; changes require a security-policy review.
+UPSTREAM_COMMIT = "4b8214fc4971e06172938a1f1554ccff6647ee80"
 UPSTREAM_URL = (
     f"https://raw.githubusercontent.com/moby/profiles/{UPSTREAM_COMMIT}/seccomp/default.json"
 )
-UPSTREAM_SHA256 = "785b2429264afba4d594320337cb17f144f3c7d51585f9805eef72e28f4f9334"
+UPSTREAM_SHA256 = "6416b47770785a41ac59073cdc77d9fe98517df2799dc83ef207e622de3053f6"
 
 # The architectures the server image is built for, as Docker names them in includes/excludes
 # (Go's GOARCH), and the seccomp architecture of each in archMap.
